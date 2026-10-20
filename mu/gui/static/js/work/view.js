@@ -93,14 +93,17 @@
     /* data-tone for Wash components; server ActionVM tones still say warn/muted. */
     const washTone = tone => ({warn:'attention', muted:'neutral'}[tone] || tone || '');
     const toneAttr = tone => (tone ? ` data-tone="${esc(washTone(tone))}"` : '');
-    const chipGlyph = glyph => `<span class="w-chip__glyph" aria-hidden="true">${glyph}</span>`;
+    /* Mu §5.4: status is a sign plus a word, never a pill. `pill` and friends keep their names
+     * (every job module calls them) but render a tagged word: tone ink only for attention,
+     * danger and caution, quiet ink otherwise (.work-tag in work.css). */
+    const chipGlyph = glyph => `<span class="work-tag__glyph" aria-hidden="true">${glyph}</span>`;
     /* Inline status: glyph + label for assistive tech, the ink drop while active. */
     const statusIcon = (status, label) => { const s = statusOf(status), text = label || s.label;
         return `<span class="w-status work-status-icon" data-tone="${s.tone}" data-status="${esc(status)}" title="${esc(text)}">${status === 'active' ? '<span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>' : `<span class="w-status__glyph" aria-hidden="true">${s.glyph}</span>`}<span class="w-sr-only">${esc(text)}</span></span>`; };
-    const pill = (tone, html, title = '') => `<span class="w-chip"${toneAttr(tone)}${title ? ` title="${esc(title)}"` : ''}>${html}</span>`;
+    const pill = (tone, html, title = '') => `<span class="work-tag"${toneAttr(tone)}${title ? ` title="${esc(title)}"` : ''}>${html}</span>`;
     const statePill = state => { const st = WASH.stateStyle(state);
-        return `<span class="w-chip" data-tone="${st.semantic}" data-status="${st.status}" title="${esc(state)}">${st.status === 'active' ? '<span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>' : chipGlyph(st.glyph)}<span>${esc(cap(st.label))}</span></span>`; };
-    const verdictPill = v => { const [tone, label] = verdictOf(v); return `<span class="w-chip work-verdict" data-tone="${tone}" data-verdict="${esc(v)}">${chipGlyph(tone === 'ok' ? '✓' : tone === 'danger' ? '✗' : '◆')}<span>${esc(cap(label))}</span></span>`; };
+        return `<span class="w-signword work-tag" data-status="${st.status}" title="${esc(state)}"><span class="w-sign" data-status="${esc(st.status)}" aria-hidden="true">${esc(st.glyph)}</span>${esc(cap(st.label))}</span>`; };
+    const verdictPill = v => { const [tone, label] = verdictOf(v); return `<span class="work-tag work-verdict" data-tone="${tone}" data-verdict="${esc(v)}">${chipGlyph(tone === 'ok' ? '✓' : tone === 'danger' ? '✗' : '◆')}<span>${esc(cap(label))}</span></span>`; };
     const severityPill = sev => pill(severityTone(sev), esc(cap(VOCAB.severity[sev]?.label || sev)));
     /* Proportional bars are SVG (attribute geometry, no inline styles). */
     function segmentBar(segments, {label = '', large = false, cls = 'work-bar'} = {}) {
@@ -152,7 +155,7 @@
     /* Inline sprite icon (static/icons/wash.svg). */
     const icon = (name, size = 'sm') => `<svg class="w-icon"${size ? ` data-size="${size}"` : ''} aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-${name}"></use></svg>`;
 
-    function create({ api, toast, boardEl, detailEl, totalEl, jobsEl = null, onOpen = null, onRoute = null, onHome = null, onConnection = null }) {
+    function create({ api, toast, boardEl, detailEl, totalEl, jobsEl = null, listEl = null, listCountEl = null, asideEl = null, onOpen = null, onRoute = null, onHome = null, onConnection = null }) {
         const ui = window.MuJobUI || {
             confirm: message => Promise.resolve(window.confirm(message)),
             prompt: ({label, optional}) => { const v = window.prompt(label, ''); return Promise.resolve(v === null || (!optional && !v.trim()) ? null : v); },
@@ -173,6 +176,11 @@
         const labels = {notes:'Notes', plan:'Plan', session:'Session', diff:'Diff', review:'Review', checks:'Checks', diagnostics:'Diagnostics', costs:'Cost & audit'};
         const stepTabs = {plan:'plan', approve:'plan', implement:'session', checks:'checks', review:'review', push:'review'};
         const open = id => (onOpen ? onOpen(id) : select(id));
+        /* The job renders in two panes (Mu §11b): its work in the main pane (detailEl) and its
+         * context in the aside (asideEl). Lookups cover both. */
+        const q = sel => detailEl.querySelector(sel) || asideEl?.querySelector(sel) || null;
+        const qa = sel => [...detailEl.querySelectorAll(sel), ...(asideEl ? asideEl.querySelectorAll(sel) : [])];
+        let inJob = false;          // the job route is open (the list marks the selected row)
         /* "Viewed" marks are server-side (markViewed → diff.viewed); a file whose hunk changes drops out.
          * Servers without markViewed keep the marks for this page visit only. */
         const viewed = () => new Set(job?.diff?.viewed || []);
@@ -207,7 +215,7 @@
             const label = LABEL[type] || action.label;
             let args = {...(action.args || {})};
             if (type === 'savePlanDraft') { editing = true; signatures.delete('plan'); selectTab('plan'); return; }
-            if (type === 'message') { selectTab('session'); setTimeout(() => detailEl.querySelector('[data-message]')?.focus(), 0); return; }
+            if (type === 'message') { selectTab('session'); setTimeout(() => q('[data-message]')?.focus(), 0); return; }
             if (type === 'markFindings' || type === 'markViewed') { selectTab(type === 'markViewed' ? 'diff' : 'review'); return; }
             if (type === 'approvePlan') {
                 if (editor?.isDirty()) return notify('Save or cancel your plan edits before approving.', 'warn');
@@ -222,8 +230,8 @@
             const input = inputOf(action);
             if (input) {
                 let text;
-                const banner = type === 'denyTool' ? detailEl.querySelector('[data-deny-reason]')
-                    : type === 'raiseLimit' ? detailEl.querySelector('[data-limit-amount]') : null;
+                const banner = type === 'denyTool' ? q('[data-deny-reason]')
+                    : type === 'raiseLimit' ? q('[data-limit-amount]') : null;
                 if (banner) text = banner.value; // the approval / limit banner carries its own field (planos)
                 else {
                     const title = type === 'reprompt' ? `Fix ${selectedFindings.size} finding${selectedFindings.size === 1 ? '' : 's'} · ${jobKey(job)}` : `${label} · ${jobKey(job)}`;
@@ -242,7 +250,7 @@
             try {
                 const result = await api('/api/jobs/cmd', { method:'POST', body:{ type, job_id:selectedId, args } });
                 notify(`${label}: done`, 'ok');
-                if (type === 'delete') { editor?.destroy(); editor = null; job = null; selectedId = ''; delete detailEl.dataset.jobId; detailEl.innerHTML = ''; onOpen?.(null); }
+                if (type === 'delete') { editor?.destroy(); editor = null; job = null; selectedId = ''; delete detailEl.dataset.jobId; detailEl.innerHTML = ''; asideEl?.replaceChildren(); onOpen?.(null); }
                 else { if (type === 'reprompt') selectedFindings.clear(); await refreshParts(result.parts); }
                 await refreshHome();
             } catch (error) { notify(error.message, 'danger'); }
@@ -334,7 +342,7 @@
             } catch (error) { notify(error.message, 'danger'); }
         }
         function renderEnvironments() {
-            const host = detailEl.querySelector('[data-environments]');
+            const host = q('[data-environments]');
             if (!host) return;
             if (!ENV || !envOpen) { host.innerHTML = ''; return; }
             const buttons = ['refreshEnvironments', 'keepEnvironments', 'setEnvironments']
@@ -369,7 +377,11 @@
             const dirtyBlock = a.id === 'approvePlan' && editor?.isDirty();
             const label = LABEL[a.id] || a.label;
             const title = dirtyBlock ? `${label}: save or cancel your plan edits first` : a.enabled ? (a.reason || (a.shortcut ? `${label} (${a.shortcut})` : label)) : `${label}: ${a.reason || 'not available now'}`;
-            return `<button type="button" class="w-btn" data-variant="${v}"${size ? ` data-size="${size}"` : ''}${tone ? ` data-tone="${esc(tone)}"` : ''} data-command="${esc(a.id)}" data-action="${esc(a.id)}"${a.id === 'approvePlan' ? ' data-plan-approve' : ''}${a.id === 'rejectPlan' ? ' data-plan-reject' : ''}${a.enabled ? '' : ' aria-disabled="true"'}${dirtyBlock ? ' disabled' : ''}${a.shortcut ? ` aria-keyshortcuts="${esc(a.shortcut)}"` : ''} title="${esc(title)}" ${extra}><span>${esc(label)}</span>${a.shortcut ? `<kbd class="w-keycap" aria-hidden="true">${esc(a.shortcut)}</kbd>` : ''}</button>`;
+            // Mu §7.3: one ink pill (the action the state asks for); every other action is a text button.
+            const text = v !== 'primary' && v !== 'danger';
+            const cls = text ? 'w-textbtn' : 'w-btn';
+            const attrs = text ? (tone === 'danger' ? ' data-tone="danger"' : '') : ` data-variant="${v}"${size ? ` data-size="${size}"` : ''}${tone ? ` data-tone="${esc(tone)}"` : ''}`;
+            return `<button type="button" class="${cls}"${attrs} data-command="${esc(a.id)}" data-action="${esc(a.id)}"${a.id === 'approvePlan' ? ' data-plan-approve' : ''}${a.id === 'rejectPlan' ? ' data-plan-reject' : ''}${a.enabled ? '' : ' aria-disabled="true"'}${dirtyBlock ? ' disabled' : ''}${a.shortcut ? ` aria-keyshortcuts="${esc(a.shortcut)}"` : ''} title="${esc(title)}" ${extra}><span>${esc(label)}</span></button>`;
         }
         /* Overflow menu item for an action (G§9.17 menu): disabled items stay listed with their reason. */
         function actionMenuItem(a) {
@@ -381,136 +393,188 @@
             root.querySelectorAll('[data-command]').forEach(b => { b.onclick = () => invoke(b.dataset.command); });
         }
 
-        /* ------------------------------------------------------------ dashboard */
-        /* Wash dashboard (G§9.3, §9.15): a stat strip, needs-you attention cards with the
-         * state's primary action inline, running-now job rows, recent results. */
-        const RUN_ICON = {planning:'bot', implementing:'bot', reviewing:'bot', checking:'wrench', provisioning:'box', pushing:'upload'};
+        /* ------------------------------------------------------------ dashboard (Mu §5, §10.2) */
+        /* Now (what needs you, its decisive action pinned on the row), Running, Recent: rows,
+         * never cards. The state sentence in the page header carries the counts. */
         const PRIMARY_BY_STATE = {plan_review:'approvePlan', review_done:'push', needs_input:'resume', failed:'retry'};
-        /* The job row (G§9.15): status glyph, title, repo · session in mono, mini stepper,
-         * the attention reason chip when waiting, and relative time. */
-        function jobRow(row, now, {action = null} = {}) {
+        const repoName = row => (row.repository ? String(row.repository).split('/').filter(Boolean).pop() : '');
+        const tone = (text, t) => (t ? `<span data-tone="${t}">${esc(text)}</span>` : esc(text));
+        /* The state sign (Mu §5.4): glyph + colour from the shared vocabulary; the label is read out. */
+        const signOf = row => { const st = WASH.stateStyle(row.state);
+            return `<span class="w-sign" data-status="${esc(st.status)}" title="${esc(cap(st.label))}" aria-hidden="true">${esc(st.glyph)}</span>`; };
+        /* Line 2: the state in words, then at most two facts that change what you'd do. */
+        function rowSentence(row) {
             const st = WASH.stateStyle(row.state);
-            const waiting = st.status === 'waiting' || st.status === 'failed';
-            const where = [row.repository ? String(row.repository).split('/').filter(Boolean).pop() : '', row.origin_session ? `session ${row.origin_session}` : ''].filter(Boolean).join(' · ');
-            return `<li class="work-job-row${row.id === selectedId ? ' is-selected' : ''}" data-row-job="${esc(row.id)}" data-status="${st.status}">
-                ${statusIcon(st.status, cap(st.label))}
-                <div class="work-job-row__main">
-                    <a href="#/job/${esc(row.id)}" class="work-job-row__title" data-job-id="${esc(row.id)}" title="${esc(row.title)}"><span class="work-job-row__key">${esc(jobKey(row))}</span>${esc(row.title)}</a>
-                    ${where ? `<span class="work-job-row__where" title="${esc(row.repository || '')}">${esc(where)}</span>` : ''}
-                </div>
-                ${miniStepper(stepsOf(row))}
-                ${waiting ? `<span class="w-chip" data-tone="${st.semantic}" title="${esc(row.limit?.summary || row.attention_detail || '')}">${chipGlyph(st.glyph)}<span>${esc(cap(row.limit?.summary ? 'limit reached' : st.label))}</span></span>` : ''}
-                ${row.verdict && !waiting ? verdictPill(row.verdict) : ''}
-                ${action || ''}
-                <span class="work-job-row__time" title="updated ${esc(when(row.updated_at))}">${esc(age(now - (row.updated_at || row.created_at)))}</span>
+            const t = st.status === 'waiting' ? 'attention' : st.status === 'failed' ? 'danger' : '';
+            const lead = row.limit?.summary ? 'Limit reached' : cap(st.label);
+            const facts = [row.limit?.summary || (st.status === 'waiting' || st.status === 'failed' ? row.attention_detail : ''),
+                row.verdict && st.status !== 'waiting' ? cap(verdictOf(row.verdict)[1]) : '', repoName(row)].filter(Boolean).slice(0, 2);
+            return [tone(lead, t), ...facts.map(esc)].join(' · ');
+        }
+        /* The job row (Mu §5.1): sign, key + title, one sentence, time; actions on hover (pinned in Now). */
+        function jobRow(row, now, {sub = null, actions = '', pinned = false, time = null} = {}) {
+            const st = WASH.stateStyle(row.state);
+            const stamp = row.updated_at || row.created_at;
+            const sel = inJob && row.id === selectedId;
+            return `<li class="w-row work-job-row${sel ? ' is-selected' : ''}" data-row-job="${esc(row.id)}" data-status="${st.status}"${sel ? ' aria-selected="true" data-selected' : ''}${pinned ? ' data-pinned' : ''}>
+                ${signOf(row)}
+                <a href="#/job/${esc(row.id)}" class="w-row__main" data-job-id="${esc(row.id)}" title="${esc(row.title)}">
+                    <span class="w-row__title"><span class="w-row__key">${esc(jobKey(row))}</span>${esc(row.title)}</span>
+                    <span class="w-row__sub"><span class="w-sr-only">${esc(cap(st.label))}: </span>${sub ?? rowSentence(row)}</span>
+                </a>
+                <span class="w-row__when" title="updated ${esc(when(stamp))}">${esc(time === null ? age(now - stamp) : time)}</span>
+                ${actions ? `<span class="w-row__actions">${actions}</span>` : ''}
             </li>`;
         }
-        /* Needs-you card: an attention (or danger) state card, sorted by wait time. */
-        function needsCard(row, now) {
+        /* A row in Now: why it waits, and the action the state asks for, always visible. */
+        function needsRow(row, now) {
             const st = WASH.stateStyle(row.state);
             const failed = st.status === 'failed';
             const wanted = row.primary_action || PRIMARY_BY_STATE[row.state] || '';
             const act = (row.actions || []).find(a => a.id === wanted && a.enabled) || (row.actions || []).find(a => a.primary && a.enabled);
             const reason = row.limit?.summary || row.attention_summary || '';
-            return `<li><article class="w-card work-job-card${failed ? ' is-failed' : ''}${row.id === selectedId ? ' is-selected' : ''}" data-state="${failed ? 'danger' : 'attention'}" data-row-job="${esc(row.id)}" aria-labelledby="needs-${esc(row.id)}">
-                <header class="w-card__head">
-                    <span class="w-chip" data-tone="${st.semantic}">${chipGlyph(st.glyph)}<span>${esc(cap(failed ? st.label : 'needs you'))}</span></span>
-                    <span class="w-card__meta" title="${esc(when(row.updated_at))}">waiting ${esc(age(now - (row.updated_at || row.created_at)))}</span>
-                </header>
-                <div class="w-card__body">
-                    <h3 class="w-card__title" id="needs-${esc(row.id)}"><a href="#/job/${esc(row.id)}" data-job-id="${esc(row.id)}"><span class="work-job-row__key">${esc(jobKey(row))}</span>${esc(row.title)}</a></h3>
-                    <p class="work-needs-reason"><span class="work-needs-reason__label">${esc(cap(reason ? 'limit reached' : failed && row.failed_from ? `failed in ${stateLabel(row.failed_from)}` : st.label))}</span>${reason ? `<span class="work-needs-reason__detail" data-limit-summary title="${esc(row.attention_detail || row.limit?.message || '')}">${esc(reason)}</span>`
-                        : row.attention_detail ? `<span class="work-needs-reason__detail" title="${esc(row.attention_detail)}">${esc(row.attention_detail)}</span>` : ''}</p>
-                    ${row.repository || row.origin_session ? `<p class="work-job-row__where">${esc([row.repository, row.origin_session ? `session ${row.origin_session}` : ''].filter(Boolean).join(' · '))}</p>` : ''}
-                </div>
-                <footer class="w-card__foot">
-                    ${act ? `<button type="button" class="w-btn" data-variant="tonal" data-tone="${failed ? 'danger' : 'attention'}" data-open-action="${esc(row.id)}" data-action-id="${esc(act.id)}"><span>${esc(LABEL[act.id] || act.label)}</span>${act.shortcut ? `<kbd class="w-keycap" aria-hidden="true">${esc(act.shortcut)}</kbd>` : ''}<span class="w-btn__chevron" aria-hidden="true">›</span></button>`
-                        : `<a class="w-btn" data-variant="ghost" href="#/job/${esc(row.id)}" data-job-id="${esc(row.id)}">Open<span class="w-btn__chevron" aria-hidden="true">›</span></a>`}
-                </footer>
-            </article></li>`;
+            const lead = cap(reason ? 'limit reached' : failed && row.failed_from ? `failed in ${stateLabel(row.failed_from)}` : st.label);
+            const detail = reason || row.attention_detail || '';
+            const sub = `${tone(lead, failed ? 'danger' : 'attention')}${detail ? ` · <span${reason ? ' data-limit-summary' : ''} title="${esc(row.attention_detail || row.limit?.message || detail)}">${esc(detail)}</span>` : ''}${repoName(row) ? ` · ${esc(repoName(row))}` : ''}`;
+            const actions = act ? `<button type="button" class="w-textbtn" data-open-action="${esc(row.id)}" data-action-id="${esc(act.id)}"${act.shortcut ? ` aria-keyshortcuts="${esc(act.shortcut)}"` : ''}>${esc(LABEL[act.id] || act.label)}</button>` : '';
+            return jobRow(row, now, {sub, actions, pinned: true});
         }
-        /* The launcher's three live choice cards (components/launcher.css), shared layout with the
-         * chat welcome: Needs you, Running now, Done this week. */
-        function renderChoices(counts, needs, now) {
-            const el = document.getElementById('work-choices');
-            if (!el) return;
-            const spend = home.running.reduce((sum, j) => sum + (Number(j.cost_usd) || 0), 0);
-            const oldest = needs[0];
-            const card = (href, glyph, tone, title, count, meta) => `<a class="w-choice" role="listitem" href="${href}">
-                <span class="w-choice__icon" data-tone="${tone}" aria-hidden="true">${icon(glyph, '')}</span>
-                <span class="w-choice__copy"><strong class="w-choice__title">${esc(title)}<span class="w-count"${count && tone !== 'ok' ? ` data-tone="${tone}"` : ''}>${count}</span></strong>
-                    <small class="w-choice__meta">${esc(meta)}</small></span>
-                <span class="w-choice__arrow" aria-hidden="true">›</span></a>`;
-            el.innerHTML = [
-                card('#needs-you', 'alert-circle', counts.needs ? 'attention' : 'ok', 'Needs you', counts.needs,
-                    oldest ? `${jobKey(oldest)} · waiting ${age(now - (oldest.updated_at || oldest.created_at))}${counts.ready ? ` · ${counts.ready} ready to push` : ''}` : 'You’re all caught up'),
-                card('#running-now', 'activity', 'running', 'Running now', counts.running,
-                    counts.running ? `${counts.checking} checking · ${money(spend)} so far` : 'Nothing is running'),
-                card('#/history', 'history', 'ok', 'Done this week', counts.done,
-                    counts.done ? 'See results and pushed PRs' : 'Finished jobs appear here'),
-            ].join('');
+        function group(id, title, body, more = '') {
+            return `<section class="w-group work-group" aria-labelledby="${id}"><header class="w-group__head"><h2 class="w-group__title" id="${id}">${esc(title)}</h2>${more}</header>${body}</section>`;
+        }
+        /* A board cell (Mu §11b): a flat section beside the others, divided by hairlines. */
+        function cell(id, title, body, {span = '', more = ''} = {}) {
+            return `<section class="w-board__cell work-cell" aria-labelledby="${id}"${span ? ` data-span="${span}"` : ''}><header class="w-pane__head"><h2 class="w-pane__title" id="${id}">${esc(title)}</h2>${more}</header>${body}</section>`;
+        }
+        /* A meter as SVG geometry (no inline styles in the jobs app): a 4px track and the value. */
+        function meter(pct, {tone = '', label = '', cls = 'work-meter'} = {}) {
+            const v = Math.max(0, Math.min(100, Math.round(pct)));
+            return `<svg class="${cls}" viewBox="0 0 100 4" preserveAspectRatio="none" role="img" aria-label="${esc(label)}"${tone ? ` data-tone="${tone}"` : ''}><rect class="work-meter__track" width="100" height="4" rx="2"></rect><rect class="work-meter__fill" width="${v}" height="4" rx="2"></rect></svg>`;
+        }
+        /* Running: what each job is doing, with its stages as a meter. */
+        function runningRow(row, now) {
+            const steps = stepsOf(row);
+            const step = focusStep(steps);
+            const done = steps.filter(s => s.status === 'done').length;
+            const pct = steps.length ? Math.round(done / steps.length * 100) : 0;
+            const what = [step?.label ? cap(step.label) : cap(stateLabel(row.state)), step?.detail || '', Number(row.cost_usd) ? money(row.cost_usd) : ''].filter(Boolean);
+            const sub = `<span class="work-job-row__detail" title="${esc(step?.detail || '')}">${what.map(esc).join(' · ')}</span>${steps.length ? ` ${meter(pct, {tone: 'running', label: `${done} of ${steps.length} stages done`, cls: 'work-meter work-row-bar'})}` : ''}`;
+            return jobRow(row, now, {sub});
+        }
+        /* Cost by day: each job's cost lands on the day it was last active (the board's trend,
+         * not an invoice). One series, so no legend; each bar carries its day and amount. */
+        function spendCell(now) {
+            const DAY = 86400, days = 14;
+            const start = Math.floor(now / DAY) * DAY - (days - 1) * DAY;
+            const buckets = Array.from({length: days}, () => 0);
+            for (const j of home.jobs) {
+                const t = j.updated_at || j.created_at || 0, c = Number(j.cost_usd) || 0;
+                if (!c || t < start) continue;
+                buckets[Math.min(days - 1, Math.floor((t - start) / DAY))] += c;
+            }
+            const week = buckets.slice(-7).reduce((a, b) => a + b, 0);
+            if (!buckets.some(Boolean)) return '';   // no cost yet: no $0.00 tile (Mu §5.5)
+            const today = buckets[days - 1];
+            const max = Math.max(...buckets, 0);
+            const W = 10, G = 2, H = 36;
+            const bars = buckets.map((v, i) => {
+                const h = max ? Math.max(v ? 2 : 0, Math.round(v / max * H)) : 0;
+                const day = new Date((start + i * DAY) * 1000).toLocaleDateString(undefined, {weekday: 'short', day: 'numeric'});
+                return `<rect x="${i * (W + G)}" y="${H - h}" width="${W}" height="${h}" rx="2"><title>${esc(day)}: ${esc(money(v))}</title></rect>`;
+            }).join('');
+            const chart = max ? `<svg class="work-spark" viewBox="0 0 ${days * (W + G) - G} ${H}" width="${days * (W + G) - G}" height="${H}" role="img" aria-label="Job cost by day, last ${days} days; ${esc(money(week))} in the last 7">${bars}</svg>` : '';
+            return cell('spend-h', 'Cost', `<span class="w-board__big work-num">${esc(money(week))}</span>
+                <p class="work-meta">last 7 days${today ? ` · ${esc(money(today))} today` : ''}</p>${chart}`);
         }
         function renderHome() {
             if (!home) return;
             totalEl.textContent = home.jobs.length;
             onHome?.(home);
             const now = Date.now() / 1000;
-            const running = row => { const step = focusStep(stepsOf(row));
-                const detail = step?.detail ? `<span class="work-job-row__detail" title="${esc(step.detail)}">› ${esc(step.detail)}</span>` : '';
-                return jobRow(row, now, {action:`<span class="work-job-row__cost" title="cost so far${step?.elapsed >= 1 ? ` · ${esc(duration(step.elapsed * 1000))} in ${esc(step.label || '')}` : ''}">${icon(RUN_ICON[row.state] || 'bot')}${money(row.cost_usd)}</span>${detail}`}); };
-            const week = now - 7 * 86400;
-            const counts = {
-                needs: home.needs_you.length, running: home.running.length,
-                checking: home.jobs.filter(j => j.state === 'checking').length,
-                ready: home.jobs.filter(j => j.state === 'review_done').length,
-                done: home.jobs.filter(j => ['done', 'pushed'].includes(j.state) && Number(j.updated_at) >= week).length,
-            };
-            const recent = home.jobs.filter(j => ['done', 'pushed', 'failed', 'cancelled'].includes(j.state)).sort((a, b) => b.updated_at - a.updated_at).slice(0, 6);
             const needs = home.needs_you.slice().sort((a, b) => (a.updated_at || 0) - (b.updated_at || 0));
-            const section = (id, eyebrow, title, count, body, extra = '') => `<section class="work-section" aria-labelledby="${id}">
-                <header class="work-section__head"><span class="w-eyebrow">${esc(eyebrow)}</span><h2 class="work-section__title" id="${id}">${esc(title)}</h2>${count !== null ? `<span class="w-count"${count && id === 'needs-you' ? ' data-tone="attention"' : ''}>${count}</span>` : ''}<span class="work-spacer"></span>${extra}</header>${body}</section>`;
-            renderChoices(counts, needs, now);
-            boardEl.innerHTML = `
-                ${section('needs-you', 'Attention', 'Needs you', home.needs_you.length, needs.length
-                    ? `<ul class="work-cards w-card-grid">${needs.map(r => needsCard(r, now)).join('')}</ul>`
-                    : `<div class="w-empty work-empty" data-tone="ok" data-size="sm"><div class="w-empty__art" aria-hidden="true">${icon('circle-check', '')}</div><h3 class="w-empty__title">You’re all caught up</h3><p class="w-empty__body">Nothing needs you right now.</p></div>`)}
-                ${section('running-now', 'Live', 'Running now', home.running.length, home.running.length
-                    ? `<ul class="work-job-rows work-running">${home.running.map(running).join('')}</ul>`
-                    : '<p class="work-empty-line">Nothing is running.</p>')}
-                ${section('jobs-h', 'Jobs', 'Latest jobs', home.jobs.length, home.jobs.length
-                    ? `<ul class="work-job-rows">${home.jobs.slice().sort((a, b) => b.updated_at - a.updated_at).slice(0, 8).map(r => jobRow(r, now)).join('')}</ul>`
-                    : `<div class="w-empty work-empty" data-tone="accent"><div class="w-empty__art" aria-hidden="true">${icon('briefcase', '')}</div><h3 class="w-empty__title">No jobs yet</h3><p class="w-empty__body">Create one with New job, or import tickets from a Jira board.</p><div class="w-empty__actions"><button type="button" class="w-btn" data-variant="secondary" data-new-job>${icon('plus')}<span>New job</span></button><a class="w-btn" data-variant="ghost" href="#/boards">Browse tickets<span class="w-btn__chevron" aria-hidden="true">›</span></a></div></div>`,
-                    home.jobs.length ? '<a href="#/jobs" class="w-btn" data-variant="ghost" data-size="sm">All jobs<span class="w-btn__chevron" aria-hidden="true">›</span></a>' : '')}
-                ${recent.length ? section('recent-h', 'Results', 'Recent results', null, `<ul class="work-job-rows">${recent.map(r => jobRow(r, now)).join('')}</ul>`) : ''}`;
+            const busy = new Set([...home.needs_you, ...home.running].map(j => j.id));
+            const finished = home.jobs.filter(j => !busy.has(j.id)).sort((a, b) => b.updated_at - a.updated_at).slice(0, 6);
+            const finishedRow = row => {
+                const st = WASH.stateStyle(row.state);
+                const took = row.updated_at && row.created_at ? duration((row.updated_at - row.created_at) * 1000) : '';
+                const sub = [tone(cap(st.label), st.status === 'failed' ? 'danger' : ''), Number(row.cost_usd) ? esc(money(row.cost_usd)) : '', took ? esc(took) : '', esc(repoName(row))].filter(Boolean).join(' · ');
+                return jobRow(row, now, {sub});
+            };
+            // The setup reminder (#work-setup-cta) is a persistent node: keep it across re-renders.
+            const cta = document.getElementById('work-setup-cta');
+            if (!home.jobs.length) {
+                boardEl.innerHTML = `${cell('needs-you', 'Now', '<ul class="w-rows work-now-rows"></ul>')}
+                    <div class="w-empty work-empty work-first-run" data-tone="accent"><div class="w-empty__art" aria-hidden="true">${icon('briefcase', '')}</div><h3 class="w-empty__title">No jobs yet</h3><p class="w-empty__body">Delegate engineering work to agents that plan, implement, check and review it in isolated sandboxes. You step in only when a job needs you.</p><div class="w-empty__actions"><button type="button" class="w-textbtn" data-new-job>Create a job</button><a class="w-textbtn" data-tone="quiet" href="#/boards">Browse tickets</a></div></div>`;
+            } else {
+                boardEl.innerHTML = `${cell('needs-you', 'Needs you', `<ul class="w-rows work-now-rows">${needs.map(r => needsRow(r, now)).join('')}</ul>${needs.length ? '' : '<p class="w-group__empty work-quiet-line">Nothing needs you.</p>'}`)}
+                    <div class="w-board work-board-grid">
+                    ${cell('running-now', 'Running', home.running.length ? `<ul class="w-rows work-running">${home.running.map(r => runningRow(r, now)).join('')}</ul>` : '<p class="w-group__empty work-quiet-line">Nothing running.</p>')}
+                    ${spendCell(now)}
+                    ${finished.length ? cell('recent-h', 'Recently finished', `<ul class="w-rows">${finished.map(finishedRow).join('')}</ul>`, {more: '<a href="#/jobs" class="w-group__more">All jobs</a>'}) : ''}
+                </div>`;
+            }
+            if (cta) boardEl.querySelector('.work-now-rows')?.prepend(cta);
+            boardEl.querySelector('.work-quiet-line')?.toggleAttribute('hidden', !!(cta && !cta.hidden));
             bindHome(boardEl);
             boardEl.querySelector('[data-new-job]')?.addEventListener('click', () => document.getElementById('work-new')?.click());
+            renderList();
             renderJobsPage();
             ui.register('page:dashboard', home.jobs.map(j => ({id:`open:${j.id}`, label:`Open ${jobKey(j)} · ${j.title}`, group:'Jobs', run:() => open(j.id)})));
         }
-        function jobTable(rows, now, extra) {
-            if (!rows.length) return `<div class="w-empty work-empty" data-tone="accent" data-size="sm"><div class="w-empty__art" aria-hidden="true">${icon('list-checks', '')}</div><h3 class="w-empty__title">No jobs here</h3><p class="w-empty__body">Create one with New job, or import tickets from a Jira board.</p></div>`;
-            return `<div class="w-table-wrap"><table class="w-table work-jobs-table"><thead><tr><th scope="col">Key</th><th scope="col">Pipeline</th><th scope="col">State</th><th scope="col" data-num>Cost</th><th scope="col" data-num>Age</th><th scope="col">Summary</th>${extra ? '<th scope="col"><span class="w-sr-only">Actions</span></th>' : ''}</tr></thead><tbody>${rows.map(row => {
-                const needs = stateStatus(row.state) === 'waiting' && row.attention_detail;
-                return `<tr class="clickable" data-row-job="${esc(row.id)}" aria-selected="${row.id === selectedId}">
-                    <td class="key" data-mono><a href="#/job/${esc(row.id)}" data-job-id="${esc(row.id)}">${esc(jobKey(row))}</a></td>
-                    <td>${miniStepper(stepsOf(row))}</td>
-                    <td>${statePill(row.state)}${row.verdict ? `<div class="work-cell-note">${verdictPill(row.verdict)}</div>` : ''}${needs ? `<div class="work-cell-note work-ellipsis" title="${esc(row.attention_detail)}">${esc(row.attention_detail)}</div>` : ''}</td>
-                    <td data-num>${money(row.cost_usd)}</td>
-                    <td data-num class="work-meta">${age(now - row.created_at)}</td>
-                    <td class="work-summary-cell" title="${esc(row.title)}"><span class="work-ellipsis">${esc(row.title)}</span>${row.origin_session || row.repository ? `<span class="work-job-row__where">${row.origin_session ? `<span title="session">session · ${esc(row.origin_session)}</span>` : ''}${row.origin_session && row.repository ? ' · ' : ''}${row.repository ? `<span>${esc(row.repository)}</span>` : ''}</span>` : ''}</td>
-                    ${extra ? `<td class="w-table__actions">${extra(row)}</td>` : ''}</tr>`;
-            }).join('')}</tbody></table></div>`;
+        /* The list pane (Mu §11b): every job as a compact row, grouped Now / Running / Recent,
+         * beside the board and beside the open job. The filter narrows all three groups. */
+        let listQuery = '', listNeedsOnly = false;
+        function renderList() {
+            if (!listEl || !home) return;
+            const now = Date.now() / 1000;
+            const match = j => (!listNeedsOnly || ['waiting', 'failed'].includes(stateStatus(j.state))) &&
+                (!listQuery || `${jobKey(j)} ${j.title} ${stateLabel(j.state)} ${j.repository || ''} ${j.origin_session || ''}`.toLowerCase().includes(listQuery.toLowerCase()));
+            const needs = home.needs_you.filter(match).sort((a, b) => (a.updated_at || 0) - (b.updated_at || 0));
+            const running = home.running.filter(match);
+            const busy = new Set([...home.needs_you, ...home.running].map(j => j.id));
+            const rest = home.jobs.filter(j => !busy.has(j.id) && match(j)).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+            const compact = row => {
+                const st = WASH.stateStyle(row.state);
+                const t = st.status === 'waiting' ? 'attention' : st.status === 'failed' ? 'danger' : '';
+                const sub = [`<span class="work-mono">${esc(jobKey(row))}</span>`, tone(cap(row.limit?.summary ? 'limit reached' : st.label), t), Number(row.cost_usd) ? esc(money(row.cost_usd)) : ''].filter(Boolean).join(' · ');
+                return jobRow(row, now, {sub});
+            };
+            const groups = [['Now', needs], ['Running', running], ['Recent', rest]].filter(([, rows]) => rows.length);
+            const scroll = listEl.closest('.w-pane')?.scrollTop || 0;
+            listEl.innerHTML = groups.length ? groups.map(([title, rows]) => `<section class="work-list-group" aria-label="${title}"><h3 class="work-list-group__title">${title} <span class="work-num">${rows.length}</span></h3><ul class="w-rows" data-spacing="loose">${rows.map(compact).join('')}</ul></section>`).join('')
+                : `<p class="w-pane__empty">${home.jobs.length ? 'No jobs match.' : 'No jobs yet.'}</p>`;
+            if (listCountEl) listCountEl.textContent = home.jobs.length ? String(home.jobs.length) : '';
+            bindHome(listEl);
+            const pane = listEl.closest('.w-pane');
+            if (pane) pane.scrollTop = scroll;
         }
+        if (listEl) {
+            const filter = document.getElementById('work-list-filter');
+            const needsOnly = document.getElementById('work-list-needs');
+            if (filter) filter.oninput = () => { listQuery = filter.value; renderList(); };
+            if (needsOnly) needsOnly.onchange = () => { listNeedsOnly = needsOnly.checked; renderList(); };
+        }
+        function jobList(rows, now, actions) {
+            if (!rows.length) return `<p class="w-group__empty work-empty-line">No jobs match. Create one with New job, or import tickets from a Jira board.</p>`;
+            return `<ul class="w-rows work-jobs-list">${rows.map(row => {
+                const sub = `${rowSentence(row)}${Number(row.cost_usd) ? ` · ${esc(money(row.cost_usd))}` : ''}${row.origin_session ? ` · <span title="session">${esc(row.origin_session)}</span>` : ''}`;
+                return jobRow(row, now, {sub, actions: actions ? actions(row) : ''});
+            }).join('')}</ul>`;
+        }
+        /* A row opens the job in place (Mu §11b): the main pane shows it, the list stays. */
+        function openRow(id) { return open(id); }
         function bindHome(root) {
-            root.querySelectorAll('[data-job-id]').forEach(b => { b.onclick = e => { e.preventDefault(); open(b.dataset.jobId); }; });
-            root.querySelectorAll('[data-row-job]').forEach(tr => { tr.onclick = e => { if (!e.target.closest('a,button,input')) open(tr.dataset.rowJob); }; });
+            root.querySelectorAll('[data-job-id]').forEach(b => { b.onclick = e => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;   // new tab / window: the link's own href
+                e.preventDefault(); openRow(b.dataset.jobId);
+            }; });
+            root.querySelectorAll('[data-row-job]').forEach(tr => { tr.onclick = e => { if (!e.target.closest('a,button,input')) openRow(tr.dataset.rowJob); }; });
             root.querySelectorAll('[data-open-action]').forEach(b => { b.onclick = async () => {
                 if (onOpen) onOpen(b.dataset.openAction);
                 if (await select(b.dataset.openAction) !== true) return;
                 const primary = job?.actions.find(a => a.id === b.dataset.actionId && a.enabled) || job?.actions.find(a => a.primary && a.enabled);
                 if (primary) await invoke(primary.id);
             }; });
-            root.querySelectorAll('a[href^="#needs-you"], a[href^="#running-now"]').forEach(a => { a.onclick = e => { e.preventDefault(); root.querySelector(a.getAttribute('href'))?.scrollIntoView({block:'start', behavior:'smooth'}); }; });
         }
         function renderJobsPage() {
             if (!jobsEl || !home) return;
@@ -518,18 +582,18 @@
             const sessionNames = [...new Set(home.jobs.map(j => j.origin_session || ''))].sort();
             const rows = home.jobs.filter(j => (!jobsNeedsOnly || ['waiting', 'failed'].includes(stateStatus(j.state))) &&
                 (!jobsSession || (j.origin_session || '') === (jobsSession === '-' ? '' : jobsSession)) &&
-                (!jobsQuery || `${jobKey(j)} ${j.title} ${stateLabel(j.state)} ${j.repository || ''} ${j.origin_session || ''} ${j.id}`.toLowerCase().includes(jobsQuery.toLowerCase())));
-            const archiveIcon = '<svg class="w-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></svg>';
+                (!jobsQuery || `${jobKey(j)} ${j.title} ${stateLabel(j.state)} ${j.repository || ''} ${j.origin_session || ''} ${j.id}`.toLowerCase().includes(jobsQuery.toLowerCase())))
+                .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
             const focused = document.activeElement?.id;
-            jobsEl.innerHTML = `<header class="w-page__head work-page-head"><h1 class="w-page__title">Jobs <span class="w-count">${home.jobs.length}</span></h1><span class="work-spacer"></span>
-                <div class="work-toolbar work-jobs-filters">
-                    <label class="work-inline-field"><span class="work-meta">Session</span><span class="w-select"><select class="w-select__control" id="work-jobs-session" aria-label="Filter by session"><option value="">All sessions</option>${sessionNames.map(n => `<option value="${esc(n || '-')}" ${(n || '-') === jobsSession ? 'selected' : ''}>${esc(n || 'no session')}</option>`).join('')}</select></span></label>
+            jobsEl.innerHTML = `<div class="work-toolbar work-jobs-filters" role="search" aria-label="Filter jobs">
+                    <input class="w-input" type="search" id="work-jobs-filter" aria-label="Filter jobs" placeholder="Filter jobs…" value="${esc(jobsQuery)}">
+                    <label class="work-inline-field"><span class="w-sr-only">Session</span><span class="w-select" data-size="sm"><select class="w-select__control" id="work-jobs-session" aria-label="Filter by session"><option value="">All sessions</option>${sessionNames.map(n => `<option value="${esc(n || '-')}" ${(n || '-') === jobsSession ? 'selected' : ''}>${esc(n || 'no session')}</option>`).join('')}</select></span></label>
                     <label class="w-check"><input class="w-check__input" type="checkbox" id="work-jobs-needs" ${jobsNeedsOnly ? 'checked' : ''}><span>Only jobs that need me</span></label>
-                    <input class="w-input" type="search" id="work-jobs-filter" aria-label="Filter jobs" placeholder="Filter…" value="${esc(jobsQuery)}"></div></header>
-                ${jobTable(rows, now, row => {
+                    <span class="work-spacer"></span><span class="work-meta">${rows.length === home.jobs.length ? `${home.jobs.length} job${home.jobs.length === 1 ? '' : 's'}` : `${rows.length} of ${home.jobs.length}`}</span></div>
+                ${jobList(rows, now, row => {
                     const del = (row.actions || []).find(a => a.id === 'delete');
-                    return `<div class="w-btn-row"><button type="button" class="w-btn" data-variant="icon" data-size="sm" data-row-archive="${esc(row.id)}" aria-label="Archive ${esc(jobKey(row))}" title="Archive">${archiveIcon}</button>
-                        <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-tone="danger" data-row-delete="${esc(row.id)}" aria-label="Delete ${esc(jobKey(row))}" title="Delete" ${del?.enabled ? '' : 'disabled'}>${icon('trash-2', '')}</button></div>`;
+                    return `<button type="button" class="w-textbtn" data-tone="quiet" data-row-archive="${esc(row.id)}" aria-label="Archive ${esc(jobKey(row))}" title="Archive">Archive</button>
+                        <button type="button" class="w-textbtn" data-tone="danger" data-row-delete="${esc(row.id)}" aria-label="Delete ${esc(jobKey(row))}" title="Delete" ${del?.enabled ? '' : 'disabled'}>Delete</button>`;
                 })}`;
             bindHome(jobsEl);
             const filter = jobsEl.querySelector('#work-jobs-filter');
@@ -546,20 +610,58 @@
         }
         async function refreshHome() { home = await api('/api/jobs/vm/home'); renderHome(); return home; }
 
+        /* ------------------------------------------------------------ list keys */
+        /* j / k move through the list pane (or the jobs list) and open the job in place. */
+        let listRoute = '';
+        function moveRow(step) {
+            const scope = listRoute === 'jobs' ? document.querySelector('.work-route[data-route="jobs"]') : listEl;
+            const rows = [...(scope || document).querySelectorAll('.work-job-row')].filter(r => r.offsetParent !== null);
+            if (!rows.length) return;
+            const at = rows.findIndex(r => r.matches('[data-selected], :focus-within'));
+            const next = rows[Math.max(0, Math.min(rows.length - 1, at < 0 ? 0 : at + step))];
+            next.querySelector('.w-row__main')?.focus();
+            next.scrollIntoView({block: 'nearest'});
+            if (listRoute !== 'jobs') open(next.dataset.rowJob);
+        }
+        /* work.js: the route changed. Now, Jobs and a job keep j / k. */
+        function listMode(name) {
+            listRoute = ['dashboard', 'jobs', 'job'].includes(name) ? name : '';
+            const wasInJob = inJob;
+            inJob = name === 'job';
+            if (wasInJob !== inJob) renderList();
+            if (!listRoute) { ui.register('page:list', []); return; }
+            ui.register('page:list', [
+                {id: 'list:next', label: 'Next job', group: 'Jobs', key: 'j', run: () => moveRow(1)},
+                {id: 'list:prev', label: 'Previous job', group: 'Jobs', key: 'k', run: () => moveRow(-1)},
+            ], 20);
+        }
+
         /* ------------------------------------------------------------ job page */
-        /* Job detail (G§9.15): title-1 + status chip, the pipeline stepper, the action the
-         * state asks for as the one primary button with everything else in an overflow menu,
-         * then the tabs. */
+        /* Job detail (Mu §10.2): the page header carries the title and the state sentence.
+         * From 1200px the page is two columns: the work itself on the left (why it waits, a
+         * pending decision, the tabs: notes, plan, diff, review, checks…) and a sticky summary
+         * on the right (the action the state asks for, the facts, the stages, the receipts).
+         * Narrower, the summary comes first. */
         function shell() {
-            detailEl.innerHTML = `<header class="work-detail-head" data-job-header></header>
-                <section class="work-pipeline" aria-label="Pipeline" data-pipeline></section>
+            detailEl.innerHTML = `<div class="work-job-layout">
+                <aside class="work-job-side" aria-label="Job summary">
+                    <div class="work-action-panel" data-actions></div>
+                    <header class="work-detail-head" data-job-header></header>
+                    <section class="work-pipeline" aria-labelledby="work-pipeline-h" data-pipeline></section>
+                    <nav class="work-job-receipts" aria-label="Receipts" data-receipts></nav>
+                </aside>
+                <div class="work-job-main">
+                <div data-job-attention></div>
                 <div data-environments></div>
                 <div data-approval></div>
-                <div class="work-action-panel" data-actions></div>
                 <div class="work-detail-tabs"><div role="tablist" aria-label="Job views" class="w-tabs work-tabs">${tabs.map(t => `<button type="button" role="tab" class="w-tabs__tab work-tab" id="work-tab-${t}" data-tab="${t}" aria-selected="${t === tab}" aria-controls="work-panel-${t}" tabindex="${t === tab ? 0 : -1}">${labels[t]}<span class="work-tab-badge" data-tab-badge="${t}"></span></button>`).join('')}</div>
-                ${tabs.map(t => `<div role="tabpanel" class="w-tabs__panel work-tabpanel" id="work-panel-${t}" aria-labelledby="work-tab-${t}" data-panel="${t}" tabindex="0" ${t === tab ? '' : 'hidden'}></div>`).join('')}</div>`;
-            const list = detailEl.querySelector('[role=tablist]');
-            detailEl.querySelectorAll('[data-tab]').forEach(b => { b.onclick = () => selectTab(b.dataset.tab); });
+                ${tabs.map(t => `<div role="tabpanel" class="w-tabs__panel work-tabpanel" id="work-panel-${t}" aria-labelledby="work-tab-${t}" data-panel="${t}" tabindex="0" ${t === tab ? '' : 'hidden'}></div>`).join('')}</div>
+                </div></div>`;
+            // The job's context (actions, facts, stages, receipts) lives in the aside pane.
+            const side = detailEl.querySelector('.work-job-side');
+            if (asideEl && side) asideEl.replaceChildren(side);
+            const list = q('[role=tablist]');
+            qa('[data-tab]').forEach(b => { b.onclick = () => selectTab(b.dataset.tab); });
             list.addEventListener('keydown', e => {
                 const i = tabs.indexOf(tab); let n = -1;
                 if (e.key === 'ArrowRight') n = (i + 1) % tabs.length; else if (e.key === 'ArrowLeft') n = (i - 1 + tabs.length) % tabs.length;
@@ -567,35 +669,88 @@
                 if (n < 0) return; e.preventDefault(); selectTab(tabs[n]); list.querySelector(`[data-tab="${tabs[n]}"]`)?.focus();
             });
         }
+        /* "Open a shell" (manual edits): the job's worktree is on this machine, so the command
+         * is a cd you paste into your own terminal. Nothing runs from the browser. */
+        let shellOpen = false;
+        const shq = v => `'${String(v).replace(/'/g, `'\\''`)}'`;
+        const shellCommand = j => `cd ${shq(j.worktree)}`;
+        function shortPath(path) {
+            const p = String(path || '');
+            return p.length > 42 ? `…${p.slice(-41)}` : p;
+        }
+        function shellBox(j) {
+            const running = stateStatus(j.state) === 'active';
+            return `<div class="work-shellbox" role="group" aria-label="Open a shell in the job's working directory">
+                <p class="work-shellbox__lede">Paste this into a terminal on this machine:</p>
+                <div class="work-shellbox__cmd"><code class="work-mono">${esc(shellCommand(j))}</code>
+                    <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-shell-copy>${icon('copy')}<span>Copy</span></button></div>
+                <p class="work-shellbox__note">${running ? '<strong>The job is running.</strong> Pause it first so your edits and the agent’s don’t collide. ' : ''}`
+                + `Commit your edits on <code class="work-mono">${esc(j.branch || 'the job branch')}</code> before you resume: the checks fail on uncommitted changes.</p></div>`;
+        }
+        async function copyShell(j, button) {
+            const text = shellCommand(j);
+            try { await navigator.clipboard.writeText(text); toast('Shell command copied', 'ok'); }
+            catch (_) {
+                const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+                const ok = document.execCommand('copy'); ta.remove();
+                toast(ok ? 'Shell command copied' : 'Couldn’t copy: select the command and copy it', ok ? 'ok' : 'attention');
+            }
+            if (button) { const label = button.querySelector('span'); if (label) { label.textContent = 'Copied'; setTimeout(() => { label.textContent = 'Copy'; }, 1500); } }
+        }
         function renderState() {
             const steps = stepsOf(job);
             const models = Object.entries(job.stage_models || {}).filter(([, m]) => m?.model);
             const failed = job.state === 'failed';
             const prTone = job.pr?.state === 'merged' ? 'ok' : job.pr?.state === 'closed' ? 'danger' : 'accent';
-            detailEl.querySelector('[data-job-header]').innerHTML = `
-                <div class="work-detail-header-top">
-                    <span class="w-eyebrow work-detail-key"><span class="work-mono">${esc(jobKey(job))}</span></span>
-                    <span class="work-spacer"></span>${budgetText(job)}
-                </div>
-                <div class="work-detail-titlebar"><h1 class="w-page__title work-detail-title">${esc(job.title)}</h1>${statePill(job.state)}</div>
-                <div class="w-chip-row work-detail-chips">
-                    ${job.paused_from ? pill('caution', `${chipGlyph('–')}<span>paused in ${esc(stateLabel(job.paused_from))}</span>`) : ''}
-                    ${job.fix_attempts ? pill('neutral', `<span>fix attempts ${esc(job.fix_attempts)}</span>`) : ''}
-                    ${job.verdict ? verdictPill(job.verdict) : ''}
-                    ${ENV ? ENV.headerPill(job.environments || job.build_environments, envOpen) : ''}
-                    ${/^https?:\/\//.test(job.pr?.url || '') ? `<a class="w-chip" data-tone="${prTone}" href="${esc(job.pr.url)}" target="_blank" rel="noopener" data-pr-link>${icon('git-pull-request')}<span>PR${job.pr.number ? ` #${esc(job.pr.number)}` : ''}${job.pr.state && job.pr.state !== 'open' ? ` · ${esc(job.pr.state)}` : ''}</span></a>` : ''}
-                    ${job.branch ? `<span class="w-chip" data-variant="meta" title="branch">${icon('git-branch')}<span class="w-sr-only">branch</span><span class="work-mono">${esc(job.branch)}</span></span>` : ''}
-                    ${job.repository ? `<span class="w-chip" data-variant="meta" title="${esc(job.repository)}"><span class="w-sr-only">repo: </span><span class="work-mono">${esc(job.repository)}</span></span>` : ''}
-                    ${job.origin_session ? `<span class="w-chip" data-variant="meta" title="session"><span class="w-sr-only">session: </span>${icon('message-circle')}<span>${esc(job.origin_session)}</span></span>` : ''}
-                </div>
-                <p class="work-detail-agents"><span>${failed && job.failed_from ? `<span class="work-failed-from">failed in ${esc(stateLabel(job.failed_from))}</span> · ` : ''}agents: ${window.MuJobAgents ? window.MuJobAgents.stageText(job) : (models.length ? models.map(([s, m]) => `${esc(s)} <code>${esc(m.model)}</code>`).join(' · ') : 'unset')}</span>
-                    <button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-stage-models>${icon('sliders-horizontal')}<span>Job settings</span></button></p>
-                ${job.attention_detail && !(approvalOf(job) && job.state === 'needs_input') && !(job.limit && job.state === 'needs_input') ? attentionBanner(job, failed) : ''}`;
-            detailEl.querySelector('[data-stage-models]').onclick = () => window.muOpenStageModels?.();
-            const envPill = detailEl.querySelector('[data-env-pill]');
+            // Mu §10.2: the page header carries the job's title (work.js) and its state sentence;
+            // the body opens with a quiet facts line (key, repository, branch, session, cost).
+            const st = WASH.stateStyle(job.state);
+            const stTone = st.status === 'waiting' ? 'attention' : st.status === 'failed' ? 'danger' : st.status === 'done' ? 'quiet' : '';
+            const prLabel = /^https?:\/\//.test(job.pr?.url || '') ? `PR${job.pr.number ? ` #${job.pr.number}` : ''}${job.pr.state && job.pr.state !== 'open' ? ` · ${job.pr.state}` : ''}` : '';
+            window.WashHead?.set({ state: [
+                { text: cap(st.label), tone: stTone },
+                failed && job.failed_from ? { text: `failed in ${stateLabel(job.failed_from)}`, tone: 'danger' } : null,
+                job.paused_from ? { text: `paused in ${stateLabel(job.paused_from)}` } : null,
+                job.fix_attempts ? { text: `fix attempts ${job.fix_attempts}` } : null,
+                job.verdict ? { text: cap(verdictOf(job.verdict)[1]) } : null,
+                prLabel ? { text: prLabel, href: job.pr.url, tone: prTone === 'danger' ? 'danger' : '' } : null,
+            ] });
+            // The summary column: facts as a list (Mu §5.3), the agents per stage, and "why it
+            // waits" as prose at the top of the work column (not a second state chip).
+            const facts = [
+                ['Key', `<span class="work-mono work-detail-key" title="job ${esc(job.id)}">${esc(jobKey(job))}</span>`],
+                job.repository ? ['Repository', `<span class="work-mono" title="repository ${esc(job.repository)}">${esc(job.repository)}</span>`] : null,
+                job.branch ? ['Branch', `<span class="work-mono" title="branch">${esc(job.branch)}</span>`] : null,
+                job.origin_session ? ['Session', `<span title="session">${esc(job.origin_session)}</span>`] : null,
+                ['Budget', budgetText(job)],
+                prLabel ? ['Pull request', `<a href="${esc(job.pr.url)}" target="_blank" rel="noopener" data-pr-link>${icon('git-pull-request')} ${esc(prLabel)}</a>`] : null,
+                ENV ? ['Environment', ENV.headerPill(job.environments || job.build_environments, envOpen)] : null,
+                job.worktree ? ['Working directory', `<span class="work-mono work-detail-path" title="${esc(job.worktree)}">${esc(shortPath(job.worktree))}</span> <button type="button" class="w-textbtn" data-open-shell aria-expanded="${shellOpen}">${icon('terminal')}<span>Open a shell</span></button>`] : null,
+                ['Agents', `<span class="work-detail-agents">${window.MuJobAgents ? window.MuJobAgents.stageText(job) : (models.length ? models.map(([s, m]) => `${esc(s)} <code>${esc(m.model)}</code>`).join(' · ') : 'unset')}</span>`],
+            ].filter(Boolean);
+            q('[data-job-header]').innerHTML = `
+                <dl class="w-facts work-detail-facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>
+                ${shellOpen && job.worktree ? shellBox(job) : ''}
+                <button type="button" class="w-textbtn" data-tone="quiet" data-stage-models>${icon('sliders-horizontal')}<span>Job settings</span></button>`;
+            // The Review tab opens with the review summary, which is where a finished review's
+            // attention text comes from: don't say it twice there (work.css hides the banner).
+            const head = String(job.attention_headline || job.attention_detail || '').replace(/…$/, '').slice(0, 120);
+            detailEl.dataset.attentionFromReview = String(!!(head && String(job.review?.summary || '').startsWith(head)));
+            q('[data-job-attention]').innerHTML = job.attention_detail && !(approvalOf(job) && job.state === 'needs_input') && !(job.limit && job.state === 'needs_input') ? attentionBanner(job, failed) : '';
+            q('[data-receipts]').innerHTML = `<h2 class="w-group__title">Receipts</h2>
+                <a class="w-textbtn" data-tone="quiet" href="#/job/${esc(job.id)}?tab=costs" data-receipt-tab="costs">Cost and audit</a>
+                <a class="w-textbtn" data-tone="quiet" href="#/job/${esc(job.id)}?tab=checks" data-receipt-tab="checks">Checks and evidence</a>
+                <a class="w-textbtn" data-tone="quiet" href="/jobs/trace?job=${encodeURIComponent(job.id)}">Job analysis</a>`;
+            qa('[data-receipt-tab]').forEach(a => { a.onclick = e => { e.preventDefault(); selectTab(a.dataset.receiptTab); q('.work-detail-tabs')?.scrollIntoView({block: 'start', behavior: 'smooth'}); }; });
+            q('[data-stage-models]').onclick = () => window.muOpenStageModels?.();
+            const shellBtn = q('[data-open-shell]');
+            if (shellBtn) shellBtn.onclick = () => { shellOpen = !shellOpen; renderState(); if (shellOpen) q('[data-shell-copy]')?.focus(); };
+            const copyBtn = q('[data-shell-copy]');
+            if (copyBtn) copyBtn.onclick = () => copyShell(job, copyBtn);
+            const envPill = q('[data-env-pill]');
             if (envPill) envPill.onclick = () => { envOpen = !envOpen; renderState(); };
-            detailEl.querySelector('[data-pipeline]').innerHTML = pipelineStepper(steps);
-            detailEl.querySelectorAll('[data-step]').forEach(g => { g.onclick = () => selectTab(stepTabs[g.dataset.step] || 'session'); });
+            q('[data-pipeline]').innerHTML = `<h2 class="w-group__title" id="work-pipeline-h">Stages</h2>${pipelineStepper(steps)}`;
+            qa('[data-step]').forEach(g => { g.onclick = () => selectTab(stepTabs[g.dataset.step] || 'session'); });
             renderEnvironments();
             renderApproval();
             renderActions();
@@ -610,12 +765,14 @@
             const active = Number(b.active_seconds);
             return `<span class="work-detail-budget" data-job-budget>
                 <span class="work-detail-cost"${tone ? ` data-tone="${tone}"` : ''} title="agent cost so far${cap ? ` of the ${money(cap)} job cap` : ' (no cost cap)'}"><span class="work-num">${money(b.cost_usd)}</span><span class="work-meta"> / ${cap ? money(cap) : 'no cap'}</span></span>
+                ${cap ? meter(frac * 100, {tone: tone === 'caution' ? 'attention' : tone, label: `${Math.round(frac * 100)}% of the cost cap`, cls: 'work-meter work-budget-bar'}) : ''}
                 ${Number.isFinite(active) && j.budget ? `<span class="work-meta work-num" title="worker-active time${b.max_runtime_seconds ? ` (limit ${duration(b.max_runtime_seconds * 1000)})` : ''}">${icon('clock')}${duration(active * 1000)}${b.max_runtime_seconds ? ` / ${duration(b.max_runtime_seconds * 1000)}` : ''}</span>` : ''}</span>`;
         }
-        /* Approval / limit / environment prompts are attention state cards (G§9.9 frame). */
+        /* Approval / limit / environment prompts are decision blocks (Mu §7.6): the one tinted
+         * surface on the job page; the sign and the title say why it waits (no second "needs you"). */
         function stateCard({id, title, glyph = '◆', tone = 'attention', data = '', body = '', foot = ''}) {
             return `<section class="w-card work-approval" data-state="${tone}" role="alert" aria-labelledby="${id}" ${data}>
-                <header class="w-card__head"><span class="w-chip" data-tone="${tone}">${chipGlyph(glyph)}<span>Needs you</span></span><h2 class="w-card__title" id="${id}">${title}</h2></header>
+                <header class="w-card__head"><span class="w-sign" data-status="${tone === 'danger' ? 'failed' : 'waiting'}" aria-hidden="true">${glyph}</span><h2 class="w-card__title" id="${id}">${title}</h2></header>
                 <div class="w-card__body">${body}</div>${foot ? `<footer class="w-card__foot">${foot}</footer>` : ''}</section>`;
         }
         function renderEnvironmentApproval(host) {
@@ -655,7 +812,7 @@
                 foot:`${cancel ? actionButton({...cancel, primary:false}, {variant:'secondary'}) : ''}${actionButton({...raise, primary:true})}`});
         }
         function renderApproval() {
-            const host = detailEl.querySelector('[data-approval]');
+            const host = q('[data-approval]');
             const limitHtml = renderLimitBanner();
             if (limitHtml) {
                 // Keep what the user typed across live re-renders of the same pause.
@@ -695,11 +852,11 @@
         /* Action bar: the enabled primary action(s) as buttons — the first is the page's one
          * primary — and every other action in the overflow menu (disabled ones with their reason). */
         function renderActions() {
-            const bar = detailEl.querySelector('[data-actions]');
+            const bar = q('[data-actions]');
             // Tool approval lives in the approval banner; hidden actions (markFindings, markViewed) never show.
             const inLimitBanner = !!(job.limit && job.state === 'needs_input');
             const list = job.actions.filter(a => !hiddenOf(a) && !BANNER_ACTIONS.has(a.id) && !(inLimitBanner && LIMIT_BANNER_ACTIONS.has(a.id)));
-            const banner = !!detailEl.querySelector('[data-approval] .work-approval');
+            const banner = !!q('[data-approval] .work-approval');
             const primaries = list.filter(a => a.enabled && a.primary);
             const others = list.filter(a => a.enabled && !a.primary);
             const disabled = list.filter(a => !a.enabled);
@@ -707,7 +864,7 @@
             const wasOpen = !!bar.querySelector('[data-overflow-menu]:not([hidden])');
             bar.innerHTML = `<div class="w-btn-row work-actions" role="toolbar" aria-label="Job actions">
                 ${primaries.map((a, i) => actionButton(a, {variant:i === 0 && !banner ? '' : (washTone(toneOf(a)) === 'danger' ? 'secondary' : 'tonal')})).join('') || '<span class="work-meta">Nothing to do right now.</span>'}
-                ${menuItems ? `<div class="work-overflow"><button type="button" class="w-btn" data-variant="secondary" aria-haspopup="menu" aria-expanded="${wasOpen}" aria-controls="work-actions-menu" data-overflow-toggle>${icon('more-horizontal')}<span>More actions</span>${disabled.length ? `<span class="w-count" title="${disabled.length} unavailable">${others.length + disabled.length}</span>` : ''}</button>
+                ${menuItems ? `<div class="work-overflow"><button type="button" class="w-textbtn" aria-haspopup="menu" aria-expanded="${wasOpen}" aria-controls="work-actions-menu" data-overflow-toggle><span>More actions</span><span aria-hidden="true">▾</span></button>
                     <div class="w-menu work-overflow__menu" role="menu" id="work-actions-menu" aria-label="More job actions" data-overflow-menu ${wasOpen ? '' : 'hidden'}>${menuItems}</div></div>` : ''}</div>`;
             bindCommands(bar);
             bindOverflow(bar);
@@ -735,7 +892,7 @@
             if (!menu.hidden) document.addEventListener('mousedown', outside, true);
         }
         function renderBadges() {
-            const set = (t, html) => { const el = detailEl.querySelector(`[data-tab-badge="${t}"]`); if (el) el.innerHTML = html ? ` ${html}` : ''; };
+            const set = (t, html) => { const el = q(`[data-tab-badge="${t}"]`); if (el) el.innerHTML = html ? ` ${html}` : ''; };
             const dot = (tone, label) => `<span class="w-status" data-tone="${tone}" aria-label="${label}">${tone === 'running' ? '<span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>' : `<span class="w-status__glyph" aria-hidden="true">${tone === 'attention' ? '◆' : tone === 'ok' ? '✓' : '✗'}</span>`}</span>`;
             const live = stateStatus(job.state) === 'active' && ['planning', 'implementing', 'reviewing'].includes(job.state);
             set('session', live ? dot('running', 'live') : approvalOf(job) ? dot('attention', 'approval needed') : '');
@@ -752,6 +909,7 @@
         function registerCommands() {
             ui.register('page:job', [
                 ...job.actions.filter(a => !hiddenOf(a) || ENV_ACTIONS.has(a.id)).map(a => ({id:`act:${a.id}`, label:LABEL[a.id] || a.label, group:'Job', key:a.shortcut || undefined, enabled:a.enabled, reason:a.reason, run:() => invoke(a.id)})),
+                ...(job.worktree ? [{id:'job:shell', label:'Copy a shell command for the working directory', group:'Job', run:() => copyShell(job)}] : []),
                 ...(ENV ? [{id:'env:panel', label:envOpen ? 'Hide build environments' : 'Show build environments', group:'Job', run:() => { envOpen = !envOpen; renderState(); }}] : []),
                 ...tabs.map(t => ({id:`tab:${t}`, label:`Show ${labels[t].toLowerCase()}`, group:'Tab', run:() => selectTab(t)})),
             ], 10);
@@ -761,7 +919,7 @@
         const emptyState = (title, body = '', tone = 'accent', glyph = 'sparkles') => `<div class="w-empty work-empty" data-tone="${tone}" data-size="sm"><div class="w-empty__art" aria-hidden="true">${icon(glyph, '')}</div><h3 class="w-empty__title">${esc(title)}</h3>${body ? `<p class="w-empty__body">${esc(body)}</p>` : ''}</div>`;
         const banner = (tone, glyph, html, role = '') => `<div class="w-banner" data-tone="${tone}"${role ? ` role="${role}"` : ''}><span class="w-banner__glyph" aria-hidden="true">${glyph}</span><div class="w-banner__msg">${html}</div></div>`;
         const card = ({id, eyebrow = '', title, meta = '', body, flush = false, attrs = ''}) => `<section class="w-card work-card" aria-labelledby="${id}" ${attrs}>
-            <header class="w-card__head">${eyebrow ? `<span class="w-eyebrow">${esc(eyebrow)}</span>` : ''}<h2 class="w-card__title" id="${id}">${title}</h2>${meta ? `<span class="w-card__meta">${meta}</span>` : ''}</header>
+            <header class="w-card__head"><h2 class="w-card__title" id="${id}">${title}</h2>${meta ? `<span class="w-card__meta">${meta}</span>` : ''}</header>
             <div class="w-card__body${flush ? ' work-card-flush' : ''}">${body}</div></section>`;
         function renderPlan(panel) {
             if (editor?.isDirty()) return;
@@ -771,7 +929,7 @@
             const latest = plan.version === plan.latest_version;
             if (plan.error) { panel.innerHTML = banner('danger', '✗', esc(plan.error), 'alert'); return; }
             if (!plan.markdown && !plan.draft && !editing) { panel.innerHTML = emptyState('No plan yet', 'The planner writes the plan and acceptance criteria here.', 'plan', 'list-checks'); return; }
-            const versions = (plan.versions || []).length > 1 ? `<label class="work-inline-field"><span class="work-meta">Version</span><span class="w-select"><select class="w-select__control" data-plan-version aria-label="Plan version">${plan.versions.map(v => `<option value="${v}" ${v === plan.version ? 'selected' : ''}>v${v}${v === plan.approved_version ? ' · approved' : ''}${v === plan.latest_version ? ' · latest' : ''}</option>`).join('')}</select></span></label>` : `<span class="w-chip" data-variant="meta">v${esc(plan.version || 1)}${plan.approved_version === plan.version ? ' · approved' : ''}</span>`;
+            const versions = (plan.versions || []).length > 1 ? `<label class="work-inline-field"><span class="work-meta">Version</span><span class="w-select"><select class="w-select__control" data-plan-version aria-label="Plan version">${plan.versions.map(v => `<option value="${v}" ${v === plan.version ? 'selected' : ''}>v${v}${v === plan.approved_version ? ' · approved' : ''}${v === plan.latest_version ? ' · latest' : ''}</option>`).join('')}</select></span></label>` : `<span class="work-meta">Version ${esc(plan.version || 1)}${plan.approved_version === plan.version ? ' · approved' : ''}</span>`;
             if (editing && editAction?.enabled && latest) {
                 panel.innerHTML = '<div data-editor></div>';
                 editor = window.MuJobPlan.mount(panel.querySelector('[data-editor]'), plan, job.actions, send, async () => { editing = false; signatures.delete('plan'); await refreshParts(['plan', 'state']); },
@@ -783,7 +941,7 @@
                 <div class="work-toolbar">${versions}
                     ${plan.draft ? pill('attention', `${chipGlyph('◆')}<span>Unsaved draft — edit the plan to continue or save it</span>`) : job.state === 'plan_review' ? pill('attention', `${chipGlyph('◆')}<span>Waiting for your approval</span>`) : ''}
                     <span class="work-spacer"></span>
-                    ${editAction?.enabled && latest ? `<button type="button" class="w-btn" data-variant="secondary" data-plan-edit>${icon('pencil')}<span>Edit plan</span>${editAction.shortcut ? `<kbd class="w-keycap" aria-hidden="true">${esc(editAction.shortcut)}</kbd>` : ''}</button>` : ''}
+                    ${editAction?.enabled && latest ? `<button type="button" class="w-textbtn" data-plan-edit${editAction.shortcut ? ` aria-keyshortcuts="${esc(editAction.shortcut)}" title="Edit plan (${esc(editAction.shortcut)})"` : ''}>${icon('pencil')}<span>Edit plan</span></button>` : ''}
                 </div>
                 ${plan.diff_from_previous ? `<details class="work-details"><summary>Changes from the previous version</summary><pre class="work-log">${esc(plan.diff_from_previous)}</pre></details>` : ''}
                 ${(plan.errors || []).length ? banner('caution', '◆', plan.errors.map(esc).join('<br>')) : ''}
@@ -808,7 +966,7 @@
                 <div class="work-toolbar">${verdictPill(report.verdict)}<span class="work-readiness"><span class="work-meta">Merge readiness</span>${resultBar(readiness, 100 - readiness)}<strong class="work-num">${readiness}/100</strong></span>
                     <span class="work-meta">${Object.entries(report.counts || {}).map(([s, c]) => `${c} ${esc(s)}`).join(' · ')}</span></div>
                 ${findings.length ? `<div class="work-toolbar" role="toolbar" aria-label="Fix review findings"><span class="work-meta work-grow">Pick findings to fix in one targeted implement run (checks and review follow); the plan stays as it is.</span>
-                    <button type="button" class="w-btn" data-variant="primary" data-size="sm" data-fix-selected ${fix?.enabled && selectedFindings.size ? '' : 'disabled'} title="${esc(fix?.enabled ? 'Fix the selected findings' : fix?.reason || 'not available')}">Fix ${selectedFindings.size || ''} selected${fix?.shortcut ? `<kbd class="w-keycap" aria-hidden="true">${esc(fix.shortcut)}</kbd>` : ''}</button></div>` : ''}
+                    <button type="button" class="w-textbtn" data-fix-selected ${fix?.enabled && selectedFindings.size ? '' : 'disabled'} title="${esc(fix?.enabled ? 'Fix the selected findings' : fix?.reason || 'not available')}">Fix ${selectedFindings.size || ''} selected</button></div>` : ''}
                 <div class="work-grid-2">
                     ${card({id:'rv-sum', eyebrow:'Review', title:'Summary', body:`${report.headline ? `<p class="work-headline">${esc(report.headline)}</p>` : ''}${(report.notes || []).length ? `<ul class="work-note__bullets">${report.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}<div class="w-markdown work-markdown">${markdown(report.summary || '')}</div>`})}
                     ${card({id:'rv-adh', eyebrow:'Plan', title:'Plan adherence', body:(report.plan_coverage || []).length ? `<ul class="work-list">${report.plan_coverage.map(c => `<li class="work-coverage">${statusIcon(coverageStatus(c.status), c.status)}<span class="work-mono work-nowrap">${esc(c.criterion_id)}</span><span class="work-grow">${esc(c.evidence || c.status)}</span></li>`).join('')}</ul>` : '<p class="work-empty-line">No acceptance criteria were assessed.</p>'})}
@@ -837,12 +995,28 @@
             collapsed.delete(f.file);
             selectTab('diff');
             setTimeout(() => {
-                const row = detailEl.querySelector(`[data-line-key="${CSS.escape((f.file || '') + ':' + f.line_start)}"]`) || detailEl.querySelector(`[data-file="${CSS.escape(f.file || '')}"]`);
+                const row = q(`[data-line-key="${CSS.escape((f.file || '') + ':' + f.line_start)}"]`) || q(`[data-file="${CSS.escape(f.file || '')}"]`);
                 row?.scrollIntoView({block:'center'}); row?.classList.add('work-flash'); setTimeout(() => row?.classList.remove('work-flash'), 1600);
             }, 0);
         }
 
         /* ------------------------------------------------------------ diff (G§9.11, wash/work_diff.js) */
+        /* Review mode: the diff panel on its own over the whole view (work.css [data-zen]);
+         * Esc, the ⤡ button, another tab or another job leave it. */
+        function setDiffZen(panel, on) {
+            if (!panel) return;
+            panel.toggleAttribute('data-zen', on);
+            document.documentElement.toggleAttribute('data-diff-zen', on);
+            renderPart('diff', true);
+            if (on) { panel.scrollTop = 0; window.WashMotion?.enter(panel); }
+            panel.querySelector('[data-diff-zen]')?.focus();
+        }
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape' || !document.documentElement.hasAttribute('data-diff-zen')) return;
+            if (e.target?.closest?.('input, textarea, select, [contenteditable], .w-menu, .w-modal')) return;
+            e.preventDefault();
+            setDiffZen(q('[data-panel="diff"]'), false);
+        });
         function renderDiff(panel) {
             const live = job.diff?.live || null;
             const files = parsePatch(diffPatch(job));
@@ -861,7 +1035,10 @@
                 : DIFF.renderFile(f, {mode: splitDiff ? 'split' : 'unified', lineKeys: true,
                     findings: findings.map(x => ({file: x.file, line: Number(x.line_start || 0), html: comment(x)}))}));
             const statusLetter = f => DIFF.statusBadge(f);
-            panel.innerHTML = `${liveNote}<div class="work-diff-layout">
+            const zen = panel.hasAttribute('data-zen');
+            const zenBar = `<div class="work-diff-bar">${zen ? `<div class="work-diff-bar__title"><span class="work-meta">Reviewing</span> <strong>${esc(job.title || jobKey(job))}</strong></div>` : ''}<span class="work-spacer"></span>
+                ${zen ? '<span class="work-meta work-diff-bar__hint">Esc to leave</span>' : ''}<button type="button" class="w-btn" data-variant="icon" data-size="sm" data-diff-zen aria-pressed="${zen}" aria-label="${zen ? 'Leave review mode' : 'Review mode: the diff on its own, full screen'}" title="${zen ? 'Leave review mode (Esc)' : 'Review mode'}">${icon(zen ? 'minimize-2' : 'maximize-2')}</button></div>`;
+            panel.innerHTML = `${zenBar}${liveNote}<div class="work-diff-layout">
                 <nav class="work-diff-tree" aria-label="Changed files"><div class="work-diff-tree-head">
                     <div class="work-toolbar"><strong>${files.length} file${files.length === 1 ? '' : 's'}</strong><span class="work-diffstat"><span class="work-add">+${totalA}</span><span class="work-del">−${totalR}</span></span><span class="work-spacer"></span>${live ? '' : `<span class="work-meta">${files.filter(f => seen.has(f.path)).length}/${files.length} viewed</span>`}</div>
                     <div class="w-segmented work-diff-mode" data-size="sm" role="group" aria-label="Diff layout"><button type="button" class="w-segmented__option" data-diff-mode="unified" aria-pressed="${!splitDiff}">Unified</button><button type="button" class="w-segmented__option" data-diff-mode="split" aria-pressed="${splitDiff}">Split</button></div></div>
@@ -873,6 +1050,7 @@
                         ${findings.some(x => x.file === f.path) ? `<span class="w-chip" data-tone="attention" title="review findings in this file">${chipGlyph('◆')}<span>${findings.filter(x => x.file === f.path).length} finding${findings.filter(x => x.file === f.path).length === 1 ? '' : 's'}</span></span>` : ''}
                         ${live ? '' : `<label class="w-check work-viewed"><input class="w-check__input" type="checkbox" data-viewed="${esc(f.path)}" ${isViewed ? 'checked' : ''}><span>Viewed</span></label>`}</header>
                         ${isCollapsed ? '' : fileBody(f)}</section>`; }).join('')}</div></div>`;
+            panel.querySelector('[data-diff-zen]').onclick = () => setDiffZen(panel, !zen);
             panel.querySelectorAll('[data-diff-mode]').forEach(b => { b.onclick = () => { splitDiff = b.dataset.diffMode === 'split'; localStorage.setItem('mucli-jobs-diff', splitDiff ? 'split' : 'unified'); renderPart('diff', true); }; });
             panel.querySelectorAll('[data-goto-file]').forEach(b => { b.onclick = () => { const f = files[Number(b.dataset.gotoFile)]; collapsed.delete(f.path); collapsed.add(`!${f.path}`); renderPart('diff', true); panel.querySelector(`#diff-file-${b.dataset.gotoFile}`)?.scrollIntoView({block:'start'}); }; });
             panel.querySelectorAll('[data-collapse]').forEach(b => { b.onclick = () => { const p = b.dataset.collapse, open = b.getAttribute('aria-expanded') === 'true';
@@ -990,7 +1168,7 @@
                     const q = failureFilter.toLowerCase(), rows = cases.filter(f => !q || `${f.suite} ${f.name} ${f.message}`.toLowerCase().includes(q));
                     const hasJunit = (selected.suites || []).some(s => s.junit);
                     const suitesWithHistory = (selected.suites || []).map(s => [s.suite, suiteHistory(s.suite)]).filter(([, h]) => h.length >= 2);
-                    return `<section class="w-card work-card" aria-labelledby="run-h"><header class="w-card__head"><span class="w-eyebrow">Run</span><h2 class="w-card__title" id="run-h">Run ${esc(selected.run)}</h2>${runPill(selected)}<span class="w-card__meta">${esc([dur(selected), selected.trigger, selected.head_sha ? String(selected.head_sha).slice(0, 12) : ''].filter(Boolean).join(' · '))}</span></header>
+                    return `<section class="w-card work-card" aria-labelledby="run-h"><header class="w-card__head"><h2 class="w-card__title" id="run-h">Run ${esc(selected.run)}</h2>${runPill(selected)}<span class="w-card__meta">${esc([dur(selected), selected.trigger, selected.head_sha ? String(selected.head_sha).slice(0, 12) : ''].filter(Boolean).join(' · '))}</span></header>
                     <div class="w-card__body work-stack">
                         ${k.total ? `<div class="work-stack-tight">${resultBar(k.passed, k.failed, k.skipped, true)}<div class="work-toolbar work-meta"><span class="work-add">✓ ${k.passed} passed</span><span class="${k.failed ? 'work-del' : ''}">✗ ${k.failed} failed</span>${k.skipped ? `<span>– ${k.skipped} skipped</span>` : ''}<span>of ${k.total}</span></div></div>` : ''}
                         ${(selected.suites || []).length ? `<div class="w-table-wrap"><table class="w-table work-suites" aria-label="Suites of run ${esc(selected.run)}"><thead><tr><th scope="col">Suite</th><th scope="col">Environment</th><th scope="col">Result</th><th scope="col" data-num>Duration</th></tr></thead><tbody>
@@ -1004,6 +1182,7 @@
                         ${!cases.length && Array.isArray(selected.new_failures) && selected.new_failures.length ? `<section><h3 class="work-subhead">New failures <span class="w-count" data-tone="danger">${selected.new_failures.length}</span></h3><ul class="work-mono work-list">${selected.new_failures.map(f => `<li class="work-del">✗ ${esc(typeof f === 'string' ? f : JSON.stringify(f))}</li>`).join('')}</ul></section>` : ''}
                         ${Array.isArray(selected.preexisting_failures) && selected.preexisting_failures.length ? `<section><h3 class="work-subhead">Pre-existing on the base commit <span class="w-count">${selected.preexisting_failures.length}</span></h3><p class="work-meta">These also fail before the change, so they are reported to the reviewer and not sent back to the implementer.</p><ul class="work-mono work-meta work-list">${selected.preexisting_failures.map(f => `<li>${esc(typeof f === 'string' ? f : JSON.stringify(f))}</li>`).join('')}</ul></section>` : ''}
                         ${suitesWithHistory.map(([suite, h]) => durationChart(suite, h, selected.run)).join('')}
+                        <div data-art-mount></div>
                         <section aria-labelledby="log-h" class="work-stack-tight"><h3 id="log-h" class="work-subhead">Log</h3>
                         ${(selected.suites || []).map(s => { const c = suiteCounts(s);
                             return `<details class="work-details work-suite-log" ${s.passed ? '' : 'open'}><summary>${statusIcon(suiteStatus(s))}<strong>${esc(s.suite)}</strong><span class="work-suite-env work-meta work-mono" title="build environment that ran it">${s.environment ? `<span aria-hidden="true">⬢</span> ${esc(s.environment)}` : 'shared runtime'}</span>${(s.preexisting_failures || []).length ? pill('neutral', '<span>pre-existing failures</span>') : ''}<span class="work-spacer"></span>${s.duration_ms != null ? `<span class="work-meta work-num">${esc(duration(s.duration_ms))}</span>` : ''}<span class="work-suite-bar">${resultBar(c.passed, c.failed, c.skipped)}</span><span class="work-nowrap work-num">${c.passed}/${c.total}</span></summary>
@@ -1011,6 +1190,8 @@
                     </div></section>`; })() : ''}</div>`;
             bindCommands(panel);
             bindRepairTranscript(panel);
+            const artMount = panel.querySelector('[data-art-mount]');
+            if (artMount && selected && window.MuArtifacts) window.MuArtifacts.mount(artMount, {jobId:job.id, run:selected.run});
             panel.querySelectorAll('tr[data-run]').forEach(tr => { tr.onclick = () => { selectedRun = Number(tr.dataset.run); renderPart('checks', true); }; });
             const filter = panel.querySelector('[data-failure-filter]');
             if (filter) filter.oninput = () => { failureFilter = filter.value; const pos = filter.selectionStart; renderPart('checks', true); const f = panel.querySelector('[data-failure-filter]'); f?.focus(); f?.setSelectionRange(pos, pos); };
@@ -1051,7 +1232,7 @@
             const notes = job.notes || [];
             const live = stateStatus(job.state) === 'active';
             const note = n => `<li class="work-note" data-stage="${esc(n.stage)}"><span class="work-note__dot" data-tone="${esc(n.tone || 'neutral')}" aria-hidden="true"></span>
-                <div class="work-note__head"><span class="w-eyebrow">${esc(NOTE_STAGE[n.stage] || n.stage)}</span><strong class="work-note__title">${esc(n.title)}</strong>${n.count > 1 ? `<span class="w-count" aria-label="${esc(n.count)} times">×${esc(n.count)}</span>` : ''}
+                <div class="work-note__head"><span class="work-note__stage">${esc(NOTE_STAGE[n.stage] || n.stage)}</span><strong class="work-note__title">${esc(n.title)}</strong>${n.count > 1 ? `<span class="w-count" aria-label="${esc(n.count)} times">×${esc(n.count)}</span>` : ''}
                     <span class="work-meta work-nowrap">${esc(when(n.at))}${n.meta ? ` · ${esc(n.meta)}` : ''}</span>
                     ${n.tab && tabs.includes(n.tab) ? `<button type="button" class="w-btn work-note__link" data-variant="ghost" data-size="sm" data-note-tab="${esc(n.tab)}"><span>${esc(labels[n.tab])}</span>${icon('chevron-right')}</button>` : ''}</div>
                 ${n.headline ? `<p class="work-note__headline">${esc(n.headline)}</p>` : ''}
@@ -1178,7 +1359,7 @@
                 return `<svg class="work-timeline" viewBox="0 0 ${W} 90" role="img" aria-label="Timeline: ${events.length} events from ${esc(when(t0))} to ${esc(when(t1))}"><line x1="20" x2="${W - 20}" y1="50" y2="50" class="tl-axis"/>${events.map(e => `<g><title>${esc(`${when(e.created_at)} ${e.event_type}${e.reason ? ` · ${e.reason}` : ''}`)}</title><circle cx="${x(Number(e.created_at))}" cy="50" r="4" class="tl_${EVENT_TONE(e.event_type + ' ' + (e.to_status || ''))}"/></g>`).join('')}<text x="20" y="86" class="tl-text">${esc(when(t0))}</text><text x="${W - 20}" y="86" text-anchor="end" class="tl-text">${esc(when(t1))}</text></svg>`; })() : '';
             panel.innerHTML = `<div class="work-stack"><div class="work-grid-2">
                 ${card({id:'cost-h', eyebrow:'Spend', title:'Cost per stage', meta:`<strong class="work-num">${money(costs.total_usd)}</strong>`, body:stages.length ? `<ul class="work-list">${stages.map(([s, v]) => `<li class="work-cost-row"><span class="work-cost-label">${esc(s)}</span>${meterBar(v / max, `${s}: ${money(v)}`)}<span class="work-num">${money(v)}</span></li>`).join('')}</ul>` : '<p class="work-empty-line">No cost recorded.</p>'})}
-                <section class="w-card work-card" aria-labelledby="att-h"><header class="w-card__head"><span class="w-eyebrow">Runs</span><h2 class="w-card__title" id="att-h">Attempts</h2></header><div class="w-card__body work-card-flush" data-attempts>${attemptsTable()}</div></section></div>
+                <section class="w-card work-card" aria-labelledby="att-h"><header class="w-card__head"><h2 class="w-card__title" id="att-h">Attempts</h2></header><div class="w-card__body work-card-flush" data-attempts>${attemptsTable()}</div></section></div>
                 ${card({id:'audit-h', eyebrow:'Audit', title:'Audit timeline', meta:`<span class="w-count">${events.length}</span>`, body:`${timeline}
                     ${events.length ? `<ol class="work-list work-audit">${events.slice().reverse().map(e => `<li><span class="work-audit-dot" data-tone="${EVENT_TONE(e.event_type + ' ' + (e.to_status || ''))}" aria-hidden="true"></span><time class="work-mono work-meta work-nowrap" datetime="${esc(new Date(Number(e.created_at) * 1000).toISOString?.() || '')}">${esc(when(e.created_at))}</time><details><summary><strong>${esc(e.event_type)}</strong>${e.to_status ? ` <span class="work-meta">→ ${esc(e.to_status)}</span>` : ''}${e.reason ? ` <span class="work-meta">${esc(e.reason)}</span>` : ''}</summary><pre class="work-code">${esc(JSON.stringify(e.payload || {}, null, 2))}</pre></details></li>`).join('')}</ol>` : '<p class="work-empty-line">No audit entries.</p>'}`})}</div>`;
             if (!attempts || attempts.id !== selectedId) loadAttempts();
@@ -1187,13 +1368,13 @@
             if (!attempts || attempts.id !== selectedId) return '<div class="work-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading attempts…</div>';
             if (!attempts.rows.length) return '<p class="work-empty-line">None.</p>';
             const tone = s => (/fail|error/.test(s) ? 'danger' : /run/.test(s) ? 'running' : /succ|done|complete|pass/.test(s) ? 'ok' : 'neutral');
-            return `<div class="w-table-wrap work-table-flush"><table class="w-table"><thead><tr><th scope="col" data-num>#</th><th scope="col">Status</th><th scope="col" data-num>Cost</th><th scope="col">Started</th><th scope="col" data-num>Took</th></tr></thead><tbody>${attempts.rows.map(a => `<tr><td data-num>${esc(a.number)}</td><td>${pill(tone(a.status), `<span>${esc(a.status)}</span>`)}${a.error ? `<div class="work-cell-note work-del work-ellipsis" title="${esc(a.error)}">${esc(a.error)}</div>` : ''}</td><td data-num>${money(a.cost_usd)}</td><td class="work-meta work-nowrap">${esc(when(a.started_at))}</td><td data-num class="work-meta">${a.finished_at && a.started_at ? duration((a.finished_at - a.started_at) * 1000) : ''}</td></tr>`).join('')}</tbody></table></div>`;
+            return `<div class="w-table-wrap work-table-flush"><table class="w-table"><thead><tr><th scope="col" data-num>#</th><th scope="col">Status</th><th scope="col" data-num>Cost</th><th scope="col">Started</th><th scope="col" data-num>Took</th></tr></thead><tbody>${attempts.rows.map(a => `<tr><td data-num>${esc(a.number)}</td><td><span class="work-tag"${toneAttr(tone(a.status) === 'ok' ? '' : tone(a.status))}>${esc(a.status)}</span>${a.error ? `<div class="work-cell-note work-del work-ellipsis" title="${esc(a.error)}">${esc(a.error)}</div>` : ''}</td><td data-num>${money(a.cost_usd)}</td><td class="work-meta work-nowrap">${esc(when(a.started_at))}</td><td data-num class="work-meta">${a.finished_at && a.started_at ? duration((a.finished_at - a.started_at) * 1000) : ''}</td></tr>`).join('')}</tbody></table></div>`;
         }
         async function loadAttempts() {
             const id = selectedId;
             try { const r = await api(`/api/jobs/${encodeURIComponent(id)}/attempts`); attempts = {id, rows:(r.attempts || []).slice().reverse()}; }
             catch (_) { attempts = {id, rows:[]}; }
-            if (id === selectedId) { const host = detailEl.querySelector('[data-attempts]'); if (host) host.innerHTML = attemptsTable(); }
+            if (id === selectedId) { const host = q('[data-attempts]'); if (host) host.innerHTML = attemptsTable(); }
         }
 
         const renderers = {notes:renderNotes, plan:renderPlan, session:renderSession, diff:renderDiff, review:renderReview, checks:renderChecks, diagnostics:renderDiagnostics, costs:renderCosts};
@@ -1204,15 +1385,16 @@
             const signature = JSON.stringify([value, part === 'diff' ? job.review : null, job.actions, part === 'session' ? job.state : null]);
             if (!force && signatures.get(part) === signature) return;
             if (part === 'plan' && editor?.isDirty()) return;
-            const panel = detailEl.querySelector(`[data-panel="${part}"]`);
+            const panel = q(`[data-panel="${part}"]`);
             if (!panel) return;
             renderers[part](panel); signatures.set(part, signature);
         }
         function selectTab(next) {
             if (!tabs.includes(next)) next = 'session';
+            if (next !== 'diff' && q('[data-panel="diff"][data-zen]')) { q('[data-panel="diff"]').removeAttribute('data-zen'); document.documentElement.removeAttribute('data-diff-zen'); }
             tab = next;
-            detailEl.querySelectorAll('[data-tab]').forEach(b => { const on = b.dataset.tab === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
-            detailEl.querySelectorAll('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== tab; });
+            qa('[data-tab]').forEach(b => { const on = b.dataset.tab === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+            qa('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== tab; });
             renderPart(tab);
             onRoute?.({id:selectedId, tab});
         }
@@ -1251,6 +1433,7 @@
             if (selectedId !== id) {
                 editor?.destroy(); editor = null; editing = false; selectedFindings.clear(); signatures.clear(); collapsed.clear(); stale.clear();
                 sessionStage = ''; selectedRun = null; failureFilter = ''; showUnavailable = false; attempts = null;
+                document.documentElement.removeAttribute('data-diff-zen');
                 tab = tabs.includes(requested) ? requested : defaultTab(next); selectedId = id; shell();
             } else if (tabs.includes(requested) && requested !== tab) { tab = requested; }
             const kept = selectedId === id && job ? Object.fromEntries(LAZY.filter(p => job[p] !== undefined && next[p] === undefined).map(p => { stale.add(p); return [p, job[p]]; })) : {};
@@ -1291,7 +1474,7 @@
             setInterval(() => { if (home && document.visibilityState === 'visible') renderHome(); }, 30000);
             setInterval(() => { void refreshLiveDiff(); }, LIVE_DIFF_MS);
         }
-        return {start, select, selectTab, leave, runById, refreshHome, refreshParts, selectedId:() => selectedId, home:() => home, job:() => job};
+        return {start, select, selectTab, leave, runById, refreshHome, refreshParts, listMode, showPreview:id => open(id), previewId:() => '', selectedId:() => selectedId, home:() => home, job:() => job};
     }
     window.MuJobWork = {create, util:{esc, money, duration, age, when, ansi, stripAnsi, pill, statePill, statusIcon, stateLabel, stateStatus, statusOf, verdictPill, severityTone, chipGlyph, icon, jobKey}};
 })();

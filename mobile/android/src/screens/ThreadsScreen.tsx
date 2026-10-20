@@ -1,6 +1,8 @@
+// Agent conversations (web threads_panel.html): the open session's thread group — status,
+// current goal, claimed paths and unread messages — and the coordination activity between them.
+
 import React, { useCallback, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { describeSessionLoadError, formatSessionLoadProblem, sessionsApi } from '../api/sessions';
@@ -14,10 +16,9 @@ import {
 import { NewThreadSheet } from '../components/NewThreadSheet';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useConnectionStore } from '../store/connection';
-import { useTheme } from '../theme/ThemeContext';
-import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
-import { EmptyState, Pressable, Skeleton, Text, Icon } from '../ui';
-import { useGlass } from '../ui/Glass';
+import { PanelPage, PanelSection } from '../components/chat/PanelPage';
+import { spacing } from '../theme/tokens';
+import { Banner, Chip, CountBadge, IconButton, PrimaryPill, Row, Text, useServerActions, useToast } from '../ui';
 
 export type ThreadsScreenProps = NativeStackScreenProps<RootStackParamList, 'Threads'>;
 
@@ -69,8 +70,8 @@ function formatTime(timestamp: number): string {
 }
 
 export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) {
-  const { colors, spacing } = useTheme();
-  const glass = useGlass();
+  const toast = useToast();
+  const actions = useServerActions();
   const activeSessionName = useConnectionStore(state => state.activeSessionName);
   const setActiveSession = useConnectionStore(state => state.setActiveSession);
   const [groupId, setGroupId] = useState('');
@@ -116,13 +117,6 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
     return () => clearInterval(poll);
   }, [load]));
 
-  const statusColor = (status: ThreadStatus) => {
-    if (status === 'error') return colors.danger.ink;
-    if (status === 'interrupted') return colors.attention.ink;
-    if (ACTIVE_STATUSES.includes(status)) return colors.accent.ink;
-    return colors.ink3;
-  };
-
   const switchThread = async (thread: ThreadSummary) => {
     if (switchingName || thread.session_name === activeSessionName) {
       if (thread.session_name === activeSessionName) navigation?.navigate('Tabs', { screen: 'Chat' });
@@ -149,256 +143,101 @@ export function ThreadsScreen({ navigation }: Partial<ThreadsScreenProps> = {}) 
     navigation?.navigate('Tabs', { screen: 'Chat' });
   };
 
-  const deleteThread = (thread: ThreadSummary) => {
+  const deleteThread = async (thread: ThreadSummary) => {
     if (thread.thread_id === currentThreadId) {
-      Alert.alert('Not allowed', 'Switch to a different thread before deleting this one.');
+      toast('Switch to a different thread before deleting this one.', 'attention');
       return;
     }
-    Alert.alert(
-      'Delete thread?',
-      `Permanently delete "${thread.title || thread.session_name}" and its history?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              try {
-                const list = await sessionsApi.list({ timeoutMs: 8_000 });
-                const session = list.sessions.find(item => item.name === thread.session_name);
-                if (session?.is_loaded) await sessionsApi.unload(thread.session_name);
-                await threadsApi.remove(thread.thread_id, activeSessionName || undefined, { timeoutMs: 12_000 });
-                await load(false);
-              } catch (cause) {
-                Alert.alert('Delete failed', cause instanceof Error ? cause.message : String(cause));
-              }
-            })();
-          },
-        },
-      ],
-    );
+    const name = thread.title || thread.session_name;
+    if (!(await actions.ask({ id: 'delete', label: 'Delete', danger: true, confirm: `Permanently delete "${name}" and its history?` }))) return;
+    try {
+      const list = await sessionsApi.list({ timeoutMs: 8_000 });
+      const session = list.sessions.find(item => item.name === thread.session_name);
+      if (session?.is_loaded) await sessionsApi.unload(thread.session_name);
+      await threadsApi.remove(thread.thread_id, activeSessionName || undefined, { timeoutMs: 12_000 });
+      await load(false);
+    } catch (cause) {
+      toast(`Couldn't delete: ${cause instanceof Error ? cause.message : String(cause)}`, 'danger');
+    }
   };
 
-  if (!activeSessionName) {
-    return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }] }>
-        <EmptyState
-          title="No active session"
-          message="Load a session before creating or reviewing agent threads."
-          icon="git-branch"
-          actionLabel="Back to chat"
-          onAction={() => navigation?.navigate('Tabs', { screen: 'Chat' })}
-        />
-      </SafeAreaView>
-    );
-  }
-
+  const running = threads.filter(t => ACTIVE_STATUSES.includes(t.status)).length;
+  const unread = threads.reduce((sum, t) => sum + (t.unread_count || 0), 0);
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }] }>
-      <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}
-        contentContainerStyle={[styles.content, { padding: spacing.base }]}
-      >
-        <View style={styles.pageHeader}>
-          <View style={styles.pageHeaderCopy}>
-            <Text variant="xs" style={[styles.kicker, { color: colors.ink3 }]}>Agent conversations</Text>
-            <Text variant="sm" dim numberOfLines={1}>{groupId || activeSessionName}</Text>
-          </View>
-          <Pressable
-            testID="create-thread"
-            onPress={() => setCreateOpen(true)}
-            activeOpacity={0.72}
-            style={[styles.createButton, { backgroundColor: colors.accent.ink }]}
-            accessibilityLabel="Create thread"
-          >
-            <Icon name="plus" size="md" color={colors.onInk} />
-            <Text variant="sm" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Thread</Text>
-          </Pressable>
-        </View>
-
-        {error ? (
-          <Pressable onPress={() => void load()} style={[styles.errorBanner, { backgroundColor: colors.danger.wash }]}>
-            <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
-            <Text variant="xs" style={[styles.errorCopy, { color: colors.danger.ink }]}>{error}</Text>
-            <Text variant="xs" style={{ color: colors.danger.ink, fontWeight: fontWeights.semibold }}>Retry</Text>
-          </Pressable>
-        ) : null}
-
-        <View style={styles.sectionHeader}>
-          <Text variant="xs" style={[styles.sectionTitle, { color: colors.ink3 }]}>Thread group</Text>
-          <Text variant="xs" dim style={styles.num}>{threads.length}</Text>
-        </View>
-        {loading && threads.length === 0 ? (
-          <View style={styles.loadingBlock}>
-            <Skeleton height={58} style={styles.skeleton} />
-            <Skeleton height={58} style={styles.skeleton} />
-          </View>
-        ) : threads.map(thread => (
-          <Pressable
-            key={thread.thread_id}
-            testID={`thread-row-${thread.thread_id}`}
-            onPress={() => void switchThread(thread)}
-            onLongPress={() => deleteThread(thread)}
-            activeOpacity={0.7}
-            style={[
-              styles.threadRow,
-              thread.thread_id === currentThreadId && glass.activePill,
-            ]}
-          >
-            <View style={[styles.statusDot, { backgroundColor: statusColor(thread.status) }]} />
-            <View style={styles.threadCopy}>
-              <View style={styles.threadTitleRow}>
-                <Text variant="sm" style={styles.threadTitle} numberOfLines={1}>
-                  {thread.title || thread.session_name}
-                </Text>
-                <Text variant="xs" dim>{statusLabel(thread.status)}</Text>
-              </View>
-              <Text variant="xs" dim numberOfLines={2}>
-                {switchingName === thread.session_name ? 'Opening…' : thread.current_goal || thread.session_name}
-              </Text>
-              {thread.claimed_paths?.length ? (
-                <Text variant="xs" style={[styles.claims, { color: colors.ink2 }]} numberOfLines={2}>
-                  owns {thread.claimed_paths.join(', ')}
-                </Text>
-              ) : null}
-            </View>
-            {thread.unread_count > 0 ? (
-              <View style={[styles.unreadBadge, { backgroundColor: colors.accent.wash }]}>
-                <Text variant="xs" style={[styles.num, { color: colors.accent.ink, fontWeight: fontWeights.semibold }]}>{thread.unread_count}</Text>
-              </View>
-            ) : null}
-            {thread.thread_id === currentThreadId ? (
-              <Icon name="check" size="md" color={colors.accent.ink} />
-            ) : !ACTIVE_STATUSES.includes(thread.status) ? (
-              <Pressable
-                onPress={() => deleteThread(thread)}
-                style={styles.deleteButton}
-                accessibilityLabel={`Delete thread ${thread.title || thread.session_name}`}
-              >
-                <Icon name="trash-2" size="sm" color={colors.ink3} />
-              </Pressable>
-            ) : (
-              <Icon name="chevron-right" size="sm" color={colors.ink3} />
-            )}
-          </Pressable>
-        ))}
-
-        <View style={[styles.sectionHeader, styles.activityHeader]}>
-          <Text variant="xs" style={[styles.sectionTitle, { color: colors.ink3 }]}>Coordination activity</Text>
-          <Text variant="xs" dim style={styles.num}>{activity.length}</Text>
-        </View>
-        {!loading && activity.length === 0 ? (
-          <View style={styles.activityEmpty}>
-            <Icon name="activity" size="md" color={colors.ink3} />
-            <Text variant="sm" dim style={styles.activityEmptyText}>
-              Messages, path claims, status changes, and conflicts will appear here.
-            </Text>
-          </View>
-        ) : activity.slice().reverse().map(event => {
+    <PanelPage testID="threads-screen" title="Agent conversations"
+      state={[
+        { text: groupId || activeSessionName || 'No session', tone: 'quiet' },
+        threads.length ? { text: `${threads.length} threads` } : null,
+        running ? { text: `${running} running` } : null,
+        unread ? { text: `${unread} new`, tone: 'attention' } : null,
+      ]}
+      loading={loading && threads.length === 0 && !!activeSessionName}
+      empty={!activeSessionName ? {
+        title: 'No active session', message: 'Load a session before creating or reviewing agent threads.',
+        actionLabel: 'Back to chat', onAction: () => navigation?.navigate('Tabs', { screen: 'Chat' }),
+      } : null}
+      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }}
+      overlay={<>
+        {activeSessionName ? <PrimaryPill label="New thread" icon="plus" onPress={() => setCreateOpen(true)} testID="create-thread" /> : null}
+        {actions.element}
+        <NewThreadSheet visible={createOpen} parentSessionName={activeSessionName} onClose={() => setCreateOpen(false)} onCreated={threadCreated} />
+      </>}>
+      {error ? (
+        <Banner tone="danger" title="Couldn't update the threads" action={{ label: 'Retry', onPress: () => void load() }} testID="threads-error">{error}</Banner>
+      ) : null}
+      <PanelSection title="Thread group" count={threads.length} empty="No threads in this group yet.">
+        {threads.map(thread => {
+          const current = thread.thread_id === currentThreadId;
+          const name = thread.title || thread.session_name;
+          return (
+            <Row key={thread.thread_id} testID={`thread-row-${thread.thread_id}`} status={threadStatusSign(thread.status)} title={name}
+              when={statusLabel(thread.status)} selected={current}
+              accessibilityLabel={`${name}, ${statusLabel(thread.status)}${current ? ', open' : ''}${thread.unread_count ? `, ${thread.unread_count} new` : ''}`}
+              onPress={() => void switchThread(thread)} onLongPress={() => void deleteThread(thread)}
+              sub={(
+                <View style={styles.sub}>
+                  <Text variant="caption" tone="ink3" numberOfLines={2}>{switchingName === thread.session_name ? 'Opening…' : thread.current_goal || thread.session_name}</Text>
+                  {thread.claimed_paths?.length ? <Text variant="monoSm" tone="ink2" numberOfLines={2}>owns {thread.claimed_paths.join(', ')}</Text> : null}
+                </View>
+              )}
+              actions={current || thread.unread_count > 0 || !ACTIVE_STATUSES.includes(thread.status) ? (
+                <View style={styles.actions}>
+                  {thread.unread_count > 0 ? <CountBadge tone="accent">{thread.unread_count}</CountBadge> : null}
+                  {current ? <Chip variant="meta" label="open" /> : !ACTIVE_STATUSES.includes(thread.status) ? (
+                    <IconButton icon="trash-2" label={`Delete thread ${name}`} onPress={() => void deleteThread(thread)} />
+                  ) : null}
+                </View>
+              ) : undefined} />
+          );
+        })}
+      </PanelSection>
+      <PanelSection title="Coordination activity" count={activity.length}
+        empty={loading ? undefined : 'Messages, path claims, status changes and conflicts will appear here.'}>
+        {activity.slice().reverse().map(event => {
           const detail = eventDetail(event);
           const actor = event.actor_title || event.actor_thread_id || 'system';
           const target = event.target_title || event.target_thread_id;
           const conflict = event.kind === 'thread_conflict' || event.kind === 'thread_claim_override';
           return (
-            <View
-              key={event.event_id}
-              style={[
-                styles.eventRow,
-                // Conflicts: danger wash in glass + ✗ glyph, no side rule (G§3.4).
-                conflict && { backgroundColor: glass.tint('danger'), borderRadius: radii.md, paddingHorizontal: spacing.md },
-              ]}
-            >
-              <View style={styles.eventMeta}>
-                {conflict ? <Text variant="xs" accessibilityLabel="conflict" style={{ color: colors.danger.ink }}>✗</Text> : null}
-                <Text variant="xs" dim numberOfLines={1} style={styles.eventActors}>
-                  {actor}{target ? ` → ${target}` : ''}
-                </Text>
-                <Text variant="xs" dim style={styles.num}>{formatTime(event.created_at)}</Text>
-              </View>
-              <Text variant="sm" style={styles.eventTitle}>{eventTitle(event.kind)}</Text>
-              {detail ? <Text variant="xs" dim style={styles.eventDetail}>{detail}</Text> : null}
-            </View>
+            <Row key={event.event_id} status={conflict ? 'failed' : undefined} title={eventTitle(event.kind)} when={formatTime(event.created_at)}
+              accessibilityLabel={`${conflict ? 'Conflict: ' : ''}${eventTitle(event.kind)}`}
+              sub={[`${actor}${target ? ` → ${target}` : ''}`, detail].filter(Boolean).join(' · ')} />
           );
         })}
-      </ScrollView>
-      <NewThreadSheet
-        visible={createOpen}
-        parentSessionName={activeSessionName}
-        onClose={() => setCreateOpen(false)}
-        onCreated={threadCreated}
-      />
-    </SafeAreaView>
+      </PanelSection>
+    </PanelPage>
   );
 }
 
+/** Thread status → the shared status vocabulary. */
+export function threadStatusSign(status: ThreadStatus): string {
+  if (status === 'error') return 'failed';
+  if (status === 'awaiting_approval' || status === 'interrupted') return 'waiting';
+  if (ACTIVE_STATUSES.includes(status)) return 'active';
+  return 'pending';
+}
+
 const styles = StyleSheet.create({
-  safeArea: { flex: 1 },
-  content: { paddingBottom: spacing['2xl'] },
-  pageHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.lg },
-  pageHeaderCopy: { flex: 1, minWidth: 0 },
-  kicker: { fontWeight: fontWeights.semibold, marginBottom: spacing.xs },
-  createButton: {
-    minHeight: touchTarget,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  errorBanner: {
-    minHeight: touchTarget,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.base,
-  },
-  errorCopy: { flex: 1 },
-  sectionHeader: {
-    minHeight: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionTitle: { fontWeight: fontWeights.semibold },
-  num: { fontVariant: ['tabular-nums'] },
-  loadingBlock: { gap: spacing.sm },
-  skeleton: { width: '100%' },
-  threadRow: {
-    minHeight: 66,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.md,
-    borderRadius: radii.sm,
-    flexDirection: 'row',
-    // Same box as the active glass-strong pill, so selection never shifts layout.
-    borderWidth: 1,
-    borderColor: 'transparent',
-    alignItems: 'center',
-  },
-  statusDot: { width: 8, height: 8, borderRadius: radii.pill, marginRight: spacing.md },
-  threadCopy: { flex: 1, minWidth: 0 },
-  threadTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm },
-  threadTitle: { flex: 1, fontWeight: fontWeights.semibold },
-  claims: { marginTop: spacing.xs, fontFamily: fonts.mono },
-  unreadBadge: {
-    minWidth: 24,
-    height: 24,
-    paddingHorizontal: spacing.sm,
-    marginHorizontal: spacing.sm,
-    borderRadius: radii.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deleteButton: { width: touchTarget, height: touchTarget, alignItems: 'center', justifyContent: 'center' },
-  activityHeader: { marginTop: spacing.xl },
-  activityEmpty: { paddingVertical: spacing.xl, paddingHorizontal: spacing.lg, alignItems: 'center' },
-  activityEmptyText: { marginTop: spacing.sm, textAlign: 'center', maxWidth: 300 },
-  eventRow: { paddingVertical: spacing.md },
-  eventMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  eventActors: { flex: 1 },
-  eventTitle: { fontWeight: fontWeights.semibold, marginTop: spacing.xs },
-  eventDetail: { marginTop: spacing.xs },
+  sub: { gap: spacing.xs },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
 });

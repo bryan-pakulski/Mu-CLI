@@ -1,59 +1,30 @@
-// More tab (G§8.3): Settings and the secondary destinations that used to
-// live only in the chat header menu. Rows are 56dp with a Wash icon.
+// More (mobile_parity.md §3): Settings, pairing, the connection and the provider.
 
 import React from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { spacing } from '../theme/tokens';
-import { Card, Eyebrow, Icon, Pressable, Text, type IconName } from '../ui';
-
-type Entry = { screen: string; label: string; detail: string; icon: IconName; needsSession?: boolean };
-
-const ENTRIES: Entry[] = [
-  { screen: 'Settings', label: 'Settings', detail: 'Theme, safety, provider and session options', icon: 'settings' },
-  { screen: 'Connection', label: 'Connection', detail: 'The Mucli server this app talks to', icon: 'network' },
-  { screen: 'Providers', label: 'Provider and model', detail: 'Choose the model for this session', icon: 'cpu' },
-  { screen: 'Modes', label: 'Mode', detail: 'Choose the active agent strategy', icon: 'sliders-horizontal', needsSession: true },
-  { screen: 'Threads', label: 'Agent threads', detail: 'Switch conversations and review coordination', icon: 'git-branch', needsSession: true },
-  { screen: 'Artifacts', label: 'Session files', detail: 'Visualizations, model artifacts and uploads', icon: 'paperclip', needsSession: true },
-  { screen: 'Traces', label: 'Session trace', detail: 'Turns, tools and context over time', icon: 'activity', needsSession: true },
-  { screen: 'Prompts', label: 'Pending prompts', detail: 'Questions and approvals waiting on you', icon: 'help-circle', needsSession: true },
-];
+import { PageHeader, Row, Rows } from '../ui';
 
 export function MoreScreen() {
   const navigation = useNavigation<any>();
-  const { colors } = useTheme();
-  const activeSessionName = useConnectionStore(s => s.activeSessionName);
+  const { baseUrl, isConnected, pairingRequired } = useConnectionStore();
+  const server = baseUrl.replace(/^https?:\/\//, '');
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: 'transparent' }} contentContainerStyle={styles.content} testID="more-screen">
-      <Eyebrow>More</Eyebrow>
-      <Text variant="title1" accessibilityRole="header">Everything else</Text>
-      <Card variant="sunken" bodyStyle={styles.body}>
-        {ENTRIES.map(entry => {
-          const disabled = entry.needsSession && !activeSessionName;
-          return (
-            <Pressable key={entry.screen} testID={`more-${entry.screen}`} accessibilityLabel={entry.label}
-              accessibilityHint={disabled ? 'Load a session first' : entry.detail} disabled={disabled} scale={false}
-              onPress={() => navigation.navigate(entry.screen)}
-              style={({ pressed }) => [styles.row, pressed ? { backgroundColor: colors.hairline } : null]}>
-              <Icon name={entry.icon} color={colors.ink3} />
-              <View style={{ flex: 1 }}>
-                <Text variant="body" style={{ fontWeight: '500' }}>{entry.label}</Text>
-                <Text variant="caption" tone="ink3">{disabled ? 'Load a session first' : entry.detail}</Text>
-              </View>
-              <Icon name="chevron-right" size="sm" color={colors.ink3} />
-            </Pressable>
-          );
-        })}
-      </Card>
-    </ScrollView>
+    <View style={{ flex: 1 }} testID="more-screen">
+      <PageHeader title="More" state={[
+        { text: isConnected ? `Connected to ${server}` : 'Not connected', tone: isConnected ? '' : 'attention' },
+        pairingRequired ? { text: 'not paired', tone: 'attention' } : null,
+      ]} />
+      <ScrollView contentContainerStyle={{ padding: spacing.base }}>
+        <Rows>
+          <Row testID="more-Settings" title="Settings" sub="Appearance, areas and paired devices" onPress={() => navigation.navigate('Settings')} />
+          <Row testID="more-Pair" status={pairingRequired ? 'waiting' : undefined} title="Pair with mucli" sub={pairingRequired ? 'This phone needs pairing to sign in' : 'Sign in, or sign out'} onPress={() => navigation.navigate('Pair')} />
+          <Row testID="more-Connection" title="Connection" sub={server} onPress={() => navigation.navigate('Connection')} />
+          <Row testID="more-Providers" title="Provider and model" sub="The model for this session" onPress={() => navigation.navigate('Providers')} />
+        </Rows>
+      </ScrollView>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  content: { padding: spacing.base, paddingBottom: spacing['2xl'], gap: spacing.md },
-  body: { paddingVertical: spacing.xs, paddingHorizontal: spacing.md, gap: 0 },
-  row: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm, borderRadius: 10 },
-});

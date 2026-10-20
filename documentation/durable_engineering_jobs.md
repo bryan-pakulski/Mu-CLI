@@ -52,6 +52,12 @@ payload may name `repository` instead (see below). Non-git workspaces are
 allowed; they run with `execution.git_enabled = false`, without a base commit,
 review branch or PR. Jobs stored before v2 that have `repository` set still load.
 
+The job's working directory (its worktree, on this machine) shows in the job's
+summary with **Open a shell**: a `cd '<worktree>'` command to copy into your own
+terminal for manual edits (also in the command palette). Nothing runs from the
+browser. Pause a running job first, and commit your edits on the job branch before
+resuming: the checks fail on uncommitted changes.
+
 ### Jobs on any repository
 
 `repository` (alias `repo`) is an alternative to `workspace_root`:
@@ -499,6 +505,29 @@ template-derived images install it best-effort at build (a base Playwright canno
 provision still builds), and Playwright's browser hosts are in the default
 package egress so `playwright install chromium` works where it is missing.
 
+**Check artifacts** (`mu/jobs/check_artifacts.py`). Before checks discard what a suite
+left in the worktree, every file it wrote during the run (untracked *or* git-ignored:
+JUnit and coverage XML, logs, HTML reports, screenshots, packet captures, archives)
+is copied into `checks/run-<n>/artifacts/<suite-N|suites>/<path>` and listed in
+`checks/run-<n>/artifacts.json`. Tracked files are never collected (an edit there
+is a source change and stays for the dirty-tree gate). Dependency and cache
+directories (`node_modules`, `__pycache__`, `.venv`, …) and symlinks are skipped; a
+file is capped at 64 MB, a suite at 500 files and a run at 512 MB (what was left out
+is listed). Text artifacts are secret-redacted on the way in, like evidence.
+Collection never fails the checks. The Checks tab's **Artifacts** browser for the
+selected run lists suite output, JUnit reports and the collected files, with a
+viewer per kind: logs and text (line numbers, filter, errors-and-warnings only,
+jump to the first error), JUnit (cases, failures with their message and trace),
+XML and JSON (pretty-printed; XML that declares a DOCTYPE or entities is never
+parsed), CSV tables, images, HTML reports (in a frame with no scripts), packet
+captures (pcap/pcapng: packets with source, destination, protocol and a summary
+for DNS, HTTP, TLS, TCP flags, ARP and ICMP; conversations), archives (contents)
+and a hex dump for anything else. Routes: `GET /api/jobs/{id}/checks/{run}/artifacts`
+(the listing), `…/preview?path=` (what the viewer shows) and `…/files/{path}` (the
+file: images inline, HTML only as a sandboxed document with `?view=1`, everything
+else as a download, always `nosniff` with a sandboxing CSP). Nothing outside the
+run's folder is served.
+
 **Job code in stage containers.** Every stage, check and repair container
 mounts the host's job code (`mu`, `providers`, `utils`, `prompts`, `mucli.py`,
 `config/model_pricing.json`) read-only over the image's `/opt/mucli` copy
@@ -587,7 +616,8 @@ Each job's folder is `$MUCLI_HOME/jobs/<id>/`. It holds the worktree,
 `ticket.json`, versioned plans, `diff.patch`, `review.json`, check evidence,
 stage transcripts and `costs.jsonl`. The job database is
 `$MUCLI_HOME/jobs/jobs.sqlite3`, and job settings are
-`$MUCLI_HOME/jobs/settings.json`. Older job paths are still supported. When an
-old job is opened, its embedded plan and review data is backed up to
-`legacy-handoffs.json`. Compatibility endpoints pass lifecycle commands to the
-core. Raw status and attention mutation endpoints return 410.
+`$MUCLI_HOME/jobs/settings.json`. The store is created at the current schema;
+older job stores are not supported (no migrations or backfills; start a fresh
+`$MUCLI_HOME/jobs` if you have one). Every status event carries the job's core-state
+snapshot. Compatibility endpoints pass lifecycle commands to the core. Raw status
+and attention mutation endpoints return 410.

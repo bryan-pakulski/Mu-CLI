@@ -877,7 +877,13 @@ def run_turn(session, text, *, origin="user"):
     # session-switch paths. Drained here so the agent's next provider
     # call sees them once, then the queue clears.
     resumption_block = session._drain_resumption_briefings()
-    if resumption_block:
+    # Prefix stability across turns: with `prompt_prefix_stable` everything that
+    # depends on this turn's message (resumption briefing, triggered skill bodies,
+    # durable recall) rides in the request-only turn context attached to the turn's
+    # user message (runtime_state.attach_turn_context) instead of the system prompt,
+    # so tools + system + earlier history stay cached from one turn to the next.
+    _turn_prefix_stable = bool(session.variables.get("prompt_prefix_stable", True))
+    if resumption_block and not _turn_prefix_stable:
         base_system_prompt = f"{base_system_prompt}\n\n{resumption_block}"
     # Cache the disk-backed L1 (workspace files) and L1B (skills) layers
     # once per turn. They're expensive to rebuild (read files / walk the
@@ -886,8 +892,33 @@ def run_turn(session, text, *, origin="user"):
     # (active goal) fresh each iteration without the disk cost — closing
     # the frozen-at-turn-start gap that starved the model of mid-turn
     # progress updates. See _inject_hierarchical_context(cached_*).
-    session._turn_skills_block = session._build_skills_block(announce=True)
+    session._turn_skills_block = session._build_skills_block(announce=True, split=_turn_prefix_stable)
     session._turn_context_files_block = session._build_context_files_block()
+    _turn_blocks: list[str] = []
+    # None = the goal (if any) is sticky and renders in the system prompt.
+    session._turn_goal_context = None
+    if _turn_prefix_stable:
+        try:
+            _goal_sticky = session._session_goal_is_sticky()
+        except Exception:  # noqa: BLE001
+            _goal_sticky = True
+        if not _goal_sticky:
+            session._turn_goal_context = session._build_active_goal_context(include_feature_state=False)
+            if session._turn_goal_context:
+                _turn_blocks.append("LAYER 3 — Active task plan / current goal:\n" + session._turn_goal_context)
+        if resumption_block:
+            _turn_blocks.append(resumption_block)
+        try:
+            _triggered = session._build_triggered_skills_block()
+        except Exception:  # noqa: BLE001 - skills are best-effort context
+            _triggered = ""
+        if _triggered:
+            _turn_blocks.append("LAYER 1B — Skills triggered by this message:\n" + _triggered)
+        _recall = str(getattr(session, "_turn_durable_recall_block", "") or "").strip()
+        if _recall:
+            _turn_blocks.append("LAYER 2M — Durable cross-session recall:\n" + _recall)
+    from mu.session.runtime_state import render_turn_context
+    session._turn_context_block = render_turn_context(_turn_blocks)
     # The pre-injection persona text (system_instruction + mode prompt +
     # workspace_context + resumption block). Reused as the base for every
     # per-iteration system-prompt rebuild.
@@ -1198,9 +1229,9 @@ def run_turn(session, text, *, origin="user"):
             _durable_recall = str(
                 getattr(session, "_turn_durable_recall_block", "") or ""
             ).strip()
-            if _durable_recall:
-                # Turn-constant (computed once at turn start): safe in the
-                # stable prompt.
+            if _durable_recall and not _prefix_stable:
+                # Legacy placement; with prompt_prefix_stable the recall is part
+                # of the turn context on the turn's user message.
                 dynamic_system_prompt += (
                     "\n\nLAYER 2M — Durable cross-session recall:\n"
                     f"{_durable_recall}"

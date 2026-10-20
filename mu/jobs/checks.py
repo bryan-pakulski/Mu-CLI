@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shlex
@@ -14,11 +15,14 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from .check_artifacts import collect as collect_artifacts, tracked_files
 from .core.artifacts import artifacts_for
 from .core.plan_ops import approved_plan_text
 from .core.plan_doc import PlanDoc
 from .dynamic_checks import allowed_executables, check_command
 from .verification import VerificationCheck, VerificationRun, VerificationStore, changed_files as _changed_files
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -530,14 +534,29 @@ class ChecksStage:
         if trigger not in ("auto", "recheck", "fix", "repair"):
             trigger = "auto"
         results = []
+        # Artifacts (check_artifacts.py): what each suite wrote is copied out for browsing
+        # before its byproducts are discarded. Collection never fails the checks.
+        tracked = tracked_files(job.worktree)
+        art_budget = {"bytes": 0}
+
+        def keep_artifacts(label, since, names):
+            try:
+                collect_artifacts(job.worktree, art, run_no, label, since=since, tracked=tracked, suites=names,
+                                  budget=art_budget)
+            except Exception as exc:  # noqa: BLE001 - best effort, recorded in the run's log
+                log.warning("check artifacts for %s not collected: %s", label, exc)
+        batch_started = time.time()
         batched = self._run_batched(job, suites) if self._sandboxed else {}
         if batched:
+            keep_artifacts("suites", batch_started, list(batched))
             byproducts += discard_byproducts(job.worktree, baseline_entries, ",".join(batched))
-        for suite in suites:
+        for index, suite in enumerate(suites, 1):
             suite_started = time.monotonic()
+            suite_wall = time.time()
             result = batched[suite.name] if suite.name in batched else self.run_suite(job, job.worktree, suite)
             elapsed = int((time.monotonic() - suite_started) * 1000)
             if suite.name not in batched:
+                keep_artifacts(f"suite-{index}", suite_wall, [suite.name])
                 # Between suites: a suite's byproducts must not leak into the next one.
                 found = discard_byproducts(job.worktree, baseline_entries, suite.name)
                 byproducts += found

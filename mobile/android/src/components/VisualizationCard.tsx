@@ -1,14 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import type { ArtifactDescriptor } from '../api/artifacts';
 import { artifactsApi } from '../api/artifacts';
 import { openExternalUrl } from '../api/urlSafety';
+import { authHeaders } from '../api/auth';
+import { baseUrl } from '../api/client';
+import { navigateTo } from '../navigation/nav';
+import { shareServerFile } from '../api/artifactDownload';
 import type { ThemeColors } from '../theme/tokens';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
-import { ModalFrame, Pressable, Text, Icon } from '../ui';
+import { ModalFrame, Pressable, Text, Icon, InkDrop, useToast } from '../ui';
 
 const MUCLI_MOBILE_VISUALIZATION_CONTROLS_V1 = true;
 
@@ -21,7 +25,10 @@ interface Props {
 interface InteractiveWebViewProps {
   uri: string;
   colors: ThemeColors;
+  /** Links the visualization itself opens (outside the server). */
   onOpenExternal: (target?: string) => void;
+  /** When the inline preview fails: the in-app viewer (a browser has no device token). */
+  onOpenFallback: () => void;
   onInteractionChange?: (active: boolean) => void;
 }
 
@@ -41,6 +48,7 @@ function InteractiveWebView({
   uri,
   colors,
   onOpenExternal,
+  onOpenFallback,
   onInteractionChange,
 }: InteractiveWebViewProps) {
   const [loading, setLoading] = useState(true);
@@ -64,16 +72,17 @@ function InteractiveWebView({
         <View style={styles.fallback}>
           <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
           <Text variant="sm" dim style={styles.fallbackText}>Inline preview failed.</Text>
-          <Pressable onPress={() => onOpenExternal()} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
+          <Pressable onPress={() => onOpenFallback()} style={{ minHeight: touchTarget, justifyContent: 'center' }}>
             <Text variant="sm" style={{ color: colors.accent.ink, fontWeight: fontWeights.semibold }}>
-              Open in browser
+              Open in session files
             </Text>
           </Pressable>
         </View>
       ) : (
         <>
           <WebView
-            source={{ uri }}
+            // The device token on the preview's request (the page's scripts can't read it).
+            source={{ uri, headers: authHeaders(baseUrl()) }}
             style={[styles.webview, { backgroundColor: colors.canvas }]}
             originWhitelist={['http://*', 'https://*']}
             javaScriptEnabled
@@ -112,7 +121,7 @@ function InteractiveWebView({
           />
           {loading ? (
             <View style={[styles.loading, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-              <ActivityIndicator color={colors.accent.ink} />
+              <InkDrop />
             </View>
           ) : null}
         </>
@@ -141,6 +150,12 @@ function VisualizationCardImpl({
 
   const openExternal = (target: string = uri) => {
     void openExternalUrl(target);
+  };
+  const toast = useToast();
+  // The HTML file through the share sheet, downloaded with the device token (a browser has none).
+  const saveOrShare = () => {
+    shareServerFile(artifactsApi.downloadUrl(sessionName, artifact.artifact_id), artifact.name, artifact.mime_type)
+      .catch(error => toast(`Couldn\u2019t download ${artifact.name}: ${error instanceof Error ? error.message : String(error)}`, 'danger'));
   };
 
   const hidePreview = () => {
@@ -174,12 +189,12 @@ function VisualizationCardImpl({
               <Icon name="maximize-2" size="sm" color={colors.ink3} />
             </Pressable>
             <Pressable
-              onPress={() => openExternal()}
+              onPress={saveOrShare}
               style={[styles.iconButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
-              accessibilityLabel="Open visualization in browser"
+              accessibilityLabel="Save or share visualization"
             >
-              <Icon name="external-link" size="sm" color={colors.ink3} />
+              <Icon name="download" size="sm" color={colors.ink3} />
             </Pressable>
           </View>
         </View>
@@ -227,6 +242,7 @@ function VisualizationCardImpl({
                 uri={uri}
                 colors={colors}
                 onOpenExternal={openExternal}
+                onOpenFallback={() => navigateTo('Artifacts', { view: artifact.artifact_id })}
                 onInteractionChange={onInteractionChange}
               />
             </View>
@@ -250,12 +266,12 @@ function VisualizationCardImpl({
               </Text>
             </View>
             <Pressable
-              onPress={() => openExternal()}
+              onPress={saveOrShare}
               style={[styles.iconButton, { backgroundColor: colors.sunken }]}
               accessibilityRole="button"
-              accessibilityLabel="Open visualization in browser"
+              accessibilityLabel="Save or share visualization"
             >
-              <Icon name="external-link" size="sm" color={colors.ink3} />
+              <Icon name="download" size="sm" color={colors.ink3} />
             </Pressable>
             <Pressable
               onPress={() => setFullScreen(false)}
@@ -271,6 +287,7 @@ function VisualizationCardImpl({
               uri={uri}
               colors={colors}
               onOpenExternal={openExternal}
+              onOpenFallback={() => navigateTo('Artifacts', { view: artifact.artifact_id })}
             />
           </View>
         </SafeAreaView>

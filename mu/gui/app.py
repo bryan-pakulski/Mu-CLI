@@ -32,6 +32,7 @@ from .routers import (
     containers as containers_router,
     debug as debug_router,
     design as design_router,
+    devices as devices_router,
     feature as feature_router,
     files as files_router,
     inspector,
@@ -41,6 +42,7 @@ from .routers import (
     memory as memory_router,
     memories as memories_router,
     modes,
+    orchestration as orchestration_router,
     prompts as prompts_router,
     providers as providers_router,
     research as research_router,
@@ -177,7 +179,15 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     # Shared status vocabulary for the Wash macros (templates/macros/wash.html).
     templates.env.globals["wash_vocab"] = load_vocabulary()
     templates.env.globals["wash_state"] = state_style
+    from mu.design import palette_choices as _palette_choices
+    templates.env.globals["wash_palette_choices"] = _palette_choices
+    from mu.design import load_tokens as _load_tokens
+    templates.env.globals["wash_text_scale"] = (_load_tokens().get("density") or {}).get("text_scale") or {}
     app.state.templates = templates
+    # The persistent shell: browser navigations to a destination get one shell
+    # document; each destination then loads into it as a keep-alive view.
+    from mu.gui import shell as mu_shell
+    mu_shell.install(app, templates)
 
     # The job trace and model pricing pages moved from static HTML onto the
     # shared Jinja layout. Keep old bookmarks working (query string included).
@@ -225,6 +235,12 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     app.include_router(traces_router.router, prefix="/api/traces", tags=["traces"])
     app.include_router(chat.events_router, tags=["events"])
     app.include_router(design_router.router, tags=["design"])
+    app.include_router(orchestration_router.router, tags=["orchestration"])
+    # Paired devices (mobile): non-loopback clients need a device token (mu/gui/devices.py).
+    from .devices import DeviceGate, DeviceStore
+    app.state.devices = DeviceStore()
+    app.include_router(devices_router.router, tags=["devices"])
+    app.add_middleware(DeviceGate)
 
     register_live_observability_hooks()
 
@@ -256,6 +272,14 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     @app.get("/models/costs", response_class=HTMLResponse)
     async def model_costs(request: Request):
         return templates.TemplateResponse(request, "model_costs.html", {"nav_active": "model_costs"})
+
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request):
+        return templates.TemplateResponse(request, "settings.html", {"nav_active": "settings"})
+
+    @app.get("/insights", include_in_schema=False)
+    async def insights_page():
+        return RedirectResponse("/trace", status_code=307)
 
     @app.get("/work", response_class=HTMLResponse)
     async def engineering_work(request: Request):
@@ -289,6 +313,10 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
         app.state.thread_wake_scheduler.start()
         app.state.job_controller.start()
         app.state.watcher.start()
+        try:
+            orchestration_router.start_if_used(app)
+        except Exception:  # noqa: BLE001 - orchestration must never block the GUI
+            _logger.exception("orchestration services failed to start")
 
     @app.on_event("shutdown")
     async def _stop_services():
@@ -296,6 +324,7 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
         if scheduler is not None:
             scheduler.stop(wait=False)
         app.state.watcher.stop()
+        orchestration_router.stop_services(app)
         # Active worker processes are intentionally not killed here. Their own
         # heartbeat/lease lets them survive daemon/browser restarts.
         app.state.job_controller.stop(wait=False)

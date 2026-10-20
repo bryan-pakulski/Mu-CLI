@@ -1,189 +1,118 @@
-import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
-import { useTheme } from '../theme/ThemeContext';
+// Provider and model (More → Provider and model): the model for the active session. Offline
+// switches join the outbound queue and replay on reconnect (G5 §3.6).
+
+import React, { useCallback, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { queueIfOffline, useConnectionStore } from '../store/connection';
-import { providersApi, ProviderInfo } from '../api/providers';
-import { spacing, fontWeights, fonts } from '../theme/tokens';
-import { Button, Card, Chip, EmptyState, ErrorState, Panel, Pressable, Skeleton, StatusIcon, Text } from '../ui';
+import { providersApi, type ProviderInfo } from '../api/providers';
+import { spacing } from '../theme/tokens';
+import { EmptyState, ErrorState, PageHeader, Row, Rows, Skeleton, Text, useToast } from '../ui';
 
 export function ProvidersScreen() {
-  const { colors } = useTheme();
+  const navigation = useNavigation<any>();
+  const toast = useToast();
   const { activeProvider, activeModel, setActiveProviderModel } = useConnectionStore();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [models, setModels] = useState<string[]>([]);
-  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [provider, setProvider] = useState<string | null>(null);
+  const [model, setModel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingModels, setLoadingModels] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  const loadModels = useCallback(async (name: string) => {
+    setLoadingModels(true);
+    try {
+      setModels((await providersApi.listModels(name)).models || []);
+    } catch (e) {
+      setModels([]);
+      toast(`Couldn't load models: ${e instanceof Error ? e.message : String(e)}`, 'danger');
+    } finally {
+      setLoadingModels(false);
+    }
+  }, [toast]);
+
   const load = useCallback(async () => {
     try {
       setError(null);
-      const res = await providersApi.list();
-      setProviders(res.providers);
-      const current = await providersApi.getCurrent();
-      if (current.provider) setSelectedProvider(current.provider);
-      if (current.model) setSelectedModel(current.model);
+      const [list, current] = await Promise.all([providersApi.list(), providersApi.getCurrent()]);
+      setProviders(list.providers);
+      setProvider(current.provider || null);
+      setModel(current.model || null);
+      if (current.provider) void loadModels(current.provider);
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [loadModels]);
 
-  useFocusEffect(
-    useCallback(() => {
-      setLoading(true);
-      load();
-    }, [load]),
-  );
+  useFocusEffect(useCallback(() => { setLoading(true); void load(); }, [load]));
 
-  const selectProvider = async (name: string) => {
-    setSelectedProvider(name);
-    setSelectedModel(null);
+  const chooseProvider = (name: string) => {
+    if (name === provider) return;
+    setProvider(name);
+    setModel(null);
     setModels([]);
-    setLoadingModels(true);
-    try {
-      const res = await providersApi.listModels(name);
-      setModels(res.models || []);
-    } catch (e) {
-      Alert.alert('Failed to load models', String(e));
-    } finally {
-      setLoadingModels(false);
-    }
+    void loadModels(name);
   };
 
-  const selectModel = async (model: string) => {
-    if (!selectedProvider) return;
-    setSelectedModel(model);
-    // G5 (§3.6): offline switches join the outbound queue and replay on
-    // reconnect; the local selection stays optimistic.
-    if (await queueIfOffline('provider_switch', {
-      provider: selectedProvider,
-      model,
-    })) {
-      setActiveProviderModel(selectedProvider, model);
-      Alert.alert('Queued (offline)', `Switch to ${selectedProvider} · ${model} replays on reconnect`);
+  const chooseModel = async (name: string) => {
+    if (!provider) return;
+    setModel(name);
+    if (await queueIfOffline('provider_switch', { provider, model: name })) {
+      setActiveProviderModel(provider, name);
+      toast(`Offline: switching to ${provider} · ${name} when reconnected`, 'attention');
       return;
     }
     try {
-      await providersApi.switch(selectedProvider, model);
-      setActiveProviderModel(selectedProvider, model);
-      Alert.alert('Provider switched', `${selectedProvider} · ${model}`);
+      await providersApi.switch(provider, name);
+      setActiveProviderModel(provider, name);
+      toast(`Now using ${provider} · ${name}`, 'ok');
     } catch (e) {
-      Alert.alert('Switch failed', String(e));
+      toast(`Couldn't switch: ${e instanceof Error ? e.message : String(e)}`, 'danger');
     }
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <View style={{ padding: spacing.base }}>
-          {[1, 2, 3].map(i => (
-            <Skeleton key={i} height={80} style={{ marginBottom: spacing.sm }} />
-          ))}
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <ErrorState message={error} onRetry={load} />
-      </SafeAreaView>
-    );
-  }
-
-  if (providers.length === 0) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <EmptyState title="No providers" message="No LLM providers configured" />
-      </SafeAreaView>
-    );
-  }
-
-  const renderProvider = ({ item }: { item: ProviderInfo }) => {
-    const isSelected = selectedProvider === item.name;
-    return (
-      <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <View style={{ flex: 1 }}>
-            <Text variant="base" style={{ fontWeight: fontWeights.medium }}>
-              {item.name}
-            </Text>
-            {item.requires && (
-              <Text variant="xs" style={{ color: colors.ink3, marginTop: 2 }}>
-                Requires: {item.requires}
-              </Text>
-            )}
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-            {item.configured && <Chip label="✓ Ready" tone="ok" />}
-            {isSelected && <Chip label="Selected" tone="accent" />}
-            <Button
-              title={isSelected ? 'Selected' : 'Select'}
-              variant={isSelected ? 'ghost' : 'primary'}
-              disabled={isSelected || !item.configured}
-              onPress={() => selectProvider(item.name)}
-            />
-          </View>
-        </View>
-        {isSelected && (
-          <View style={{ marginTop: spacing.sm, paddingTop: spacing.xs }}>
-            <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.xs, fontVariant: ['tabular-nums'] }}>
-              {loadingModels ? 'Loading models…' : `Models (${models.length})`}
-            </Text>
-            {models.map(m => (
-              <Pressable
-                key={m}
-                onPress={() => selectModel(m)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: selectedModel === m }}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                  paddingVertical: spacing.md, minHeight: 44,
-                  borderTopWidth: 1, borderTopColor: colors.hairline,
-                }}
-              >
-                <Text variant="sm" style={{ color: selectedModel === m ? colors.accent.ink : colors.ink, fontWeight: selectedModel === m ? fontWeights.medium : fontWeights.regular }}>
-                  {m}
-                </Text>
-                {selectedModel === m && <Chip label="Active" tone="accent" />}
-              </Pressable>
-            ))}
-            {!loadingModels && models.length === 0 && (
-              <Text variant="xs" style={{ color: colors.ink3 }}>No models available</Text>
-            )}
-          </View>
-        )}
-      </Card>
-    );
-  };
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-      {activeProvider && activeModel && (
-        <View style={{ padding: spacing.base, paddingBottom: 0 }}>
-          <Panel title="Current" right={<StatusIcon status="done" label="Active" showLabel size="xs" />}>
-            <Text variant="base" style={{ fontWeight: fontWeights.semibold, fontFamily: fonts.mono }}>
-              {activeProvider} · {activeModel}
-            </Text>
-          </Panel>
-        </View>
-      )}
-      <FlatList
-        data={providers}
-        keyExtractor={item => item.name}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
-        contentContainerStyle={{ padding: spacing.base }}
-        renderItem={renderProvider}
-      />
-    </SafeAreaView>
+  const header = (
+    <PageHeader title="Provider and model" back={navigation.canGoBack() ? { label: 'Back', onPress: () => navigation.goBack() } : undefined}
+      state={[activeProvider && activeModel ? { text: `${activeProvider} · ${activeModel}` } : { text: 'Nothing selected', tone: 'quiet' }]} />
   );
+
+  let body: React.ReactNode;
+  if (loading) body = <View style={styles.content}>{[1, 2, 3].map(i => <Skeleton key={i} height={48} />)}</View>;
+  else if (error) body = <ErrorState message={error} onRetry={() => void load()} />;
+  else if (!providers.length) body = <EmptyState title="No providers" message="Configure a provider key (or Ollama) on the computer running mucli." />;
+  else {
+    body = (
+      <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}>
+        <Text variant="label" tone="ink2" accessibilityRole="header">Provider</Text>
+        <Rows>
+          {providers.map(p => (
+            <Row key={p.name} testID={`provider-${p.name}`} selected={p.name === provider} status={p.name === provider ? 'done' : undefined}
+              title={p.name} sub={p.configured ? 'Ready' : `Needs ${p.requires || 'configuration'}`}
+              onPress={p.configured ? () => chooseProvider(p.name) : undefined} />
+          ))}
+        </Rows>
+        {provider ? (
+          <>
+            <Text variant="label" tone="ink2" accessibilityRole="header">Model</Text>
+            <Rows empty={loadingModels ? 'Loading models…' : 'No models available'}>
+              {loadingModels ? [] : models.map(m => (
+                <Row key={m} testID={`model-${m}`} selected={m === model} status={m === model ? 'done' : undefined} title={m} onPress={() => void chooseModel(m)} />
+              ))}
+            </Rows>
+          </>
+        ) : null}
+      </ScrollView>
+    );
+  }
+  return <View style={{ flex: 1 }} testID="providers-screen">{header}{body}</View>;
 }
+
+const styles = StyleSheet.create({
+  content: { padding: spacing.base, gap: spacing.sm, paddingBottom: spacing['2xl'] },
+});

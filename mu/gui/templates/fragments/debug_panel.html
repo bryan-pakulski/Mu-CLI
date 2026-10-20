@@ -138,7 +138,7 @@
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + f.id"></span>
-                        <template x-for="tag in (f.tags || [])" :key="tag">
+                        <template x-for="(tag, ti) in (f.tags || [])" :key="ti">
                             <span class="tag w-chip" data-variant="meta" x-text="tag"></span>
                         </template>
                     </div>
@@ -149,7 +149,7 @@
     </section>
 
     <!-- footnote -->
-    <div class="panel-footnote" x-show="$store.debug.loaded">
+    <div class="panel-footnote" x-show="$store.debug.loaded && $store.debug.scratchpadCount">
         <span x-text="$store.debug.scratchpadCount + ' scratchpad entries'"></span>
     </div>
 

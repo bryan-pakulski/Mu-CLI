@@ -83,8 +83,10 @@ _SECRET_BASENAMES = ("id_rsa", "id_rsa.*", "id_ed25519", "id_ed25519.*", "id_ecd
                      "*.pem", "*.key", "*.pfx", "*.p12", "*.jks", "*.keystore", ".env", ".env.*",
                      "credentials*.json", "service-account*.json", "service_account*.json", "gcp-key*.json")
 # System trust stores and package trees ship certificates and test keys; they are not user secrets.
-SCAN_IGNORE = ("/etc/ssl/*", "/etc/pki/*", "/etc/ca-certificates/*", "/etc/ssh/ssh_config", "/etc/ssh/ssh_config.d/*",
-               "/etc/ssh/sshd_config", "/etc/ssh/sshd_config.d/*", "/etc/ssh/moduli", "*.pub",
+# The scan lists directories as well as files: a config directory itself is not key material.
+SCAN_IGNORE = ("/etc/ssl/*", "/etc/pki/*", "/etc/ca-certificates/*", "/etc/ssh/ssh_config", "/etc/ssh/ssh_config.d",
+               "/etc/ssh/ssh_config.d/*", "/etc/ssh/sshd_config", "/etc/ssh/sshd_config.d", "/etc/ssh/sshd_config.d/*",
+               "/etc/ssh/moduli", "*.pub",
                "*/site-packages/*", "*/dist-packages/*", "*/node_modules/*", "/root/.rustup/*",
                "/root/.nvm/versions/*", "/root/.sdkman/candidates/*", "/root/.pyenv/versions/*",
                "/root/.local/lib/*", "/root/go/pkg/*", "/root/.cargo/registry/*", "/root/.cargo/git/*")
@@ -1038,19 +1040,30 @@ def _job_lock(job: Any):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+SYSBOX_MANAGER_SOCKET = "/run/sysbox/sysmgr.sock"
+
+
 def sysbox_available(docker: Optional[Docker] = None) -> bool:
+    """Sysbox is registered with Docker and, for a local daemon, its manager is running (a
+    registered runtime whose sysbox-mgr is stopped fails every container at create time)."""
     from mu.container.hardware import _docker_runtimes
     try:
-        return "sysbox-runc" in _docker_runtimes((docker or Docker()).runner)
+        if "sysbox-runc" not in _docker_runtimes((docker or Docker()).runner):
+            return False
     except Exception:  # noqa: BLE001 - detection is best effort
         return False
+    host = os.environ.get("DOCKER_HOST", "")
+    if host and not host.startswith("unix://"):
+        return True  # a remote daemon: its manager socket isn't visible from here
+    return os.path.exists(SYSBOX_MANAGER_SOCKET)
 
 
-SYSBOX_MESSAGE = ("This job needs Docker-in-Docker, which requires Sysbox. Install it (see Settings → Build environments), "
-                  "then retry.")
+SYSBOX_MESSAGE = ("This job needs Docker-in-Docker, which requires Sysbox, installed and running. Install or start it "
+                  "(see Settings → Build environments), then retry.")
 SYSBOX_GUIDANCE = [
     "Install Sysbox CE for your distribution (https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md).",
     'Make sure /etc/docker/daemon.json lists the runtime: {"runtimes": {"sysbox-runc": {"path": "/usr/bin/sysbox-runc"}}}.',
+    "Start the Sysbox service (sudo systemctl enable --now sysbox) so its manager is running.",
     "Restart Docker (sudo systemctl restart docker), then retry the job. mucli never installs Sysbox itself.",
 ]
 

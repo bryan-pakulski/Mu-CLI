@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { WorkspacePathField } from './WorkspacePathField';
 import { fontSizes, fontWeights, radii, spacing, touchTarget, typography } from '../theme/tokens';
-import { ModalFrame, Pressable, Text, Icon } from '../ui';
+import { ModalFrame, Pressable, Text, Icon, InkDrop } from '../ui';
 import { useGlass } from '../ui/Glass';
 
 export type WorkspaceSettingsSheetProps = {
@@ -105,7 +105,7 @@ export function WorkspaceSettingsSheet({
           contentContainerStyle={[styles.content, { paddingBottom: spacing['4xl'] }]}
         >
           {loading ? (
-            <ActivityIndicator color={colors.accent.ink} style={styles.loader} />
+            <View style={styles.loader}><InkDrop /></View>
           ) : (
             <>
               <Text variant="xs" accessibilityRole="header" style={[styles.sectionLabel, { color: colors.ink3 }]}>Attached</Text>
@@ -165,7 +165,7 @@ export function WorkspaceSettingsSheet({
             style={[styles.saveButton, { backgroundColor: canSave ? colors.accent.ink : colors.raised, borderColor: canSave ? colors.accent.ink : colors.hairline }]}
           >
             {saving ? (
-              <ActivityIndicator color={colors.onInk} />
+              <InkDrop />
             ) : (
               <Text style={{ color: canSave ? colors.onInk : colors.ink3, fontWeight: fontWeights.semibold }}>Save workspace</Text>
             )}

@@ -882,6 +882,67 @@ async def get_job_evidence(job_id: str, file: str, request: Request):
     })
 
 
+def _check_run_artifacts(request: Request, job_id: str):
+    from mu.jobs.core.artifacts import artifacts_for
+    return artifacts_for(_job_or_404(_service(request), job_id))
+
+
+@router.get("/{job_id}/checks/{run}/artifacts")
+async def list_check_artifacts(job_id: str, run: int, request: Request):
+    """Everything browsable for one checks run (mu/jobs/check_artifacts.py): suite output,
+    JUnit reports and the files the suites produced."""
+    from mu.jobs.check_artifacts import run_listing
+    art = _check_run_artifacts(request, job_id)
+    try:
+        return run_listing(art, run)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="checks run not found") from exc
+
+
+@router.get("/{job_id}/checks/{run}/preview")
+async def preview_check_artifact(job_id: str, run: int, path: str, request: Request):
+    """What the artifact viewer shows for one file (text, JUnit cases, packets, …)."""
+    import asyncio
+    from mu.jobs.check_artifacts import build_preview, resolve
+    art = _check_run_artifacts(request, job_id)
+    try:
+        entry = resolve(art, run, path)
+    except (FileNotFoundError, ValueError):
+        entry = None
+    if entry is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    return await asyncio.to_thread(build_preview, entry)
+
+
+@router.get("/{job_id}/checks/{run}/files/{path:path}")
+async def get_check_artifact(job_id: str, run: int, path: str, request: Request):
+    """One artifact file. Artifacts come from code under test: images display inline, an
+    HTML report only as a sandboxed document with no scripts (?view=1, for the viewer's
+    frame, with its CSS/images beside it), everything else as a download."""
+    from fastapi.responses import FileResponse
+    from mu.jobs.check_artifacts import media_type, resolve
+    art = _check_run_artifacts(request, job_id)
+    try:
+        entry = resolve(art, run, path)
+    except (FileNotFoundError, ValueError):
+        entry = None
+    if entry is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    name = os.path.basename(entry["path"])
+    kind = entry["kind"]
+    view = request.query_params.get("view") == "1"
+    mt = media_type(name, kind)
+    inline = kind == "image" or name.lower().endswith(".css") or (view and kind in ("html", "log", "text", "json", "csv", "xml", "junit"))
+    if kind == "html" and not view:
+        mt = "application/octet-stream"
+    return FileResponse(entry["full"], media_type=mt, headers={
+        "Content-Disposition": f'{"inline" if inline else "attachment"}; filename="{re.sub(r"[^A-Za-z0-9._-]", "_", name)}"',
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; sandbox",
+        "Cache-Control": "private, max-age=300",
+    })
+
+
 @router.get("/{job_id}/receipt")
 async def get_job_receipt(job_id: str, request: Request):
     service = _service(request)

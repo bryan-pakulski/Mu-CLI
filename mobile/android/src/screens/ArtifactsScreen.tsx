@@ -1,55 +1,50 @@
+// Session files (web artifacts_panel.html): visualizations and files the agent published, and your
+// uploads, in one place. Visualizations open in a hardened in-app viewer; files download with this
+// phone's device token and go to the share sheet (a browser has no token, so it would be asked to
+// pair).
+
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, FlatList, Modal, RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppState, StyleSheet, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { WebView } from 'react-native-webview';
-import { ArtifactDescriptor, artifactsApi } from '../api/artifacts';
+import { artifactsApi, type ArtifactDescriptor } from '../api/artifacts';
+import { ApiError, baseUrl } from '../api/client';
 import { openExternalUrl } from '../api/urlSafety';
+import { shareServerFile } from '../api/artifactDownload';
+import { authHeaders } from '../api/auth';
+import { useRoute } from '@react-navigation/native';
 import { attachmentsApi, type AttachmentDescriptor, type PickedDocument } from '../api/attachments';
+import { PanelPage, PanelSection } from '../components/chat/PanelPage';
 import { useConnectionStore } from '../store/connection';
-import { useTheme } from '../theme/ThemeContext';
-import { fontSizes, fontWeights, paperColors, radii, spacing, touchTarget } from '../theme/tokens';
-import { EmptyState, ModalFrame, Pressable, Text, Icon } from '../ui';
+import { paperColors, spacing } from '../theme/tokens';
+import { IconButton, PrimaryPill, Row, Sheet, Text, useServerActions, useToast } from '../ui';
 
-type UnifiedItem =
-  | { kind: 'visualization'; artifact: ArtifactDescriptor }
-  | { kind: 'model'; artifact: ArtifactDescriptor }
-  | { kind: 'upload'; attachment: AttachmentDescriptor };
-
-function formatBytes(value: number): string {
+export function formatBytes(value: number): string {
   if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${value} B`;
 }
 
 export function ArtifactsScreen() {
-  const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
+  const toast = useToast();
+  const actions = useServerActions();
   const sessionName = useConnectionStore(state => state.activeSessionName);
-
   const [artifacts, setArtifacts] = useState<ArtifactDescriptor[]>([]);
   const [uploads, setUploads] = useState<AttachmentDescriptor[]>([]);
-  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [viewingArtifact, setViewingArtifact] = useState<ArtifactDescriptor | null>(null);
+  // Chat's artifact strip opens a visualization here: { view: artifact_id }.
+  const route = useRoute<any>();
+  const viewId: string | undefined = route.params?.view;
 
   // Stable exact URL the artifact WebView is allowed to load (nav gate).
-  const artifactUri = viewingArtifact
-    ? artifactsApi.viewUrl(sessionName as string, viewingArtifact.artifact_id)
-    : '';
+  const artifactUri = viewingArtifact && sessionName ? artifactsApi.viewUrl(sessionName, viewingArtifact.artifact_id) : '';
 
   const load = useCallback(async () => {
-    if (!sessionName) {
-      setArtifacts([]);
-      setUploads([]);
-      return;
-    }
+    if (!sessionName) { setArtifacts([]); setUploads([]); return; }
     try {
-      const [artRes, attRes] = await Promise.all([
-        artifactsApi.list(sessionName),
-        attachmentsApi.list(sessionName),
-      ]);
+      const [artRes, attRes] = await Promise.all([artifactsApi.list(sessionName), attachmentsApi.list(sessionName)]);
       setArtifacts(artRes.artifacts || []);
       setUploads(attRes.attachments || []);
     } catch {
@@ -57,439 +52,151 @@ export function ArtifactsScreen() {
     }
   }, [sessionName]);
 
+  useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    void load();
-  }, [load]);
-
+    if (!viewId) return;
+    const target = artifacts.find(a => a.artifact_id === viewId);
+    if (target) setViewingArtifact(target);
+  }, [viewId, artifacts]);
   useEffect(() => {
-    const appState = AppState.addEventListener('change', state => {
-      if (state === 'active') void load();
-    });
+    const appState = AppState.addEventListener('change', state => { if (state === 'active') void load(); });
     return () => appState.remove();
   }, [load]);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
+  const [sharing, setSharing] = useState<string | null>(null);
+  const download = (url: string, name: string, mimeType?: string) => {
+    setSharing(name);
+    shareServerFile(url, name, mimeType)
+      .catch(error => toast(`Couldn\u2019t download ${name}: ${error instanceof Error ? error.message : String(error)}`, 'danger'))
+      .finally(() => setSharing(null));
   };
 
-  const removeArtifact = (artifact: ArtifactDescriptor) => {
-    if (!sessionName) return;
-    Alert.alert('Delete artifact?', artifact.name, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await artifactsApi.remove(sessionName, artifact.artifact_id);
-          void load();
-        },
-      },
-    ]);
-  };
-
-  const removeUpload = (item: AttachmentDescriptor) => {
-    if (!sessionName) return;
-    Alert.alert('Delete upload?', item.name, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await attachmentsApi.remove(sessionName, item.attachment_id);
-          void load();
-        },
-      },
-    ]);
+  const confirmDelete = async (title: string, name: string, run: () => Promise<unknown>) => {
+    if (!(await actions.ask({ id: 'delete', label: 'Delete', danger: true, confirm: `${title}\n${name}` }))) return;
+    try {
+      await run();
+      toast(`Deleted ${name}`, 'ok');
+    } catch (error) {
+      // Already gone on the server is fine; anything else is reported.
+      if (!(error instanceof ApiError && error.status === 404)) {
+        toast(`Couldn\u2019t delete ${name}: ${error instanceof Error ? error.message : String(error)}`, 'danger');
+      }
+    }
+    void load();
   };
 
   const pickFiles = async () => {
     if (!sessionName) return;
-    const result = await DocumentPicker.getDocumentAsync({
-      type: '*/*',
-      multiple: true,
-      copyToCacheDirectory: true,
-    });
+    const result = await DocumentPicker.getDocumentAsync({ type: '*/*', multiple: true, copyToCacheDirectory: true });
     if (result.canceled) return;
     setUploading(true);
     try {
-      for (const asset of result.assets) {
-        await attachmentsApi.upload(sessionName, asset as PickedDocument);
-      }
+      for (const asset of result.assets) await attachmentsApi.upload(sessionName, asset as PickedDocument);
       await load();
     } catch (error) {
-      Alert.alert('Upload failed', String(error));
+      toast(`Upload failed: ${String(error)}`, 'danger');
     } finally {
       setUploading(false);
     }
   };
 
-  // Build unified list: visualizations first, then model artifacts, then uploads
   const visualizations = artifacts.filter(a => a.kind === 'visualization');
   const modelArtifacts = artifacts.filter(a => a.kind !== 'visualization');
-  const totalCount = visualizations.length + modelArtifacts.length + uploads.length;
-
-  const sections: { title: string; subtitle: string; count: number }[] = [
-    { title: 'Visualizations', subtitle: 'Interactive HTML published by the agent', count: visualizations.length },
-    { title: 'Model artifacts', subtitle: 'Files published by the agent', count: modelArtifacts.length },
-    { title: 'File uploads', subtitle: 'Your uploaded source files for this session', count: uploads.length },
-  ];
-
-  const items: (UnifiedItem | { kind: 'header'; title: string; subtitle: string; count: number })[] = [
-    ...visualizations.map(a => ({ kind: 'visualization' as const, artifact: a })),
-    ...modelArtifacts.map(a => ({ kind: 'model' as const, artifact: a })),
-    ...uploads.map(a => ({ kind: 'upload' as const, attachment: a })),
-  ];
-
-  const renderItem = ({ item }: { item: UnifiedItem | { kind: 'header'; title: string; subtitle: string; count: number } }) => {
-    if (item.kind === 'header') {
-      return (
-        <View style={styles.sectionHeader}>
-          <View style={{ flex: 1 }}>
-            <Text variant="xs" style={{ fontWeight: fontWeights.semibold, color: colors.ink3 }}>
-              {item.title}
-            </Text>
-            <Text variant="xs" dim style={{ marginTop: 2 }}>
-              {item.subtitle}
-            </Text>
-          </View>
-          <View style={[styles.countBadge, { backgroundColor: colors.sunken }]}>
-            <Text variant="xs" style={{ fontWeight: fontWeights.medium, color: colors.ink2, fontVariant: ['tabular-nums'] }}>{item.count}</Text>
-          </View>
-        </View>
-      );
-    }
-
-    if (item.kind === 'visualization') {
-      const a = item.artifact;
-      return (
-        <Pressable
-          onPress={() => setViewingArtifact(a)}
-          style={styles.row}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-            <Icon name="bar-chart-3" size="md" color={colors.ink2} />
-          </View>
-          <View style={styles.rowCopy}>
-            <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
-              {a.title || a.name}
-            </Text>
-            <Text variant="xs" dim numberOfLines={1}>
-              {formatBytes(a.size)} · visualization
-            </Text>
-          </View>
-          <Pressable
-            onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, a.artifact_id))}
-            style={styles.rowAction}
-            hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
-            accessibilityRole="button"
-            accessibilityLabel="Download visualization"
-          >
-            <Icon name="download" size="md" color={colors.ink3} />
-          </Pressable>
-          <Pressable accessibilityLabel="Delete artifact"
-            onPress={() => removeArtifact(a)}
-            style={styles.rowAction}
-            hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
-          >
-            <Icon name="trash-2" size="md" color={colors.danger.ink} />
-          </Pressable>
-        </Pressable>
-      );
-    }
-
-    if (item.kind === 'model') {
-      const a = item.artifact;
-      return (
-        <Pressable
-          onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, a.artifact_id))}
-          style={styles.row}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-            <Icon name="paperclip" size="md" color={colors.ink2} />
-          </View>
-          <View style={styles.rowCopy}>
-            <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
-              {a.title || a.name}
-            </Text>
-            <Text variant="xs" dim numberOfLines={1}>
-              {formatBytes(a.size)} · {a.mime_type || 'file'}
-            </Text>
-          </View>
-          <Pressable accessibilityLabel="Download artifact"
-            onPress={() => sessionName && openExternalUrl(artifactsApi.downloadUrl(sessionName, a.artifact_id))}
-            style={styles.rowAction}
-            hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
-          >
-            <Icon name="download" size="md" color={colors.ink3} />
-          </Pressable>
-          <Pressable accessibilityLabel="Delete artifact"
-            onPress={() => removeArtifact(a)}
-            style={styles.rowAction}
-            hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
-          >
-            <Icon name="trash-2" size="md" color={colors.danger.ink} />
-          </Pressable>
-        </Pressable>
-      );
-    }
-
-    // upload
-    const u = item.attachment;
-    return (
-      <Pressable
-        onPress={() => sessionName && openExternalUrl(attachmentsApi.downloadUrl(sessionName, u.attachment_id))}
-        style={styles.row}
-        activeOpacity={0.7}
-      >
-        <View style={[styles.rowIcon, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-          <Icon name="cloud-upload" size="md" color={colors.ink2} />
-        </View>
-        <View style={styles.rowCopy}>
-          <Text variant="sm" style={{ fontWeight: fontWeights.semibold }} numberOfLines={1}>
-            {u.name}
-          </Text>
-          <Text variant="xs" dim numberOfLines={1}>
-            {formatBytes(u.size)} · {u.mime_type || 'file'}
-          </Text>
-        </View>
-        <Pressable accessibilityLabel="Download upload"
-          onPress={() => sessionName && openExternalUrl(attachmentsApi.downloadUrl(sessionName, u.attachment_id))}
-          style={styles.rowAction}
-          hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
-        >
-          <Icon name="download" size="md" color={colors.ink3} />
-        </Pressable>
-        <Pressable accessibilityLabel="Delete upload"
-          onPress={() => removeUpload(u)}
-          style={styles.rowAction}
-          hitSlop={{ top: spacing.sm, bottom: spacing.sm, left: spacing.sm, right: spacing.sm }}
-        >
-          <Icon name="trash-2" size="md" color={colors.danger.ink} />
-        </Pressable>
-      </Pressable>
-    );
-  };
-
-  // Build flat list with section headers interleaved
-  type FlatItem = UnifiedItem | { kind: 'header'; title: string; subtitle: string; count: number };
-  const flatData: FlatItem[] = [];
-  let sectionIdx = 0;
-  if (visualizations.length > 0) {
-    flatData.push({ kind: 'header', ...sections[0] });
-    visualizations.forEach(a => flatData.push({ kind: 'visualization', artifact: a }));
-    sectionIdx++;
-  }
-  if (modelArtifacts.length > 0) {
-    flatData.push({ kind: 'header', ...sections[1] });
-    modelArtifacts.forEach(a => flatData.push({ kind: 'model', artifact: a }));
-    sectionIdx++;
-  }
-  if (uploads.length > 0) {
-    flatData.push({ kind: 'header', ...sections[2] });
-    uploads.forEach(a => flatData.push({ kind: 'upload', attachment: a }));
-    sectionIdx++;
-  }
+  const total = visualizations.length + modelArtifacts.length + uploads.length;
+  const fileActions = (label: string, onDownload: () => void, onDelete: () => void) => (
+    <View style={styles.actions}>
+      <IconButton icon="download" label={`Download ${label}`} onPress={onDownload} />
+      <IconButton icon="trash-2" label={`Delete ${label}`} onPress={onDelete} />
+    </View>
+  );
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: 'transparent' }}>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.hairline, paddingTop: insets.top + spacing.xs }]}>
-        <Text variant="lg" style={{ fontWeight: fontWeights.semibold }}>Session files</Text>
-        <View style={styles.headerActions}>
-          <Pressable
-            onPress={pickFiles}
-            disabled={uploading || !sessionName}
-            style={[styles.uploadBtn, { backgroundColor: colors.accent.ink, opacity: uploading || !sessionName ? 0.5 : 1 }]}
-          >
-            {uploading ? (
-              <ActivityIndicator color={colors.onInk} size="small" />
-            ) : (
-              <Icon name="cloud-upload" size="md" color={colors.onInk} />
-            )}
-            <Text variant="xs" style={{ color: colors.onInk, fontWeight: fontWeights.semibold, marginLeft: spacing.xs }}>
-              {uploading ? 'Uploading' : 'Upload'}
-            </Text>
-          </Pressable>
-        </View>
-      </View>
+    <PanelPage testID="artifacts-screen" title="Session files"
+      state={[{ text: `${total} files` }, uploading ? { text: 'uploading…', tone: 'quiet' } : null, sharing ? { text: `downloading ${sharing}…`, tone: 'quiet' } : null]}
+      empty={total === 0 ? { title: 'No files yet', message: 'Agent outputs, visualizations and your uploads will appear here in one place.' } : null}
+      refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }}
+      overlay={<>
+        {sessionName ? <PrimaryPill label={uploading ? 'Uploading…' : 'Upload'} icon="cloud-upload" onPress={() => { if (!uploading) void pickFiles(); }} testID="artifacts-upload" /> : null}
+        {actions.element}
+      </>}>
+      {visualizations.length ? (
+        <PanelSection title="Visualizations" count={visualizations.length}>
+          <Text variant="caption" tone="ink3">Interactive HTML published by the agent</Text>
+          {visualizations.map(a => (
+            <Row key={a.artifact_id} testID={`artifact-${a.artifact_id}`} title={a.title || a.name} sub={`${formatBytes(a.size)} · visualization`}
+              onPress={() => setViewingArtifact(a)}
+              actions={fileActions('visualization', () => sessionName && download(artifactsApi.downloadUrl(sessionName, a.artifact_id), a.name, a.mime_type),
+                () => sessionName && void confirmDelete('Delete artifact?', a.name, () => artifactsApi.remove(sessionName, a.artifact_id)))} />
+          ))}
+        </PanelSection>
+      ) : null}
+      {modelArtifacts.length ? (
+        <PanelSection title="Model artifacts" count={modelArtifacts.length}>
+          <Text variant="caption" tone="ink3">Files published by the agent</Text>
+          {modelArtifacts.map(a => (
+            <Row key={a.artifact_id} testID={`artifact-${a.artifact_id}`} title={a.title || a.name} sub={`${formatBytes(a.size)} · ${a.mime_type || 'file'}`}
+              onPress={() => sessionName && download(artifactsApi.downloadUrl(sessionName, a.artifact_id), a.name, a.mime_type)}
+              actions={fileActions('artifact', () => sessionName && download(artifactsApi.downloadUrl(sessionName, a.artifact_id), a.name, a.mime_type),
+                () => sessionName && void confirmDelete('Delete artifact?', a.name, () => artifactsApi.remove(sessionName, a.artifact_id)))} />
+          ))}
+        </PanelSection>
+      ) : null}
+      {uploads.length ? (
+        <PanelSection title="File uploads" count={uploads.length}>
+          <Text variant="caption" tone="ink3">Your uploaded source files for this session</Text>
+          {uploads.map(u => (
+            <Row key={u.attachment_id} testID={`upload-${u.attachment_id}`} title={u.name} sub={`${formatBytes(u.size)} · ${u.mime_type || 'file'}`}
+              onPress={() => sessionName && download(attachmentsApi.downloadUrl(sessionName, u.attachment_id), u.name, u.mime_type)}
+              actions={fileActions('upload', () => sessionName && download(attachmentsApi.downloadUrl(sessionName, u.attachment_id), u.name, u.mime_type),
+                () => sessionName && void confirmDelete('Delete upload?', u.name, () => attachmentsApi.remove(sessionName, u.attachment_id)))} />
+          ))}
+        </PanelSection>
+      ) : null}
 
-      {/* List */}
-      <FlatList
-        data={flatData}
-        keyExtractor={(item, index) => {
-          if (item.kind === 'header') return `header-${item.title}`;
-          if (item.kind === 'visualization' || item.kind === 'model') return `art-${item.artifact.artifact_id}`;
-          return `att-${item.attachment.attachment_id}`;
-        }}
-        renderItem={renderItem}
-        contentContainerStyle={{ paddingBottom: spacing['2xl'] }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent.ink} />}
-        ListEmptyComponent={
-          totalCount === 0 ? (
-            <EmptyState
-              icon="folder-open"
-              title="No files yet"
-              message="Agent outputs, visualizations, and your uploads will appear here in one place."
-            />
-          ) : null
-        }
-      />
-
-      {/* In-app visualization viewer */}
-      <ModalFrame transparent={false}
-        visible={viewingArtifact !== null}
-        animationType="fade"
-        presentationStyle="fullScreen"
-        statusBarTranslucent
-        onRequestClose={() => setViewingArtifact(null)}
-      >
-        <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-          <View style={[styles.visHeader, { borderBottomColor: colors.hairline }]}>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text variant="xs" dim style={{ fontWeight: fontWeights.semibold }}>
-                VISUALIZATION
-              </Text>
-              <Text numberOfLines={1} style={{ fontSize: fontSizes.base, fontWeight: fontWeights.semibold, color: colors.ink }}>
-                {viewingArtifact?.title || viewingArtifact?.name || ''}
-              </Text>
-            </View>
-            {sessionName && viewingArtifact && (
-              <Pressable
-                onPress={() => openExternalUrl(artifactsApi.downloadUrl(sessionName, viewingArtifact.artifact_id))}
-                style={[styles.iconButton, { backgroundColor: colors.sunken }]}
-                accessibilityRole="button"
-                accessibilityLabel="Download visualization"
-              >
-                <Icon name="download" size="md" color={colors.ink3} />
-              </Pressable>
-            )}
-            <Pressable
-              onPress={() => setViewingArtifact(null)}
-              style={[styles.closeButton, { backgroundColor: colors.sunken }]}
-              accessibilityRole="button"
-              accessibilityLabel="Close visualization"
-            >
-              <Icon name="x" size="lg" color={colors.ink} />
-            </Pressable>
-          </View>
-          {sessionName && viewingArtifact && (
-            <WebView
-              source={{ uri: artifactUri }}
-              style={{ flex: 1, backgroundColor: paperColors.raised }}
-              originWhitelist={['http://*', 'https://*']}
-              javaScriptEnabled
-              domStorageEnabled
-              cacheEnabled={false}
-              // Same hardening as VisualizationCard's InteractiveWebView: an
-              // artifact is untrusted active content — confine it to the exact
-              // backend URL, no cookies/file access, no mixed content.
-              incognito
-              sharedCookiesEnabled={false}
-              thirdPartyCookiesEnabled={false}
-              allowFileAccess={false}
-              allowUniversalAccessFromFileURLs={false}
-              javaScriptCanOpenWindowsAutomatically={false}
-              setSupportMultipleWindows={false}
-              mixedContentMode="never"
-              scrollEnabled
-              nestedScrollEnabled
-              showsVerticalScrollIndicator
-              showsHorizontalScrollIndicator
-              onShouldStartLoadWithRequest={(request) => {
-                if (request.url === artifactUri || request.url === 'about:blank') return true;
-                // Any other navigation attempt goes to the OS browser instead
-                // (http/https only — see openExternalUrl).
-                openExternalUrl(request.url);
-                return false;
-              }}
-            />
-          )}
-        </SafeAreaView>
-      </ModalFrame>
-    </SafeAreaView>
+      <Sheet visible={viewingArtifact !== null} onClose={() => setViewingArtifact(null)} title={viewingArtifact?.title || viewingArtifact?.name || 'Visualization'}
+        full scroll={false} closeLabel="Close visualization" testID="artifact-viewer"
+        headerRight={sessionName && viewingArtifact ? (
+          <IconButton icon="download" label="Download visualization" onPress={() => download(artifactsApi.downloadUrl(sessionName, viewingArtifact.artifact_id), viewingArtifact.name, viewingArtifact.mime_type)} />
+        ) : undefined}>
+        {sessionName && viewingArtifact ? (
+          <WebView
+            // The device token on the viewer's request (the page's scripts can't read it).
+            source={{ uri: artifactUri, headers: authHeaders(baseUrl()) }}
+            style={[styles.web, { backgroundColor: paperColors.raised }]}
+            originWhitelist={['http://*', 'https://*']}
+            javaScriptEnabled
+            domStorageEnabled
+            cacheEnabled={false}
+            // Same hardening as VisualizationCard's InteractiveWebView: an
+            // artifact is untrusted active content — confine it to the exact
+            // backend URL, no cookies/file access, no mixed content.
+            incognito
+            sharedCookiesEnabled={false}
+            thirdPartyCookiesEnabled={false}
+            allowFileAccess={false}
+            allowUniversalAccessFromFileURLs={false}
+            javaScriptCanOpenWindowsAutomatically={false}
+            setSupportMultipleWindows={false}
+            mixedContentMode="never"
+            scrollEnabled
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+            showsHorizontalScrollIndicator
+            onShouldStartLoadWithRequest={(request) => {
+              if (request.url === artifactUri || request.url === 'about:blank') return true;
+              // Any other navigation attempt goes to the OS browser instead
+              // (http/https only — see openExternalUrl).
+              void openExternalUrl(request.url);
+              return false;
+            }}
+          />
+        ) : null}
+      </Sheet>
+    </PanelPage>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.base,
-    paddingBottom: spacing.md,
-    borderBottomWidth: 1,
-  },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  uploadBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.sm,
-    minHeight: touchTarget,
-    borderRadius: radii.sm,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.base,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
-  countBadge: {
-    minWidth: 24,
-    height: 24,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 64,
-    paddingHorizontal: spacing.base,
-  },
-  rowIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowCopy: {
-    flex: 1,
-    marginLeft: spacing.md,
-  },
-  rowAction: {
-    width: touchTarget,
-    height: touchTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  visHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-  },
-  iconButton: {
-    width: touchTarget,
-    height: touchTarget,
-    borderRadius: radii.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeButton: {
-    width: touchTarget,
-    height: touchTarget,
-    borderRadius: radii.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  web: { flex: 1 },
 });

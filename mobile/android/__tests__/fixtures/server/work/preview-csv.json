@@ -1,0 +1,21 @@
+{
+  "bytes": 38,
+  "kind": "csv",
+  "name": "timings.csv",
+  "path": "artifacts/suite-1/timings.csv",
+  "rows": [
+    [
+      "test",
+      "seconds"
+    ],
+    [
+      "test_ok",
+      "0.1"
+    ],
+    [
+      "test_bad",
+      "0.2"
+    ]
+  ],
+  "truncated": false
+}

@@ -17,6 +17,11 @@ export interface ManagedContainer {
   egress_allow: string[];
   egress_deny: string[];
   network_name?: string;
+  worker_port?: number | string | null;
+  /** Non-finished jobs whose build environments snapshot this environment. */
+  jobs_using?: number;
+  /** Secret-scan blocks from job build environments (GET /api/containers). */
+  job_scan_blocks?: Array<{ job_id: string; binding: string; paths: string[] }>;
 }
 
 export interface ContainerGpuStats {
@@ -77,6 +82,8 @@ export interface ContainerTemplateSummary {
   description?: string;
   egress_allow?: string[];
   egress_deny?: string[];
+  job_setup?: string[];
+  jobs_using?: number;
 }
 
 export interface ContainerListing {
@@ -131,6 +138,11 @@ export const containersApi = {
     api.get<ContainerJob>(`/api/containers/jobs/${encodeURIComponent(jobId)}`, { query: { after } }),
   action: (name: string, action: 'start' | 'stop' | 'restart') =>
     api.post<Record<string, unknown>>(`/api/containers/${encodeURIComponent(name)}/actions/${action}`),
+  /** Attach / detach a session (the server rebinds the session to the environment). */
+  attach: (name: string, sessionName: string) =>
+    api.post<Record<string, unknown>>(`/api/containers/${encodeURIComponent(name)}/actions/attach`, { session_name: sessionName }),
+  detach: (name: string, sessionName: string) =>
+    api.post<Record<string, unknown>>(`/api/containers/${encodeURIComponent(name)}/actions/detach`, { session_name: sessionName }),
   remove: (name: string) =>
     api.delete<void>(`/api/containers/${encodeURIComponent(name)}`, { query: { force: true } }),
   snapshot: (name: string, templateName: string, description: string = '') =>
@@ -140,7 +152,7 @@ export const containersApi = {
     }),
   /** Edit a template's job fields (job setup, network allowlist, description); affects jobs started later. */
   patchTemplate: (name: string, body: { job_setup?: string[]; egress_allow?: string[]; description?: string }) =>
-    api.patch<ContainerTemplateSummary>(`/api/containers/templates/${encodeURIComponent(name)}`, body),
+    api.patch<{ ok: boolean; template: ContainerTemplateSummary }>(`/api/containers/templates/${encodeURIComponent(name)}`, body),
   removeTemplate: (name: string) =>
     api.delete<void>(`/api/container-templates/${encodeURIComponent(name)}`),
 };

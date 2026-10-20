@@ -8,16 +8,18 @@ import { StyleSheet } from 'react-native';
 import { act, render } from '@testing-library/react-native';
 import { ThemeProvider } from '../src/theme/ThemeContext';
 import { duskColors, paperColors } from '../src/theme/tokens';
-import { glass as glassTokens, glassEffect } from '../src/theme/wash.generated';
+import { DESTINATIONS } from '../src/theme/tokens';
+import { destination as destinationTokens, glassEffect } from '../src/theme/wash.generated';
 import { ApprovalCard, Card, markdownStyles } from '../src/ui';
 import {
   AmbientBackground,
+  GLASS_CLEAR,
   GLASS_MIN_ALPHA,
   TEXT_BEARING_LEVELS,
-  glassAlpha,
+  destinationArt,
+  glassFillAlpha,
   glassStyle,
   parseColor,
-  routeAmbient,
   stateTint,
 } from '../src/ui/Glass';
 
@@ -79,52 +81,62 @@ describe('no coloured side accents (G§3.4)', () => {
       for (const solid of [false, true]) {
         const quote = StyleSheet.flatten(markdownStyles(colors, 'chat', { solid }).blockquote);
         expect(quote.borderLeftWidth).toBe(0);
-        expect(quote.backgroundColor).toBe(solid ? colors.sunken : glassTokens[colors.name].subtle);
+        expect(quote.backgroundColor).toBe(solid ? colors.sunken : glassStyle('subtle', colors).backgroundColor);
       }
     }
   });
 });
 
-describe('glassStyle (G§3.3)', () => {
+describe('glassStyle (G§3.3, revision 2)', () => {
   const alphaOf = (style: { backgroundColor?: unknown }) => parseColor(String(style.backgroundColor)).a;
+  const rgbOf = (color: unknown) => { const { r, g, b } = parseColor(String(color)); return [r, g, b]; };
 
-  it('keeps every text-bearing level at or above the opacity floor in both themes', () => {
+  it('keeps every text-bearing level at or above the opacity floor at any strength', () => {
     expect(GLASS_MIN_ALPHA).toBe(glassEffect.min_alpha);
     for (const colors of [paperColors, duskColors]) {
       for (const level of TEXT_BEARING_LEVELS) {
-        expect(alphaOf(glassStyle(level, colors))).toBeGreaterThanOrEqual(glassEffect.min_alpha);
-        expect(alphaOf(glassStyle(level, colors, { flat: true }))).toBeGreaterThanOrEqual(glassEffect.min_alpha);
-        expect(glassAlpha(level, colors.name)).toBeGreaterThanOrEqual(glassEffect.min_alpha);
+        for (const strength of [0.01, 0.3, 0.6, 1, 5]) {
+          expect(alphaOf(glassStyle(level, colors, { strength }))).toBeGreaterThanOrEqual(glassEffect.min_alpha);
+          expect(glassFillAlpha(level, strength)).toBeGreaterThanOrEqual(glassEffect.min_alpha);
+        }
       }
     }
   });
 
-  it('uses the generated glass tokens: surface at level 1, strong at 2 and 3, subtle for insets', () => {
+  it('clears 12% per unit strength at level 1 and half that at levels 2 and 3', () => {
+    expect(glassFillAlpha(1, 0)).toBe(1);
+    expect(glassFillAlpha(1, 1)).toBeCloseTo(Math.max(GLASS_MIN_ALPHA, 1 - GLASS_CLEAR));
+    expect(glassFillAlpha(2, 1)).toBeCloseTo(Math.max(GLASS_MIN_ALPHA, 1 - GLASS_CLEAR / 2));
+    expect(glassFillAlpha(3, 0.5)).toBeGreaterThan(glassFillAlpha(1, 0.5));
+    expect(glassFillAlpha(1, 0.3)).toBeGreaterThan(glassFillAlpha(1, 0.9));
+  });
+
+  it('tints the theme surfaces: surface at level 1, raised at 2 and 3, sunken for insets', () => {
     for (const colors of [paperColors, duskColors]) {
-      const g = glassTokens[colors.name];
-      expect(glassStyle(1, colors).backgroundColor).toBe(g.surface);
-      expect(glassStyle(2, colors).backgroundColor).toBe(g.strong);
-      expect(glassStyle(3, colors).backgroundColor).toBe(g.strong);
-      expect(glassStyle('subtle', colors).backgroundColor).toBe(g.subtle);
-      expect(glassStyle(1, colors).borderColor).toBe(g.edge);
-      expect(glassStyle(1, colors).borderTopColor).toBe(g.border);
+      expect(rgbOf(glassStyle(1, colors).backgroundColor)).toEqual(rgbOf(colors.surface));
+      expect(rgbOf(glassStyle(2, colors).backgroundColor)).toEqual(rgbOf(colors.raised));
+      expect(rgbOf(glassStyle(3, colors).backgroundColor)).toEqual(rgbOf(colors.raised));
+      expect(rgbOf(glassStyle('subtle', colors).backgroundColor)).toEqual(rgbOf(colors.sunken));
+      expect(glassStyle(1, colors).borderColor).toBe(colors.hairline);
     }
   });
 
   it('only uses the subtle inset nested on glass, where the compounded opacity clears the floor', () => {
-    for (const colors of [paperColors, duskColors]) {
-      const parent = glassAlpha(1, colors.name);
-      const inset = glassAlpha('subtle', colors.name);
+    for (const strength of [0.3, 0.6, 1]) {
+      const parent = glassFillAlpha(1, strength);
+      const inset = glassFillAlpha('subtle', strength);
       expect(1 - (1 - parent) * (1 - inset)).toBeGreaterThanOrEqual(glassEffect.min_alpha);
     }
   });
 
-  it('falls back to solid surfaces with Reduce decoration', () => {
+  it('falls back to solid surfaces for palettes, Reduce decoration and strength 0', () => {
     for (const colors of [paperColors, duskColors]) {
-      expect(glassStyle(1, colors, { solid: true }).backgroundColor).toBe(colors.surface);
-      expect(glassStyle(2, colors, { solid: true }).backgroundColor).toBe(colors.raised);
-      expect(glassStyle(3, colors, { solid: true }).backgroundColor).toBe(colors.raised);
-      expect(glassStyle('subtle', colors, { solid: true }).backgroundColor).toBe(colors.sunken);
+      for (const options of [{ solid: true }, { strength: 0 }]) {
+        expect(glassStyle(1, colors, options).backgroundColor).toBe(colors.surface);
+        expect(glassStyle(2, colors, options).backgroundColor).toBe(colors.raised);
+        expect(glassStyle(3, colors, options).backgroundColor).toBe(colors.raised);
+        expect(glassStyle('subtle', colors, options).backgroundColor).toBe(colors.sunken);
+      }
       expect(stateTint(colors, 'attention', true)).toBe(colors.attention.wash);
     }
   });
@@ -152,6 +164,7 @@ describe('glassStyle (G§3.3)', () => {
 });
 
 describe('ApprovalCard on glass (G§9.9)', () => {
+  const rgbOf = (color: unknown) => { const { r, g, b } = parseColor(String(color)); return [r, g, b]; };
   const renderCard = () => render(
     <ThemeProvider statusBar={false}>
       <ApprovalCard toolName="write_file" description="Edit 2 files" target="src/app.py" remember={false}
@@ -171,7 +184,7 @@ describe('ApprovalCard on glass (G§9.9)', () => {
       expect(card[key]).toBeUndefined();
       expect(header[key]).toBeUndefined();
     }
-    expect(card.backgroundColor).toBe(glassTokens.paper.surface);
+    expect(rgbOf(card.backgroundColor)).toEqual(rgbOf(paperColors.surface));
     await act(async () => undefined);
   });
 
@@ -203,14 +216,13 @@ describe('ApprovalCard on glass (G§9.9)', () => {
 });
 
 describe('ambient wash (G§6.2)', () => {
-  it('maps screens to their wash', () => {
-    expect(routeAmbient('Chat')).toBe('dawn');
-    expect(routeAmbient('Work')).toBe('lagoon');
-    expect(routeAmbient('JobDetail')).toBe('lagoon');
-    expect(routeAmbient('Traces')).toBe('lagoon');
-    expect(routeAmbient('Containers')).toBe('meadow');
-    expect(routeAmbient('Settings')).toBe('dawn');
-    expect(routeAmbient(undefined)).toBe('dawn');
+  it('takes each destination scene from the design tokens', () => {
+    expect(DESTINATIONS.length).toBe(6);
+    for (const name of DESTINATIONS) {
+      expect(destinationArt(name)).toBe((destinationTokens as Record<string, { ambient: string }>)[name].ambient);
+    }
+    expect(destinationArt('chat')).toBe('dawn');
+    expect(destinationArt('environments')).toBe('meadow');
   });
 
   it('renders one fixed ambient image behind the app', async () => {

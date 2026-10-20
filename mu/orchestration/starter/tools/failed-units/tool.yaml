@@ -1,0 +1,17 @@
+id: sys.failed-units
+title: Failed systemd units
+summary: List units systemd reports as failed.
+category: diagnostics
+effect: read_only
+idempotent: true
+targets: {requires: [systemd]}
+privilege: {run_as: nobody}
+inputs: {type: object, properties: {}, additionalProperties: false}
+outputs:
+  type: object
+  properties:
+    failed: {type: array, items: {type: object, properties: {unit: {type: string}, description: {type: string}}}}
+    count: {type: integer}
+  required: [failed, count]
+implementation: {runtime: python3, entry: failed_units.py}
+limits: {timeout_s: 30, max_output_kb: 64}

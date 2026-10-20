@@ -1,14 +1,14 @@
 import React, { useMemo, useState } from 'react';
 
 const MUCLI_CONTAINER_HARDWARE_V1 = true;
-import { StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import type {
   ContainerDevice,
   ContainerHardwareCapabilities,
 } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, radii, spacing, touchTarget, fonts } from '../theme/tokens';
-import { Pressable, Text, Icon } from '../ui';
+import { Pressable, Text, TextField, Icon } from '../ui';
 
 interface Props {
   capabilities?: ContainerHardwareCapabilities | null;
@@ -147,7 +147,7 @@ export function ContainerHardwareSection({
         </View>
       ) : null}
 
-      <TextInput
+      <TextField
         value={deviceHost}
         onChangeText={value => {
           setDeviceHost(value);
@@ -156,17 +156,17 @@ export function ContainerHardwareSection({
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="/dev/video0"
-        placeholderTextColor={colors.ink3}
-        style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]}
+        accessibilityLabel="Host device path"
+        mono
       />
-      <TextInput
+      <TextField
         value={deviceTarget}
         onChangeText={setDeviceTarget}
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="Container path, e.g. /dev/video0"
-        placeholderTextColor={colors.ink3}
-        style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]}
+        accessibilityLabel="Container device path"
+        mono
       />
       <View style={styles.deviceActions}>
         <View style={styles.permissionChoices}>
@@ -238,7 +238,6 @@ const styles = StyleSheet.create({
   deviceRow: { minHeight: 56, borderRadius: radii.sm, paddingHorizontal: spacing.md, marginBottom: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   presets: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.sm },
   preset: { maxWidth: '48%', minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  input: { minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, fontSize: fontSizes.base, marginBottom: spacing.sm },
   deviceActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   permissionChoices: { flexDirection: 'row', gap: spacing.xs },
   addButton: { minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },

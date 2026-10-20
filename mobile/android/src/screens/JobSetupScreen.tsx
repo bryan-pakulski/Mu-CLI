@@ -1,18 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import {
   firstAttention, promptInitials, setupApi, stepStatus, type SetupAction, type SetupStep, type SetupVM,
 } from '../api/setup';
-import { DoctorPanel } from './JobDoctorScreen';
+import { DoctorPanel } from '../components/JobDoctorPanel';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { STATUS } from '../theme/status';
 import { fontWeights, fonts, spacing, toneInk, touchTarget } from '../theme/tokens';
-import { Banner, Button, Field, Loading, Meter, ModalFrame, Panel, Pre, Pressable, StatusIcon, Tabs, Text, TextField, useInterval, useToast } from '../ui';
+import { Banner, Button, Dialog, Field, Loading, Meter, PageHeader, Panel, Pre, Pressable, StatusIcon, Text, TextField, useInterval, useServerActions, useToast } from '../ui';
 
 export type JobSetupScreenProps = NativeStackScreenProps<RootStackParamList, 'JobSetup'>;
 
@@ -35,6 +34,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState('');
   const [dialog, setDialog] = useState<Dialog>(null);
+  const confirm = useServerActions();
 
   const load = useCallback(async (recheck = false) => {
     try {
@@ -76,11 +76,11 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
       void run(step, action);
     };
     if (action.confirm) {
-      Alert.alert(action.label, action.confirm, [{ text: 'Cancel', style: 'cancel' }, { text: 'Continue', onPress: go }]);
+      void confirm.ask({ id: action.id, label: action.label, confirm: action.confirm }).then(ok => { if (ok) go(); });
     } else {
       go();
     }
-  }, [navigation, run]);
+  }, [navigation, run, confirm]);
 
   const finish = useCallback(async () => {
     try {
@@ -92,42 +92,42 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
     }
   }, [navigation, toast]);
 
-  const tabs = (
-    <Tabs accessibilityLabel="Setup" value={tab} onChange={id => setTab(id as 'checklist' | 'doctor')}
-      items={[{ id: 'checklist', label: 'Checklist', testID: 'job-setup-tab-checklist' }, { id: 'doctor', label: 'Doctor', testID: 'job-setup-tab-doctor' }]} />
+  const header = (
+    <PageHeader title="Setup" back={{ label: 'Work', onPress: () => navigation.goBack() }} testID="job-setup-header"
+      state={vm ? [vm.can_finish ? { text: 'All set', tone: 'ok' } : { text: `${vm.done} of ${vm.total} done` }, vm.blocking.length ? { text: `to do: ${vm.blocking.join(', ')}`, tone: 'attention' } : null] : undefined}
+      tabs={[{ key: 'checklist', label: 'Checklist' }, { key: 'doctor', label: 'Doctor' }]} tab={tab} onTab={key => setTab(key as 'checklist' | 'doctor')} />
   );
   if (tab === 'doctor') {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
+      <View style={styles.root}>
+        {header}
         <ScrollView contentContainerStyle={styles.content} testID="job-setup-doctor-tab">
-          <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Setup</Text>
-          {tabs}
           <DoctorPanel onOpenChecklist={() => setTab('checklist')} />
         </ScrollView>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!vm) {
     return (
-      <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
+      <View style={styles.root}>
+        {header}
         {error ? <View style={styles.content}><Banner tone="danger" glyph="✗" title="Could not load setup" role="alert"><Text variant="xs">{error}</Text></Banner>
           <Button label="Try again" onPress={() => void load()} /></View> : <Loading label="Checking your machine…" />}
-      </SafeAreaView>
+      </View>
     );
   }
 
   const job = vm.job;
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
+    <View style={styles.root}>
+      {header}
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" testID="job-setup">
-        <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Setup</Text>
-        {tabs}
         <View style={styles.progress}>
           <View style={{ flex: 1 }}><Meter value={vm.done} max={vm.total || 1} tone="ok" accessibilityLabel={`${vm.done} of ${vm.total} done`} /></View>
-          <Text variant="xs" style={{ color: colors.ink3 }} testID="job-setup-progress">{vm.done}/{vm.total} done</Text>
+          <Text variant="xs" tone="ink3" testID="job-setup-progress">{vm.done}/{vm.total} done</Text>
         </View>
-        <Text variant="xs" style={{ color: colors.ink3 }}>Each step checks the host live; re-run any time.</Text>
+        <Text variant="xs" tone="ink3">Each step checks the host live; re-run any time.</Text>
         {vm.can_finish
           ? <Banner tone="ok" glyph="✓" title="All set" right={<Button small primary tone="ok" label="Finish" onPress={() => void finish()} testID="job-setup-finish" />} />
           : <Text variant="sm" style={{ color: vm.blocking.length ? colors.attention.ink : colors.ink3 }} testID="job-setup-blocking">
@@ -155,14 +155,14 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
                   style={({ pressed }) => [styles.stepHead, { backgroundColor: pressed ? colors.sunken : 'transparent' }]}>
                   <StatusIcon status={stepStatus(step)} label={step.checking ? 'checking' : st.label} />
                   <View style={{ flex: 1 }}>
-                    <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{step.title}{step.optional ? <Text variant="xs" style={{ color: colors.ink3 }}> (optional)</Text> : null}</Text>
+                    <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{step.title}{step.optional ? <Text variant="xs" tone="ink3"> (optional)</Text> : null}</Text>
                     <Text variant="xs" style={{ color: step.checking ? colors.ink3 : toneInk(colors, st.tone) }} numberOfLines={expanded ? undefined : 2}>{step.detail}</Text>
                   </View>
-                  <Text variant="xs" style={{ color: colors.ink3 }}>{expanded ? '▾' : '▸'}</Text>
+                  <Text variant="xs" tone="ink3">{expanded ? '▾' : '▸'}</Text>
                 </Pressable>
                 {expanded ? (
                   <View style={styles.stepBody} testID={`setup-step-${step.id}-body`}>
-                    <Text variant="xs" style={{ color: colors.ink3 }}>{step.why}</Text>
+                    <Text variant="xs" tone="ink3">{step.why}</Text>
                     {step.actions.map(action => (
                       <View key={action.id} style={styles.action}>
                         <Button small label={`${action.label}${action.kind === 'terminal' ? '  (terminal)' : ''}`}
@@ -170,7 +170,7 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
                           loading={busy === `${step.id}:${action.id}`}
                           disabled={Boolean(busy) || (action.kind === 'job' && Boolean(job?.running))}
                           onPress={() => press(step, action)} testID={`setup-action-${step.id}-${action.id}`} />
-                        {action.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>{action.hint}</Text> : null}
+                        {action.hint ? <Text variant="xs" tone="ink3">{action.hint}</Text> : null}
                       </View>
                     ))}
                   </View>
@@ -181,52 +181,51 @@ export function JobSetupScreen({ navigation, route }: JobSetupScreenProps) {
         </View>
       </ScrollView>
 
-      <ModalFrame statusBarTranslucent={false} visible={dialog !== null} transparent animationType="fade" onRequestClose={() => setDialog(null)}>
-        <View style={[styles.backdrop, { backgroundColor: colors.scrim }]}>
-          <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
-            {dialog?.kind === 'prompts' ? (
-              <>
-                <Text variant="md" style={{ fontWeight: fontWeights.semibold }}>{dialog.action.label}</Text>
-                {dialog.action.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>{dialog.action.hint}</Text> : null}
-                {(dialog.action.prompts || []).map((prompt, i) => (
-                  <Field key={prompt.label} label={prompt.label}>
-                    <TextField value={dialog.values[i]} secureTextEntry={Boolean(prompt.secret)} autoCapitalize="none" autoCorrect={false}
-                      accessibilityLabel={prompt.label} testID={`setup-prompt-${i}`}
-                      onChangeText={text => setDialog(d => (d && d.kind === 'prompts' ? { ...d, values: d.values.map((v, j) => (j === i ? text : v)) } : d))} />
-                  </Field>
-                ))}
-                <View style={styles.row}>
-                  <Button label="Cancel" onPress={() => setDialog(null)} />
-                  <Button primary label="Save" testID="setup-prompt-save" onPress={() => {
-                    const { step, action, values } = dialog;
-                    setDialog(null);
-                    void run(step, action, values);
-                  }} />
-                </View>
-              </>
-            ) : dialog?.kind === 'terminal' ? (
-              <>
-                <Text variant="md" style={{ fontWeight: fontWeights.semibold }}>{dialog.action.label}</Text>
-                <Text variant="xs" style={{ color: colors.ink3 }}>Run this in a terminal on the mucli host{dialog.action.hint ? ` — ${dialog.action.hint}` : ''}.</Text>
-                <Pre testID="setup-terminal-command" style={{ fontFamily: fonts.mono }}>{dialog.action.command || ''}</Pre>
-                <View style={styles.row}>
-                  <Button label="Copy" testID="setup-terminal-copy" onPress={() => {
-                    void Clipboard.setStringAsync(dialog.action.command || '');
-                    toast('Command copied', 'ok');
-                  }} />
-                  <Button label="Close" onPress={() => setDialog(null)} />
-                  <Button primary label="I ran it — check again" testID="setup-terminal-done" onPress={() => {
-                    const { step, action } = dialog;
-                    setDialog(null);
-                    void run(step, action);
-                  }} />
-                </View>
-              </>
-            ) : null}
+      <Dialog visible={dialog?.kind === 'prompts'} onClose={() => setDialog(null)} title={dialog?.action.label || ''} testID="setup-prompts"
+        footer={<>
+          <Button variant="secondary" label="Cancel" onPress={() => setDialog(null)} />
+          <Button variant="primary" label="Save" testID="setup-prompt-save" onPress={() => {
+            if (dialog?.kind !== 'prompts') return;
+            const { step, action, values } = dialog;
+            setDialog(null);
+            void run(step, action, values);
+          }} />
+        </>}>
+        {dialog?.kind === 'prompts' ? (
+          <View style={styles.dialog}>
+            {dialog.action.hint ? <Text variant="caption" tone="ink3">{dialog.action.hint}</Text> : null}
+            {(dialog.action.prompts || []).map((prompt, i) => (
+              <Field key={prompt.label} label={prompt.label}>
+                <TextField value={dialog.values[i]} secureTextEntry={Boolean(prompt.secret)} autoCapitalize="none" autoCorrect={false}
+                  accessibilityLabel={prompt.label} testID={`setup-prompt-${i}`}
+                  onChangeText={text => setDialog(d => (d && d.kind === 'prompts' ? { ...d, values: d.values.map((v, j) => (j === i ? text : v)) } : d))} />
+              </Field>
+            ))}
           </View>
-        </View>
-      </ModalFrame>
-    </SafeAreaView>
+        ) : null}
+      </Dialog>
+      <Dialog visible={dialog?.kind === 'terminal'} onClose={() => setDialog(null)} title={dialog?.action.label || ''} testID="setup-terminal"
+        footer={<>
+          <Button variant="secondary" label="Copy" icon="copy" testID="setup-terminal-copy" onPress={() => {
+            void Clipboard.setStringAsync(dialog?.action.command || '');
+            toast('Command copied', 'ok');
+          }} />
+          <Button variant="primary" label="I ran it, check again" testID="setup-terminal-done" onPress={() => {
+            if (dialog?.kind !== 'terminal') return;
+            const { step, action } = dialog;
+            setDialog(null);
+            void run(step, action);
+          }} />
+        </>}>
+        {dialog?.kind === 'terminal' ? (
+          <View style={styles.dialog}>
+            <Text variant="caption" tone="ink3">Run this in a terminal on the mucli host{dialog.action.hint ? `: ${dialog.action.hint}` : ''}.</Text>
+            <Pre testID="setup-terminal-command">{dialog.action.command || ''}</Pre>
+          </View>
+        ) : null}
+      </Dialog>
+      {confirm.element}
+    </View>
   );
 }
 
@@ -240,6 +239,5 @@ const styles = StyleSheet.create({
   stepHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, minHeight: touchTarget },
   stepBody: { paddingHorizontal: spacing.md, paddingBottom: spacing.md, gap: spacing.sm },
   action: { gap: 2, alignItems: 'flex-start' },
-  backdrop: { flex: 1, justifyContent: 'center', padding: spacing.base },
-  sheet: { borderWidth: 1, borderRadius: 12, padding: spacing.base, gap: spacing.md },
+  dialog: { gap: spacing.sm },
 });

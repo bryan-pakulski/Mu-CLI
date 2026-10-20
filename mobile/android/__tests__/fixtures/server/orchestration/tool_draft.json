@@ -1,0 +1,331 @@
+{
+ "actions": [
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": true,
+   "hidden": false,
+   "id": "lintDraft",
+   "input": null,
+   "label": "Run lint",
+   "primary": false,
+   "reason": "",
+   "shortcut": "",
+   "tone": ""
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": "test",
+   "enabled": true,
+   "hidden": false,
+   "id": "testDraft",
+   "input": null,
+   "label": "Test on canary",
+   "primary": false,
+   "reason": "",
+   "shortcut": "",
+   "tone": ""
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": true,
+   "hidden": false,
+   "id": "submitReview",
+   "input": null,
+   "label": "Submit for review",
+   "primary": false,
+   "reason": "",
+   "shortcut": "",
+   "tone": ""
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": false,
+   "hidden": false,
+   "id": "requestChanges",
+   "input": {
+    "arg": "notes",
+    "label": "What should change?",
+    "multiline": true,
+    "optional": false
+   },
+   "label": "Request changes",
+   "primary": false,
+   "reason": "version is not in review",
+   "shortcut": "",
+   "tone": "warn"
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": false,
+   "hidden": false,
+   "id": "publishVersion",
+   "input": {
+    "arg": "typed",
+    "expect": "demo.rotate",
+    "label": "Type demo.rotate to confirm",
+    "multiline": false,
+    "optional": false
+   },
+   "label": "Publish",
+   "primary": true,
+   "reason": "version is not in review",
+   "shortcut": "",
+   "tone": "ok"
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": false,
+   "hidden": false,
+   "id": "deprecateVersion",
+   "input": null,
+   "label": "Deprecate",
+   "primary": false,
+   "reason": "only published versions are deprecated",
+   "shortcut": "",
+   "tone": "warn"
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": false,
+   "hidden": false,
+   "id": "undeprecateVersion",
+   "input": null,
+   "label": "Restore",
+   "primary": false,
+   "reason": "version is not deprecated",
+   "shortcut": "",
+   "tone": ""
+  },
+  {
+   "args": {},
+   "confirm": "Retire this version? Runbooks pinned to it stop working.",
+   "danger": true,
+   "dialog": null,
+   "enabled": false,
+   "hidden": false,
+   "id": "retireVersion",
+   "input": null,
+   "label": "Retire",
+   "primary": false,
+   "reason": "deprecate the version first",
+   "shortcut": "",
+   "tone": "danger"
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": false,
+   "hidden": false,
+   "id": "newVersion",
+   "input": null,
+   "label": "New version",
+   "primary": false,
+   "reason": "edit the open draft instead",
+   "shortcut": "",
+   "tone": ""
+  },
+  {
+   "args": {},
+   "confirm": "Discard this draft version? This cannot be undone.",
+   "danger": true,
+   "dialog": null,
+   "enabled": true,
+   "hidden": false,
+   "id": "discardDraft",
+   "input": null,
+   "label": "Discard draft",
+   "primary": false,
+   "reason": "",
+   "shortcut": "",
+   "tone": "danger"
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": "run",
+   "enabled": false,
+   "hidden": false,
+   "id": "runTool",
+   "input": null,
+   "label": "Run",
+   "primary": true,
+   "reason": "only published versions run on the fleet",
+   "shortcut": "",
+   "tone": ""
+  }
+ ],
+ "blobs": {},
+ "category": "other",
+ "check_mode": false,
+ "created_at": 1792491810.905049,
+ "created_by": "operator",
+ "diff": "",
+ "effect": "destructive",
+ "effect_style": {
+  "label": "destructive",
+  "semantic": "danger"
+ },
+ "files": {},
+ "idempotent": false,
+ "intent": "Rotate logs older than N days.",
+ "key_id": "",
+ "lint": {
+  "counts": {},
+  "current": false,
+  "ok": false,
+  "stale": true
+ },
+ "lint_result": {
+  "findings": [
+   {
+    "message": "title is required",
+    "rule": "manifest",
+    "severity": "error"
+   },
+   {
+    "message": "effect must be one of read_only, mutating, destructive",
+    "rule": "manifest",
+    "severity": "error"
+   },
+   {
+    "message": "implementation.runtime must be one of bash, python3, builtin",
+    "rule": "manifest",
+    "severity": "error"
+   },
+   {
+    "message": "implementation.entry must be a plain file name",
+    "rule": "manifest",
+    "severity": "error"
+   }
+  ],
+  "ok": false,
+  "stale": true
+ },
+ "manifest": {
+  "approval": "confirm",
+  "category": "other",
+  "effect": "",
+  "env": {},
+  "id": "demo.rotate",
+  "idempotent": false,
+  "implementation": {
+   "check_mode": false,
+   "entry": "",
+   "runtime": ""
+  },
+  "inputs": {
+   "additionalProperties": false,
+   "properties": {},
+   "type": "object"
+  },
+  "limits": {
+   "cpu": 1.0,
+   "max_output_kb": 512,
+   "memory_mb": 256,
+   "timeout_s": 300
+  },
+  "outputs": {},
+  "paths": {
+   "protect_system": false,
+   "write": []
+  },
+  "preconditions": [],
+  "privilege": {
+   "run_as": "root"
+  },
+  "rollback": "",
+  "rollout": {
+   "canary": 1,
+   "default_batch": 10,
+   "max_nodes": 50
+  },
+  "secrets": [],
+  "summary": "",
+  "targets": {
+   "os": [
+    "linux"
+   ],
+   "requires": []
+  },
+  "tests": [],
+  "title": "",
+  "version": 1
+ },
+ "manifest_digest": "sha256:356e0cc86d1d027a0cc7719e58884c0cfcc3732e4a369417a8886f936de2fcaf",
+ "manifest_yaml": "approval: confirm\ncategory: other\neffect: ''\nenv: {}\nid: demo.rotate\nidempotent: false\nimplementation:\n  check_mode: false\n  entry: ''\n  runtime: ''\ninputs:\n  additionalProperties: false\n  properties: {}\n  type: object\nlimits:\n  cpu: 1.0\n  max_output_kb: 512\n  memory_mb: 256\n  timeout_s: 300\noutputs: {}\npaths:\n  protect_system: false\n  write: []\npreconditions: []\nprivilege:\n  run_as: root\nrollback: ''\nrollout:\n  canary: 1\n  default_batch: 10\n  max_nodes: 50\nsecrets: []\nsummary: ''\ntargets:\n  os:\n  - linux\n  requires: []\ntests: []\ntitle: ''\nversion: 1\n",
+ "notes": [
+  {
+   "action": "tool.draft.create",
+   "actor": "operator",
+   "at": 1792491810.905049,
+   "seq": 79,
+   "text": "Draft created by operator",
+   "tone": "info"
+  }
+ ],
+ "origin": "studio",
+ "previous": "",
+ "published_at": null,
+ "ref": "demo.rotate@1",
+ "review": {},
+ "rollback": "",
+ "run_as": "root",
+ "secrets": [],
+ "session_name": "",
+ "signature": "",
+ "stage": "intent",
+ "status": "draft",
+ "style": {
+  "glyph": "\u25cb",
+  "label": "draft",
+  "semantic": "neutral",
+  "status": "pending"
+ },
+ "summary": "",
+ "tests": {
+  "count": 0,
+  "last": null,
+  "passed": 0
+ },
+ "title": "demo.rotate",
+ "tool_id": "demo.rotate",
+ "updated_at": 1792491810.905049,
+ "usage": [],
+ "version": 1,
+ "versions": [
+  {
+   "ref": "demo.rotate@1",
+   "status": "draft",
+   "style": {
+    "glyph": "\u25cb",
+    "label": "draft",
+    "semantic": "neutral",
+    "status": "pending"
+   },
+   "version": 1
+  }
+ ]
+}

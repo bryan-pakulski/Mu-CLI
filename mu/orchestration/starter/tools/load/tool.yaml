@@ -1,0 +1,18 @@
+id: sys.uptime-load
+title: Uptime and load
+summary: Report uptime, load averages and load per CPU.
+category: diagnostics
+effect: read_only
+idempotent: true
+privilege: {run_as: nobody}
+inputs: {type: object, properties: {}, additionalProperties: false}
+outputs:
+  type: object
+  properties:
+    uptime_s: {type: number}
+    load: {type: array, items: {type: number}}
+    cpu_count: {type: integer}
+    load_per_cpu: {type: [number, "null"]}
+  required: [uptime_s, load, cpu_count]
+implementation: {runtime: python3, entry: load.py}
+limits: {timeout_s: 15, max_output_kb: 8}

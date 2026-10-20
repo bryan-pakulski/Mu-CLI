@@ -145,13 +145,15 @@ export function Sheet({ visible, onClose, title, children, dismissable = true, f
     <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
       {children}
     </ScrollView>
-  ) : <View style={styles.scroll}>{children}</View>;
+  ) : <View style={full ? styles.fill : styles.scroll}>{children}</View>;
   const foot = footer ? <View style={[styles.footer, { borderTopColor: colors.hairline }]}>{footer}</View> : null;
 
   if (full) {
     return (
       <ModalFrame testID={testID} visible={visible} transparent={false} onRequestClose={requestClose} animationType={reducedMotion ? 'none' : 'slide'}>
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        {/* A translucent Modal window isn't resized for the keyboard on Android, so the sheet
+            makes room itself (otherwise a composer at the bottom sits under the keyboard). */}
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={[styles.fullInner]}>
             {header}
             {body}
@@ -250,6 +252,8 @@ const styles = StyleSheet.create({
   sheet: { flexShrink: 1, minHeight: 0, width: '100%', maxWidth: 640, alignSelf: 'center', paddingTop: spacing.sm, paddingHorizontal: spacing.base, paddingBottom: spacing.base, borderTopWidth: 1 },
   fullInner: { flex: 1, paddingHorizontal: spacing.base, paddingBottom: spacing.base },
   scroll: { flexShrink: 1, minHeight: 0 },
+  // A full sheet that doesn't scroll gives its content the whole height (chats, viewers).
+  fill: { flex: 1, minHeight: 0 },
   scrollContent: { paddingBottom: spacing.xs },
   handle: { width: 36, height: 4, borderRadius: radii.pill, alignSelf: 'center', marginBottom: spacing.sm },
   header: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm, borderBottomWidth: 1 },

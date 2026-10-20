@@ -17,7 +17,9 @@
  *   </div>
  *   <div class="w-subagents">                     the sub-agent card (shares the row)
  *
- * Collapsed row: sunken, radius-md, 36px. Running: a sky ink drop with a
+ * A finished trace folds into one summary line (.w-toollist[data-summary] >
+ * .w-toolsummary, Mu §10.1) that expands to the rows. Rows are text on the
+ * leaf (no fill) with a hover tint, radius-md, 32px. Running: a sky ink drop with a
  * live timer. Done: ✓ in ok ink for 1.2s (data-fresh + --w-age), then the
  * glyph settles to neutral ink-3. Errors tint the row with the danger wash
  * and show ✗ in danger ink; blocked rows tint plan. No side rule (G§3.4).
@@ -29,15 +31,45 @@
 .w-toolgroup {
     min-width: 0;
     border-radius: var(--wash-radius-md);
-    background: var(--w-glass-fill-subtle);
+    background: transparent;
     color: var(--wash-ink-2);
 }
+/* Mu §5.3: an open card is not a box; its output sits on sunken (code on sunken). */
+:is(.w-toolcard, .w-toolgroup):is([data-open]) { background: transparent; }
+.w-toolcard__row:hover { background: var(--w-glass-fill-subtle); }
+
+/* the per-turn summary line */
+.w-toolsummary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    align-self: flex-start;
+    max-width: 100%;
+    min-height: 28px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--wash-ink-3);
+    font: inherit;
+    font-size: var(--wash-type-label-size);
+    line-height: var(--wash-type-label-line);
+    text-align: left;
+    cursor: pointer;
+}
+.w-toolsummary:hover { color: var(--wash-ink); }
+.w-toolsummary__caret { flex: none; font-size: 0.8em; transition: transform var(--wash-motion-small) var(--wash-ease-small); }
+.w-toollist[data-open] > .w-toolsummary .w-toolsummary__caret { transform: rotate(90deg); }
+.w-toolsummary__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--wash-type-label-weight); }
+.w-toolsummary__glyph,
+.w-toolsummary__failed { flex: none; color: var(--wash-danger-ink); font-weight: 600; }
+.w-toolsummary__failed::before { content: "· "; color: var(--wash-ink-3); font-weight: 400; }
+.w-toolsummary__body { display: flex; flex-direction: column; gap: 2px; margin-top: var(--wash-space-1); }
 .w-toolcard__row {
     display: flex;
     align-items: center;
     gap: var(--wash-space-2);
     width: 100%;
-    min-height: 36px;
+    min-height: 32px;
     padding: 0 var(--wash-space-3);
     border: 0;
     border-radius: inherit;
@@ -91,10 +123,10 @@
     animation-delay: calc(var(--w-age, 0ms) * -1);
 }
 @keyframes w-toolcard-settle { to { color: var(--wash-ink-3); } }
-:is(.w-toolcard, .w-toolgroup)[data-state="error"] > .w-toolcard__row { border-radius: inherit; background: color-mix(in srgb, var(--wash-danger-wash) 72%, var(--w-glass-fill)); }
+:is(.w-toolcard, .w-toolgroup)[data-state="error"] > .w-toolcard__row { border-radius: inherit; }
 :is(.w-toolcard, .w-toolgroup)[data-state="error"] .w-toolcard__kind { color: var(--wash-danger-ink); }
 :is(.w-toolcard, .w-toolgroup)[data-state="error"] .w-toolcard__glyph { color: var(--wash-danger-ink); }
-.w-toolcard[data-state="blocked"] > .w-toolcard__row { border-radius: inherit; background: color-mix(in srgb, var(--wash-plan-wash) 72%, var(--w-glass-fill)); }
+.w-toolcard[data-state="blocked"] > .w-toolcard__row { border-radius: inherit; }
 .w-toolcard[data-state="blocked"] :is(.w-toolcard__glyph, .w-toolcard__kind) { color: var(--wash-plan-ink); }
 
 /* expanded */
@@ -124,7 +156,7 @@
     padding: var(--wash-space-2) var(--wash-space-3);
     overflow: auto;
     border-radius: var(--wash-radius-sm);
-    background: var(--w-glass-fill);
+    background: var(--wash-sunken);
     color: var(--wash-ink);
     font-family: var(--wash-font-mono);
     font-size: var(--wash-type-mono-sm-size);

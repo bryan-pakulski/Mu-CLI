@@ -24,6 +24,8 @@ Invoke via `python mucli.py [flags]`.
 | `--gui` | Launch the browser GUI in the background (default port 30311). |
 | `--trace` | Launch the GUI and open the Trace Analyzer dashboard (`/trace`). See [tracing.md](tracing.md). |
 | `--trace-analyze <file>` | Print a terminal summary of a trace JSONL file and exit (headless quick-look). See [tracing.md](tracing.md). |
+| `gui pair` | Show a pairing QR code and code for a phone (valid 10 minutes, one use). See [security.md](security.md) §8. |
+| `gui devices [list\|revoke NAME]` | List paired devices, or revoke one (its streams and terminal close at once). |
 
 ## Environment variables
 
@@ -34,12 +36,16 @@ Invoke via `python mucli.py [flags]`.
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Gemini provider | API key for Google Gemini. |
 | `OLLAMA_HOST` | Ollama provider | URL of the Ollama server (also settable via `/set ollama_host`). |
 | `MUCLI_HOME` | Filesystem layout | Base directory for sessions and logs. Defaults to `~/.mucli/`. |
+| `MUCLI_GUI_ALLOWED_HOSTS` | GUI | Comma-separated host names (besides IP addresses and `localhost`) the GUI accepts on mutating orchestration requests; guards against DNS rebinding. |
+| `MUCLI_ORCH_ALLOW_PUBLIC_BIND` | Orchestration | `1` lets the node endpoint bind to `0.0.0.0` or a public address. Refused otherwise; see [orchestration.md](orchestration.md). |
 
 Sessions and logs live under `MUCLI_HOME`:
 
 - `~/.mucli/sessions/` — saved session JSON files
 - `~/.mucli/logs/` — log output
 - `~/.mucli/trace/` — per-run JSONL traces (one file per run; see [tracing.md](tracing.md))
+- `~/.mucli/orchestration/` — orchestration store (`orch.sqlite3`), tool files (`blobs/`) and
+  master keys (`keys/`, mode 0700); see [orchestration.md](orchestration.md)
 - `~/.mucli/secrets.env` — agent-harness secrets (`CLAUDE_CODE_OAUTH_TOKEN`, optionally
   `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`), mode 0600; set with `/job agents secret KEY value`
   or Settings → Agents. Environment variables win over this file.
@@ -432,8 +438,35 @@ global-cap remainder; use `context_status` / `compact` or adjust
 | `small_window_profile` | str | `auto` | `auto`: compact tools/schemas, no skills index and capped context files when the model's real window is ≤ `small_window_threshold`; `on`/`off` force it. |
 | `small_window_threshold` | int | `32768` | Window size (tokens) at or below which the small-window profile applies. |
 | `openai_api` | str | `auto` | `auto`: the Responses API for OpenAI reasoning models (encrypted reasoning replayed between tool-loop turns); `chat` / `responses` force one API. |
-| `openai_prompt_cache_retention` | str | `""` | e.g. `24h` for models that support extended prompt-cache retention. |
+| `openai_prompt_cache_retention` | str | `""` | e.g. `24h` for models before GPT-5.6 that support extended prompt-cache retention; never sent to GPT-5.6+ (see Prompt caching). |
 | `openai_xhigh_models` | list | `[]` | OpenAI model prefixes that accept `reasoning_effort: xhigh` (`/effort max`); others get `high`. |
+| `anthropic_cache_ttl` | str | `1h` | Lifetime of Anthropic prompt-cache entries: `1h` keeps the cached prefix across pauses between turns longer than five minutes (writes cost 2× input instead of 1.25×); `5m` is the API default, cheaper for back-to-back automated work. |
+
+### Prompt caching
+
+Every request is laid out so the provider can reuse its prefix: tools, then a system prompt that
+stays byte-stable across turns (`prompt_prefix_stable`), then the history, then a request-only
+tail. Two request-only blocks carry what changes:
+
+- **Turn context**, on the turn's own user message: the turn-scoped goal, the bodies of skills
+  triggered by the message (the system prompt keeps only the skills index), the durable recall
+  and any resumption briefing. It is cached with the history for the rest of the turn.
+- **Runtime state**, the last block: clock, memory and scratchpad snapshots, delegated work.
+
+Per provider:
+
+- **Anthropic:** explicit cache breakpoints on the tools, the system prompt and the history just
+  before the runtime state (or automatic caching when there is none), all with
+  `anthropic_cache_ttl`. `ANTHROPIC_AUTO_CACHE=0` turns caching off for proxies that reject it.
+- **OpenAI:** caching is automatic; requests carry a per-session `prompt_cache_key`. GPT-5.6 and
+  later get explicit `prompt_cache_breakpoint` markers on the system prompt (sent as the leading
+  developer message) and on the last stable user block, because their implicit breakpoint would
+  land on the volatile tail. If an endpoint rejects the markers, mucli falls back to the plain
+  request.
+- **Ollama:** there is no request-level cache; a loaded model reuses the KV cache of the longest
+  matching prefix. Keep the model loaded (`ollama_keep_alive`, e.g. `30m`; the daemon default is
+  five minutes), keep `num_ctx` constant (mucli sends one value per model, since a change reloads
+  it), and use `ollama_side_model` so summaries don't evict the main model's cache.
 
 ### Loop mode
 

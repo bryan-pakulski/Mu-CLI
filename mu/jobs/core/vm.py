@@ -13,7 +13,7 @@ from .actions import JobFacts, available_actions
 from .artifacts import artifacts_for
 from .notes import AUDIT_EXCLUDED
 from .pipeline import HistoryEntry, derive_pipeline, mini_indicator
-from .states import TERMINAL, CoreState, JobState, WAITING, from_legacy
+from .states import TERMINAL, CoreState, JobState, WAITING
 
 PARTS = ("state", "pipeline", "plan", "diff", "review", "checks", "session", "costs", "notes")
 
@@ -77,7 +77,7 @@ def toolchains_vm():
 
 
 def _history(service, job_id: str) -> List[HistoryEntry]:
-    """Core-state history derived from legacy ``status_changed`` events."""
+    """Core-state history from the ``core_state`` snapshot every status event carries."""
     out: List[HistoryEntry] = []
     try:
         events = service.store.list_events_by_type(job_id, ("status_changed", "job_created"))
@@ -89,8 +89,10 @@ def _history(service, job_id: str) -> List[HistoryEntry]:
         payload = ev.payload or {}
         try:
             record = payload.get("core_state")
-            core = CoreState(JobState(record["state"])) if record else from_legacy(ev.to_status.value, str(payload.get("attention_reason") or ""))
-        except ValueError:
+            if not record:
+                continue
+            core = CoreState(JobState(record["state"]))
+        except (ValueError, KeyError, TypeError):
             continue
         state = core.state
         if state == JobState.NEEDS_INPUT and core.paused_from:
@@ -165,7 +167,7 @@ def facts_for(service, job, core: Optional[CoreState] = None, *, archived: bool 
     open_findings = 0
     if review:
         open_findings = sum(1 for f in review.get("findings") or [] if f.get("disposition", "open") == "open")
-    has_plan = bool(meta.get("plan")) or (art.exists() and art.read_text("plan.md") is not None)
+    has_plan = art.exists() and art.read_text("plan.md") is not None
     plan_version = 0
     if has_plan:
         try:
@@ -437,8 +439,6 @@ def job_vm(service, job_id: str, *, parts: Optional[Iterable[str]] = None,
            now: Optional[float] = None, plan_version: Optional[int] = None) -> Dict[str, Any]:
     """Full job page VM, or only the requested ``parts`` (change-stream refetch)."""
     job = service.get(job_id)
-    from .artifacts import migrate_metadata
-    job = migrate_metadata(service, job)
     now = time.time() if now is None else now
     wanted = set(parts or PARTS) | {"state"}
     core = service.store.core_state(job.id)

@@ -116,6 +116,8 @@ export interface SessionSummary {
   is_current: boolean;
   is_loaded: boolean;
   is_busy: boolean;
+  /** A prompt (approval or question) waits for the person in this session. */
+  awaiting_input?: boolean;
   modified_at: string;
   modified_unix: number;
   session_type?: SessionType;

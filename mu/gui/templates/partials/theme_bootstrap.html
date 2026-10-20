@@ -4,8 +4,15 @@
      It also applies the "Reduce decoration" preference (G§6.2 rule 5):
      localStorage `mucli-decoration` = reduced | full; when unset it follows
      prefers-reduced-transparency. Reduced sets html[data-decoration="reduced"],
-     which swaps every wash painting for a flat wash token. It also sets
-     html[data-nav] = vt | fade for page transitions. -->
+     which swaps every wash painting for a flat wash token. It applies the palette
+     (localStorage `mucli-palette`: darcula | one | material | tokyo → html[data-palette];
+     wash, the default, sets nothing) and the Wash glass strength (`mucli-glass`, 0–100,
+     default 60 → --mu-glass and html[data-glass]) and its blur (`mucli-glass-blur`, 0–100,
+     default 60 → --mu-blur) and the text size (`mucli-text-scale`, 85–120 percent → --mu-scale).
+     It also sets
+     html[data-nav] = vt | fade for page transitions, and html[data-sidebar] =
+     collapsed when the sidebar was collapsed (localStorage `mucli-layout`
+     .sidebarOpen === false; wash_shell.js toggles it on every page). -->
 <script>
 (function () {
     var root = document.documentElement, pref = 'system';
@@ -24,9 +31,37 @@
     try { deco = localStorage.getItem('mucli-decoration'); } catch (e) {}
     try { quiet = !!(window.matchMedia && window.matchMedia('(prefers-reduced-transparency: reduce)').matches); } catch (e) {}
     if (deco === 'reduced' || (deco !== 'full' && quiet)) root.setAttribute('data-decoration', 'reduced');
+    // Palette (route_theme.js MuPalette): wash (default) | darcula | one | material | tokyo.
+    try {
+        var palette = localStorage.getItem('mucli-palette');
+        if (palette === 'darcula' || palette === 'one' || palette === 'material' || palette === 'tokyo') root.setAttribute('data-palette', palette);
+    } catch (e) { /* storage unavailable: wash */ }
+    // Glass strength for the Wash theme (route_theme.js MuGlass): 0–100, default 60.
+    var glass = 60;
+    try {
+        var rawGlass = localStorage.getItem('mucli-glass');
+        if (rawGlass !== null && !isNaN(parseInt(rawGlass, 10))) glass = Math.max(0, Math.min(100, parseInt(rawGlass, 10)));
+    } catch (e) { /* default */ }
+    root.style.setProperty('--mu-glass', String(glass / 100));
+    var blur = 60;
+    try {
+        var rawBlur = localStorage.getItem('mucli-glass-blur');
+        if (rawBlur !== null && !isNaN(parseInt(rawBlur, 10))) blur = Math.max(0, Math.min(100, parseInt(rawBlur, 10)));
+    } catch (e) { /* default */ }
+    root.style.setProperty('--mu-blur', String(blur / 100));
+    if (glass > 0) root.setAttribute('data-glass', '');
+    // Text size (route_theme.js MuTextScale): percent 85–120, default 100 → --mu-scale.
+    try {
+        var rawScale = parseInt(localStorage.getItem('mucli-text-scale'), 10);
+        if (!isNaN(rawScale) && rawScale !== 100) root.style.setProperty('--mu-scale', String(Math.max(85, Math.min(120, rawScale)) / 100));
+    } catch (e) { /* default */ }
     // Page navigation style (base.css "page transitions"): browsers with cross-document View
     // Transitions (pageswap/pagereveal) animate natively; the rest (e.g. Firefox) get the
     // scripted fade in wash_shell.js.
     root.setAttribute('data-nav', ('onpageswap' in window) ? 'vt' : 'fade');
+    try {
+        var layout = JSON.parse(localStorage.getItem('mucli-layout') || '{}');
+        if (layout && layout.sidebarOpen === false) root.setAttribute('data-sidebar', 'collapsed');
+    } catch (e) { /* default: expanded */ }
 })();
 </script>

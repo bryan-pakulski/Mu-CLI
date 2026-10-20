@@ -30,8 +30,7 @@ the same YAML already required by ``mu.skills``, with a manual fallback
 when PyYAML is absent.
 
 ``validate()`` checks a resolved prompt still names the critical tool
-surface / workflow anchors the harness depends on (the same substrings
-pinned by ``tests/test_mode_sota_patterns.py``), so a hand-edited file
+surface / workflow anchors the harness depends on, so a hand-edited file
 that silently drops ``spawn_agent`` or ``plan mode`` is surfaced as a
 warning rather than a silent regression.
 """
@@ -254,9 +253,8 @@ def resolved_snapshot(session: Any = None) -> Dict[str, Dict[str, Any]]:
 
 # --- critical-section validation ----------------------------------------
 
-# Substrings each prompt must still name. A tuple means any-of. Mirrors
-# the assertions in tests/test_mode_sota_patterns.py so a hand-edited file
-# that drops a frontier feature is caught as drift, not a silent regression.
+# Substrings each prompt must still name. A tuple means any-of. A hand-edited
+# file that drops a frontier feature is caught as drift, not a silent regression.
 _CRITICAL: Dict[str, List[Union[str, Tuple[str, ...]]]] = {
     "base": [
         "bash", "read_file", "apply_diff", "search_for_string",

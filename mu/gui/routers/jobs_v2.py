@@ -135,8 +135,9 @@ async def events(request: Request, after: int = Query(0, ge=0), once: bool = Fal
         seq = min(after or bus.seq, bus.seq)
         yield f"event: hello\ndata: {json.dumps({'seq': seq})}\n\n"
         heartbeat = time.monotonic()
+        from mu.gui.devices import still_paired
         while True:
-            if await request.is_disconnected():
+            if await request.is_disconnected() or not still_paired(request):
                 return
             cursor = await asyncio.to_thread(collect_durable_changes, service, bus, cursor)
             changes = await asyncio.to_thread(bus.wait, seq, .25)

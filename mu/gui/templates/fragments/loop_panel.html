@@ -124,7 +124,7 @@
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + m.id"></span>
-                        <template x-for="tag in (m.tags || [])" :key="tag">
+                        <template x-for="(tag, ti) in (m.tags || [])" :key="ti">
                             <span class="tag w-chip" data-variant="meta" x-text="tag"></span>
                         </template>
                     </div>
@@ -135,7 +135,7 @@
     </section>
 
     <!-- footnote -->
-    <div class="panel-footnote" x-show="$store.loop.loaded">
+    <div class="panel-footnote" x-show="$store.loop.loaded && ($store.loop.backlog.length || $store.loop.loopFeatures.length)">
         <span x-text="$store.loop.backlog.length + ' todos'"></span>
         <span x-show="$store.loop.loopFeatures.length"
               x-text="' · ' + $store.loop.loopFeatures.length + ' features'"></span>

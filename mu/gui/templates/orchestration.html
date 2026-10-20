@@ -1,0 +1,72 @@
+{#- Orchestration (/orchestration) as an application workspace (mu_style_guide.md
+    §11b; documentation/plans/orchestration.md §8). #orch-app is the page's
+    .w-panes, a direct child of the leaf: list | main | aside, each scrolling on
+    its own, filled by static/js/orchestration/*.js (view.js lays them out per
+    route). Hash routes: #/ Now (a board; #/approvals is the same screen),
+    #/runs, #/run/<id>, #/nodes, #/node/<id>, #/catalog, #/tool/<id>/<v>,
+    #/runbook/<id>/<v>, #/studio[/<id>/<v>], #/studio/runbook/<id>/<v> (or /new),
+    #/setup[/<token id>], #/new-run, #/audit and #/settings. On Runs, Nodes and
+    Catalog the list stays while a row's hash route fills main (the item itself)
+    and aside (its context: a run's execution log, a node's executions, a tool's
+    actions and runs). Every mutation posts to /api/orchestration/cmd with the
+    CSRF token carried on #orch-app. #orch-chat is the fleet chat (chat.js), a
+    column of #orch-app while open. -#}
+{% extends "_layout.html" %}
+{% import "macros/wash.html" as w %}
+{% block title %}Orchestration · μcli{% endblock %}
+{% block page_css %}
+<link id="mucli-orchestration-css" rel="stylesheet" href="/static/css/wash/patterns/orchestration.css">
+{% endblock %}
+{% block head_scripts %}
+    <script src="/static/vendor/highlight.min.js" defer></script>
+{% endblock %}
+{% block ambient %}lagoon{% endblock %}
+{% block body_class %}orch-body{% endblock %}
+
+{#- The page header (Mu §4): view.js rewrites it per route through
+    window.WashHead — Orchestration with the state sentence and tabs on the top
+    routes, the item's own name and a back link on detail routes. -#}
+{% block page_title %}Orchestration{% endblock %}
+{% block page_tabs %}<a class="w-pagetabs__tab" href="#/" aria-current="page">Now</a><a class="w-pagetabs__tab" href="#/runs">Runs</a><a class="w-pagetabs__tab" href="#/nodes">Nodes</a><a class="w-pagetabs__tab" href="#/catalog">Catalog</a>{% endblock %}
+
+{% block content %}
+<div class="w-panes orch-app orch-panes" id="orch-app" data-csrf="{{ csrf_token }}" data-layout="main">
+    <section class="w-pane orch-list" data-pane="list" id="orch-list" aria-labelledby="orch-list-title">
+        <div class="w-pane-resize" data-pane-resize aria-hidden="true"></div>
+        <header class="w-pane__head"><h2 class="w-pane__title" id="orch-list-title" data-list-title>List</h2><span class="orch-list__tools" data-list-tools></span></header>
+        <div id="orch-list-body"></div>
+    </section>
+    <section class="w-pane orch-main" data-pane="main" id="orch-main" aria-label="Orchestration">
+        <div class="orch-backbar" data-backbar hidden><button type="button" class="w-textbtn" data-tone="quiet" data-show-list>← <span data-backbar-label>Back</span></button></div>
+        <div class="w-page orch-page" id="orch-view">
+            <div class="orch-loading" role="status"><span class="w-inkdrop" data-tone="running" aria-hidden="true"></span>Loading…</div>
+        </div>
+    </section>
+    <aside class="w-pane orch-aside" data-pane="aside" id="orch-aside" aria-label="Context"></aside>
+    <aside class="orch-chat" id="orch-chat" aria-label="Fleet chat" hidden></aside>
+</div>
+<noscript><div class="w-page"><p>Orchestration needs JavaScript.</p></div></noscript>
+{% endblock %}
+
+{% block body_end %}
+<script src="/static/js/dialogs.js"></script>
+<script src="/static/js/wash/confirm.js"></script>
+<script src="/static/js/wash/diff.js"></script>
+<script src="/static/js/wash/toolcard.js"></script>
+<script src="/static/js/orchestration/api.js"></script>
+<script src="/static/js/orchestration/ui.js"></script>
+<script src="/static/js/orchestration/schema.js"></script>
+<script src="/static/js/orchestration/pickers.js"></script>
+<script src="/static/js/orchestration/results.js"></script>
+<script src="/static/js/orchestration/nodes.js"></script>
+<script src="/static/js/orchestration/setup.js"></script>
+<script src="/static/js/orchestration/catalog.js"></script>
+<script src="/static/js/orchestration/studio.js"></script>
+<script src="/static/js/orchestration/runbooks.js"></script>
+<script src="/static/js/orchestration/runs.js"></script>
+<script src="/static/js/orchestration/settings.js"></script>
+<script src="/static/js/orchestration/view.js"></script>
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
+<script src="/static/js/orchestration/chat.js"></script>
+{% endblock %}

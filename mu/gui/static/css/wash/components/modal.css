@@ -25,7 +25,7 @@
     place-items: center;
     padding: var(--wash-space-6);
     background: var(--wash-scrim);
-    animation: w-modal-fade var(--wash-motion-medium) var(--wash-ease-medium) both;
+    animation: w-modal-fade var(--wash-motion-medium) var(--wash-ease-medium) backwards;
 }
 .w-modal:focus { outline: none; }
 .w-modal__dialog {
@@ -40,7 +40,7 @@
     -webkit-backdrop-filter: var(--w-glass-filter-strong);
     color: var(--wash-ink);
     box-shadow: var(--w-glass-lift-3);
-    animation: w-modal-rise var(--wash-motion-medium) var(--wash-ease-medium) both;
+    animation: w-modal-rise var(--wash-motion-medium) var(--wash-ease-medium) backwards;
 }
 
 .w-modal__dialog[data-size="sm"] { width: min(560px, 100%); }
@@ -78,6 +78,23 @@
     padding: var(--wash-space-4) var(--wash-space-6);
     border-top: 1px solid var(--wash-hairline);
     background: transparent;
+}
+/* Closing (MuDialog.close sets `hidden`): the scrim fades and the dialog settles back,
+ * and display:none waits for it (allow-discrete). The transitions live on the hidden
+ * state only, so dialogs shown and hidden another way (x-show) close at once. */
+.w-modal[hidden] {
+    display: none;
+    opacity: 0;
+    animation: none;
+    transition: opacity var(--wash-motion-small) var(--wash-ease-small),
+        display var(--wash-motion-small) var(--wash-ease-small) allow-discrete;
+}
+.w-modal[hidden] .w-modal__dialog {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+    animation: none;
+    transition: opacity var(--wash-motion-small) var(--wash-ease-small),
+        transform var(--wash-motion-small) var(--wash-ease-small);
 }
 @keyframes w-modal-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes w-modal-rise {

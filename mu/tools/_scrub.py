@@ -17,8 +17,8 @@ The redaction itself lives in `mu/security/secret_paths.py:redact_secrets`
 Google, JWT, PEM blocks). This module is the *wiring* — when and how
 the redacted-count notice gets appended.
 
-Tests: `tests/test_secret_scrubber.py`,
-`tests/test_search_for_string_fix.py`.
+Tests: `tests/tools/test_secret_scrubber.py`,
+`tests/tools/`.
 """
 
 from __future__ import annotations

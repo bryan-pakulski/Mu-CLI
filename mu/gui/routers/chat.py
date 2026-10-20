@@ -512,6 +512,9 @@ async def interrupt(request: Request, payload: Optional[Dict[str, Any]] = None):
         session_name = (payload.get("session_name") or "").strip() or None
     session = _resolve_session(request, session_name)
     name = session.session_manager.current_session_name
+    # Questions wait indefinitely for an answer; Stop is how a person walks away from one.
+    # Cancelling first wakes a waiting turn (host or container relay) so it can stop.
+    request.app.state.prompts.cancel_session(name)
 
     session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
     if session_type == "container":
@@ -639,8 +642,9 @@ async def stream_events(request: Request, session: str | None = None):
                         }
                     ),
                 }
+            from mu.gui.devices import still_paired
             while True:
-                if await request.is_disconnected():
+                if await request.is_disconnected() or not still_paired(request):
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=15.0)

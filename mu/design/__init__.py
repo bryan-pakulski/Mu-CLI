@@ -7,7 +7,7 @@ by the terminal, web and Android surfaces.
 
 Python surfaces read these files directly through this module. Web and
 Android consume generated copies (``scripts/design/build_tokens.py``);
-``tests/test_wash_tokens.py`` fails when the generated copies are stale.
+``tests/design/test_wash_tokens.py`` fails when the generated copies are stale.
 
 See ``documentation/design/wash_design_guide.md``.
 """
@@ -24,6 +24,8 @@ TOKENS_PATH = DESIGN_DIR / "tokens.json"
 VOCABULARY_PATH = DESIGN_DIR / "vocabulary.json"
 
 THEMES = ("paper", "dusk")
+# Alternative palettes (tokens.json "palettes"): each has a light and a dark spec.
+MODES = ("light", "dark")
 SEMANTICS = ("accent", "running", "ok", "attention", "caution", "danger", "plan", "info")
 STEPS = ("wash", "pigment", "ink")
 
@@ -31,6 +33,38 @@ STEPS = ("wash", "pigment", "ink")
 @lru_cache(maxsize=None)
 def load_tokens() -> Dict[str, Any]:
     return json.loads(TOKENS_PATH.read_text(encoding="utf-8"))
+
+
+def palettes() -> Dict[str, Any]:
+    """Alternative palettes: name → {label, note, light, dark} (the Wash theme is the default)."""
+    return {k: v for k, v in load_tokens().get("palettes", {}).items() if not k.startswith("_")}
+
+
+def destinations() -> Dict[str, Any]:
+    """Destination → {accent pigment, ambient scene} (the shell's per-destination accent)."""
+    return {k: v for k, v in load_tokens().get("destination", {}).items() if not k.startswith("_")}
+
+
+def palette_choices() -> list:
+    """Theme picker rows (Wash first): name, label, note and swatches per mode
+    (canvas, surface, ink and the accent / ok / attention / danger / plan pigments)."""
+    tokens = load_tokens()
+    semantic = tokens["semantic"]
+
+    def swatches(spec: Dict[str, Any]) -> Dict[str, Any]:
+        color, pig = spec["color"], spec["pigment"]
+        return {
+            "canvas": color["canvas"], "surface": color["surface"], "ink": color["ink"], "ink3": color["ink-3"],
+            "hairline": color["hairline"],
+            "dots": [pig[semantic[role]]["pigment"] for role in ("accent", "ok", "attention", "danger", "plan")],
+        }
+
+    rows = [{"name": "wash", "label": "Wash", "note": "Watercolour paper by day, dusk by night",
+             "light": swatches(tokens["themes"]["paper"]), "dark": swatches(tokens["themes"]["dusk"])}]
+    for name, spec in palettes().items():
+        rows.append({"name": name, "label": spec["label"], "note": spec["note"],
+                     "light": swatches(spec["light"]), "dark": swatches(spec["dark"])})
+    return rows
 
 
 @lru_cache(maxsize=None)
@@ -100,6 +134,17 @@ def state_style(state: Any) -> Dict[str, str]:
         "semantic": spec["semantic"],
         "label": row["label"] if row else key.replace("_", " "),
     }
+
+
+def table_style(table: str, key: Any) -> Dict[str, str]:
+    """Any ``{key: {status, label}}`` vocabulary table (``orch_run_state`` ...) → status, glyph,
+    semantic role and label, like ``state_style`` for job states."""
+    name = str(key or "")
+    row = load_vocabulary().get(table, {}).get(name)
+    status = row["status"] if row else "pending"
+    spec = status_spec(status)
+    return {"status": status, "glyph": spec["glyph"], "semantic": spec["semantic"],
+            "label": row["label"] if row else name.replace("_", " ")}
 
 
 def attention_label(reason: Any) -> str:

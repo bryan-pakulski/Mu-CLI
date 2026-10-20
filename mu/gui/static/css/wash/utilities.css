@@ -1,5 +1,5 @@
 /* Wash utilities layer — the last layer, and the only place `!important`
- * is allowed (tests/test_wash_css_contract.py).
+ * is allowed.
  *
  * These are the overrides that must beat everything, including inline style
  * attributes and Wash components: hiding, reduced motion, and the
@@ -26,11 +26,11 @@ body.resizing * {
 .composer-mode-popout,
 .composer-settings-popout { width: auto !important; }
 
-/* Responsive visibility for the shared shell (layout.css): the top-bar menu
- * button only exists below 840px, where the sidebar becomes a drawer, and
- * anything marked .w-optional drops out of the top bar there. */
+/* Responsive visibility for the shared frame (layout.css): the navigation
+ * button only exists below 840px, where the rail becomes a drawer, and
+ * anything marked .w-optional drops out there. */
 @media (width >= 840px) {
-    .w-topbar__menu { display: none !important; }
+    .w-shell__menu { display: none !important; }
 }
 @media (width < 840px) {
     .w-optional { display: none !important; }

@@ -1,0 +1,259 @@
+/* Chat secondary surfaces (Mu round 2: documentation/design/mu_style_guide.md §2, §5, §7).
+ * The chat page's floats — the workspace panel (.w-chat__stage), the settings drawer,
+ * modals, popovers and composer popouts — compose Wash components the Mu way:
+ * no boxes inside a float, no outlined pills, segmented controls read as text tabs,
+ * meta chips read as quiet words, counts that say zero are left out (product.js marks
+ * them data-zero). patterns/mu-leaf.css does the same for every other page; this file
+ * is imported by chat.css (and so also serves the /design gallery).
+ */
+/* ------------------------------------------------------------ zero counts */
+:where(.chat-body, .gallery-body) .w-count[data-zero] { display: none; }
+
+/* ------------------------------------------------------------ floats: one plane, no boxes */
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal, .w-popover) :is(.w-card, .w-panel) {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+/* Outlined pills → text buttons (§7.3). */
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal, .w-popover, .welcome-shell) .w-btn[data-variant="secondary"] {
+    height: auto;
+    min-height: 0;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--wash-ink);
+}
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal, .w-popover, .welcome-shell) .w-btn[data-variant="secondary"]:hover:not(:disabled) {
+    background: transparent;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal, .w-popover) .w-btn[data-variant="secondary"]:disabled { color: var(--wash-ink-3); }
+
+/* Segmented controls → text tabs. */
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal) .w-segmented {
+    gap: var(--wash-space-4);
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal) .w-segmented__option {
+    min-height: 0;
+    padding: 0 0 var(--wash-space-1);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: inset 0 -2px 0 transparent;
+    color: var(--wash-ink-3);
+}
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal) .w-segmented__option:is([aria-pressed="true"], [aria-checked="true"], [aria-selected="true"]) {
+    background: transparent;
+    box-shadow: inset 0 -2px 0 var(--wash-ink);
+    color: var(--wash-ink);
+}
+
+/* Meta chips (labels, kinds, tags) → quiet words; tone chips keep their colour as ink. */
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal) .w-chip:not(button, [role="button"], [aria-pressed]) {
+    height: auto;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--wash-ink-3);
+    font-weight: 400;
+}
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal) .w-chip:not(button, [role="button"], [aria-pressed])[data-tone="danger"] { color: var(--wash-danger-ink); }
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal) .w-chip:not(button, [role="button"], [aria-pressed])[data-tone="attention"] { color: var(--wash-attention-ink); }
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal) .w-chip:not(button, [role="button"], [aria-pressed])[data-tone="caution"] { color: var(--wash-caution-ink); }
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal) .w-chip:not(button, [role="button"], [aria-pressed]) + .w-chip:not(button, [role="button"], [aria-pressed])::before {
+    content: "·";
+    margin-right: 0.4em;
+    color: var(--wash-ink-3);
+}
+
+/* Banners inside floats: a tinted line, no box. */
+:where(.chat-body, .gallery-body) :is(.w-chat__stage, .w-drawer, .w-modal) .w-banner {
+    min-height: 0;
+    border-radius: var(--wash-radius-sm);
+}
+
+/* ------------------------------------------------------------ the panel head */
+.chat-body .w-stage-head .panel-segmented { margin-right: var(--wash-space-2); }
+.chat-body .w-stage-head .w-panel__actions { margin-left: auto; }
+
+/* ------------------------------------------------------------ Mode OS header (mode_workspace_header.html) */
+.mode-panel .mode-os { margin: 0 0 var(--wash-space-4); padding: 0 0 var(--wash-space-3); }
+.mode-os .mode-os-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: var(--wash-space-3);
+    margin: 0;
+}
+.mode-os .mode-os-heading h2 {
+    margin: 0;
+    color: var(--wash-ink);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+    letter-spacing: var(--wash-type-title-3-tracking);
+}
+.mode-os .mode-os-status { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); white-space: nowrap; }
+.mode-os .mode-os-status[data-status="active"] { color: var(--wash-ink-2); }
+.mode-os .mode-os-status[data-status="failed"] { color: var(--wash-danger-ink); }
+.mode-os .mode-os-objective {
+    max-width: 60ch;
+    margin: var(--wash-space-1) 0 0;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+}
+.mode-os .mode-os-metrics { margin-top: var(--wash-space-3); }
+.mode-os .mode-os-metrics:not(:has(.mode-os-metric:not([style*="display: none"]))) { display: none; }
+.mode-os .mode-os-metric { padding: 0 var(--wash-space-4) 0 0; border: 0; border-radius: 0; background: none; }
+.mode-os .mode-os-metric dd { color: var(--wash-ink); font-size: var(--wash-type-body-lg-size); font-weight: var(--wash-type-label-weight); }
+
+/* ------------------------------------------------------------ settings drawer */
+.chat-body .settings-appearance-link { margin: var(--wash-space-3) 0 var(--wash-space-4); }
+
+/* ------------------------------------------------------------ transcript kinds */
+.chat-body .visualization-kind { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+
+/* ------------------------------------------------------------ panels */
+/* Memory capture is one field (like the composer): its selects are quiet words with a caret. */
+.memory-capture .w-select__control {
+    height: auto;
+    padding: 0 var(--wash-space-4) 0 var(--wash-space-1);
+    border-color: transparent;
+    background-color: transparent;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-label-size);
+}
+.memory-capture .w-select__control:hover { color: var(--wash-ink); }
+/* Threads: the current thread is a selected row, not a raised card. */
+.thread-panel .thread-roster-row.active { background: var(--w-glass-fill-subtle); box-shadow: none; }
+.thread-panel .thread-panel-head { align-items: center; }
+.thread-panel .thread-group-id { margin: 0; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+.files-browser-head .files-browser-note { margin: 0; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+.artifacts-panel-head p code { font-size: 0.95em; }
+
+/* ------------------------------------------------------------ settings drawer: setting rows (§10.6) */
+.settings-pane .var-group-body {
+    display: block;
+    padding: 0 0 var(--wash-space-4) var(--wash-space-5);
+}
+.settings-pane .var-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
+    grid-template-areas:
+        "head control"
+        "hint control"
+        "error error";
+    column-gap: var(--wash-space-5);
+    align-items: center;
+    padding: var(--wash-space-3) 0;
+}
+.settings-pane .var-row + .var-row { border-top: 1px solid var(--wash-hairline); }
+.settings-pane .var-row > .var-head { grid-area: head; }
+.settings-pane .var-row > :is(.w-input, .w-select, .var-bool) { grid-area: control; width: 100%; }
+.settings-pane .var-row > .var-hint { grid-area: hint; align-self: start; color: var(--wash-ink-3); -webkit-line-clamp: 2; }
+.settings-pane .var-row > .var-error { grid-area: error; }
+.settings-pane .var-row .var-type { display: none; }
+.settings-pane .var-row .var-bool { justify-content: flex-end; min-height: 0; }
+.settings-pane .var-group-head .var-group-count { display: none; }
+/* Stats: one fact list. */
+.inspector .inspector-facts.w-facts { display: grid; margin-bottom: var(--wash-space-4); }
+.inspector .inspector-facts.w-facts .stat-val.inspector-cost { font-size: inherit; }
+@media (width < 840px) {
+    .settings-pane .var-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "control" "hint" "error"; }
+}
+
+/* ------------------------------------------------------------ memory ledger: rows (§5.1) */
+/* The statement gets the panel's full width; actions sit on the meta line, shown on
+ * hover / focus (always on touch); long statements clamp until the row is opened. */
+.memory-ledger-card {
+    position: relative;
+    display: block;
+    padding: var(--wash-space-3) var(--wash-space-1);
+}
+.memory-ledger-card.selected { background: var(--w-glass-fill-subtle); }
+.memory-ledger-card .memory-ledger-actions {
+    position: absolute;
+    top: var(--wash-space-2);
+    right: var(--wash-space-1);
+    max-width: none;
+    flex-wrap: nowrap;
+    gap: var(--wash-space-3);
+    opacity: 0;
+    transition: opacity var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.memory-ledger-card:is(:hover, :focus-within, .selected) .memory-ledger-actions { opacity: 1; }
+@media (hover: none) { .memory-ledger-card .memory-ledger-actions { opacity: 1; } }
+.memory-ledger-card .memory-ledger-actions .w-btn { height: auto; min-height: 0; padding: 0; background: transparent; }
+.memory-ledger-card .memory-ledger-meta { padding-right: 200px; min-height: 20px; }
+.memory-ledger-card .memory-ledger-meta .w-chip { height: auto; padding: 0; }
+.memory-ledger-card .memory-ledger-statement {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+}
+.memory-ledger-card.selected .memory-ledger-statement { display: block; }
+
+/* Context map view switch: text tabs like every other segmented control in a float. */
+.context-view-controls .memory-view-toggle.w-segmented { flex: 0 1 auto; gap: var(--wash-space-4); padding: 0; border-radius: 0; background: transparent; }
+.context-view-controls .memory-view-toggle .w-segmented__option { flex: 0 0 auto; padding: 0 0 var(--wash-space-1); }
+.context-view-controls .memory-view-toggle .w-segmented__option.active { background: transparent; box-shadow: inset 0 -2px 0 var(--wash-ink); color: var(--wash-ink); }
+/* Stats facts read as text, not code. */
+.inspector .inspector-facts.w-facts .stat-val:not(.mono) { font-family: var(--wash-font-sans); font-size: var(--wash-type-body-size); font-weight: 400; }
+
+/* Below 1200 the workspace panel floats over the transcript: opaque, so the
+ * conversation never reads through it (Mu §2.1 floats). */
+@media (width < 1200px) {
+    .chat-body .w-chat__stage {
+        background: var(--wash-raised);
+        box-shadow: var(--w-glass-lift-3);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+}
+
+/* Composer model popover: sentence-case labels, not variable names. */
+.composer-settings-popout .provider-model-section .settings-var-key {
+    font-family: var(--wash-font-sans);
+    font-size: var(--wash-type-label-size);
+    color: var(--wash-ink-2);
+    text-transform: none;
+    letter-spacing: 0;
+}
+.composer-settings-popout .settings-all-link { margin: var(--wash-space-2) 0 0; }
+
+/* The composer foot is one line (§7.5): when the column is narrow (the workspace panel
+ * docked beside it) the model name gives way first, never the send button. */
+.chat-body .w-composer__bar { flex-wrap: nowrap; }
+.chat-body .w-composer__bar > * { flex-shrink: 0; }
+.chat-body .w-composer__bar > .composer-settings { flex: 0 1 auto; min-width: 11ch; }
+/* A narrow composer (the workspace pane open beside a small window) drops the "Effort"
+ * word before the model name loses its last readable characters. */
+.chat-body .w-composer__form { container: w-composer / inline-size; }
+@container w-composer (width < 560px) {
+    .chat-body .w-composer__effort-label { display: none; }
+    /* Send, mic and the context ring never leave the bar: the gaps tighten and the
+     * text items (mode, model, effort) share what's left, truncating with an ellipsis. */
+    .chat-body .w-composer__bar { gap: var(--wash-space-2); }
+    .chat-body .w-composer__bar > :is(.composer-mode-picker, .w-composer__effort) { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+    .chat-body .w-composer__bar > .composer-settings { min-width: 8ch; }
+}
+@container w-composer (width < 420px) {
+    .chat-body .w-composer__bar > .w-composer__effort { display: none; }
+}
+.chat-body .w-composer__bar .composer-settings-btn { max-width: 100%; min-width: 0; overflow: hidden; }
+.chat-body .w-composer__bar .w-composer__effort { min-width: 0; }

@@ -104,6 +104,26 @@ with [documentation/jobs_quickstart.md](documentation/jobs_quickstart.md). The
 reference is
 [documentation/durable_engineering_jobs.md](documentation/durable_engineering_jobs.md).
 
+## Orchestration
+
+Orchestration manages a fleet of Linux machines through a catalog of reviewed, signed tools.
+An AI helps design the tools, but it never gets a shell on a node or sees credentials, and
+nothing runs without your approval (or an access-policy rule you wrote). Nodes run a
+standard-library-only agent that dials out to the master over a private network.
+
+```
+mucli --gui                         # Orchestration in the sidebar: nodes, catalog, Studio, runs, approvals
+mucli orch nodes token --labels env=dev   # enrol a node (or Nodes → Set up a node in the GUI)
+mucli orch runs start sys.disk-usage@1 --labels env=dev --wait
+mucli orch runbooks validate ./runbooks   # CI: check runbook YAML against the catalog
+```
+
+Runbooks (ordered steps over published tools) are written in the GUI's runbook editor, with live
+checks, a YAML view, bulk tool upgrades and canary tests of drafts.
+
+Guide: [documentation/orchestration.md](documentation/orchestration.md). Design:
+[documentation/plans/orchestration.md](documentation/plans/orchestration.md).
+
 ## Common slash commands
 
 The most common day-to-day commands — see [documentation/commands.md](documentation/commands.md) for the full reference.
@@ -153,6 +173,8 @@ mu/
   feature/        Feature plan engine
   gui/            FastAPI web UI server (SSE chat, inspector, multi-session)
   memory/         TaskMemoryStore + ScratchpadStore (lifecycle, eviction)
+  orchestration/  Fleet orchestration master (catalog, runs, signing, policy)
+                  and node/, the standard-library-only node agent
   retrieval/      SemanticCodeIndex for L4B context retrieval
   security/       Always-on secret_paths denylist + scrubber
   session/        Session, SessionManager, per-turn context/messages/
@@ -175,6 +197,7 @@ See `documentation/`:
 - [`configuration.md`](documentation/configuration.md) — env vars, session variables, config files, job settings
 - [`jobs_quickstart.md`](documentation/jobs_quickstart.md) — jobs golden path: setup, new job, approve plan, review, push
 - [`durable_engineering_jobs.md`](documentation/durable_engineering_jobs.md) — job pipeline, checks, review, push, Jira, sandbox
+- [`orchestration.md`](documentation/orchestration.md) — fleet orchestration: nodes, signed tool catalog, AI Studio, runs, policies
 - [`skills.md`](documentation/skills.md) — declarative agent extensions
 - [`hooks.md`](documentation/hooks.md) — lifecycle hooks (Python decorator + `.mu/hooks.json`)
 - [`security.md`](documentation/security.md) — full security model: workspace sandbox, secret filtering, approval flow, plan mode, sub-agent isolation, limitations

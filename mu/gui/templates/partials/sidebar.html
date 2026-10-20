@@ -1,33 +1,47 @@
-{#- Shared sidebar (G§8.1): primary navigation for every page on the Wash
-    shell. 264px; a 64px icon rail below 1200px; an off-canvas drawer below
-    840px (wash_shell.js toggles #w-shell[data-sidebar-open]).
-    `nav_active` names the current item. Pages fill _layout.html's
-    `sidebar_extra` block (markup rendered after Navigate: the chat page's
-    Sessions and Threads, the Work sub-navigation) and may set `work_badge`
-    (top-level `{% set %}`), a count badge on the Work item. -#}
+{#- The rail (Mu §3.2): the only navigation, on every page. It lists
+    destinations, never a destination's sub-pages (those are tabs in the page
+    header). It sits on the painted wash, beside the leaf; an icon rail below
+    1200px or when collapsed (the foot button, html[data-sidebar="collapsed"],
+    every page); an off-canvas drawer below 840px (wash_shell.js toggles
+    #w-shell[data-sidebar-open]).
+
+    `nav_active` names the current item. `sidebar_extra` (from _layout.html)
+    renders under the destinations: the chat page's Sessions. `work_badge`
+    (top-level `{% set %}`) is a count badge on Work. The Orchestration item
+    carries the orchestration attention badge on every page (wash_shell.js
+    fills it from /api/orchestration/badge, which never starts orchestration);
+    Work carries the jobs badge (data-work-badge, /api/jobs/attention) unless
+    the page supplies its own `work_badge`. `data-nav` lets the persistent
+    shell (mu_shell.js) mark the active destination without a reload.
+    Counts are the global home of "needs you" (Mu §6.1). -#}
 {%- import "macros/wash.html" as w -%}
 {%- set active = nav_active | default("") -%}
+{%- if active in ("trace", "job_trace", "model_costs") %}{% set active = "insights" %}{% endif -%}
 {%- set primary = [
     ("chat", "/", "message-circle", "Chat"),
     ("work", "/work", "briefcase", "Work"),
+    ("orchestration", "/orchestration", "server", "Orchestration"),
     ("environments", "/containers", "box", "Environments"),
-    ("trace", "/trace", "activity", "Trace"),
 ] -%}
-{%- set tools = [
-    ("job_trace", "/jobs/trace", "bar-chart-3", "Job analysis"),
-    ("model_costs", "/models/costs", "sliders-horizontal", "Model pricing"),
+{%- set foot = [
+    ("insights", "/trace", "activity", "Insights"),
+    ("settings", "/settings", "settings", "Settings"),
 ] -%}
 <aside class="w-sidebar" id="w-sidebar" aria-label="Main navigation">
+    <a href="/" class="w-wordmark w-sidebar__mark" aria-label="μcli home"><span class="w-mark" aria-hidden="true"{{ mark_attrs | default("") }}></span><span class="w-nav__label">μcli</span></a>
     <ul class="w-sidebar__section" aria-label="Navigate">
         {%- for key, href, glyph, label in primary %}
-        <li><a class="w-nav__item" href="{{ href }}" title="{{ label }}"{% if active == key %} aria-current="page"{% endif %}>{{ w.icon(glyph) }}<span class="w-nav__label">{{ label }}</span>{% if key == "work" and work_badge is defined %}{{ work_badge }}{% endif %}</a></li>
+        <li><a class="w-nav__item" href="{{ href }}" data-nav="{{ key }}" title="{{ label }}"{% if active == key %} aria-current="page"{% endif %}>{{ w.icon(glyph) }}<span class="w-nav__label">{{ label }}</span>{% if key == "work" %}{% if work_badge is defined %}{{ work_badge }}{% else %}<span class="w-count w-nav__badge" data-tone="attention" data-work-badge hidden></span>{% endif %}{% endif %}{% if key == "orchestration" %}<span class="w-count w-nav__badge" data-tone="attention" data-orch-badge hidden></span>{% endif %}</a></li>
         {%- endfor %}
     </ul>
     {%- if sidebar_extra is defined and sidebar_extra|trim %}{{ sidebar_extra }}{% endif %}
-    <p class="w-sidebar__heading" id="w-sidebar-tools">Insights</p>
-    <ul class="w-sidebar__section" aria-labelledby="w-sidebar-tools">
-        {%- for key, href, glyph, label in tools %}
-        <li><a class="w-nav__item" href="{{ href }}" title="{{ label }}"{% if active == key %} aria-current="page"{% endif %}>{{ w.icon(glyph) }}<span class="w-nav__label">{{ label }}</span></a></li>
+    <ul class="w-sidebar__section w-sidebar__foot" aria-label="More">
+        {%- for key, href, glyph, label in foot %}
+        <li><a class="w-nav__item" href="{{ href }}" data-nav="{{ key }}" title="{{ label }}"{% if active == key %} aria-current="page"{% endif %}>{{ w.icon(glyph) }}<span class="w-nav__label">{{ label }}</span></a></li>
         {%- endfor %}
+        <li><button type="button" class="w-nav__item w-sidebar__collapse" data-sidebar-toggle
+                aria-controls="w-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+            {{ w.icon("panel-left") }}<span class="w-nav__label" data-sidebar-toggle-label>Collapse</span>
+        </button></li>
     </ul>
 </aside>

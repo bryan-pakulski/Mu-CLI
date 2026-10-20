@@ -1,14 +1,28 @@
-import React, { useState, useCallback } from 'react';
-import { View, ScrollView, RefreshControl, StyleSheet, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+// Files (web files_panel.html): browse the workspace tree; folders open in place, files open
+// read-only in a full-screen sheet.
+
+import React, { useCallback, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { useTheme } from '../theme/ThemeContext';
-import { filesApi, FileEntry } from '../api/files';
-import { spacing, fonts } from '../theme/tokens';
-import { Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text, Icon } from '../ui';
+import { filesApi, type FileEntry } from '../api/files';
+import { PanelPage } from '../components/chat/PanelPage';
+import { spacing } from '../theme/tokens';
+import { Button, Pre, Row, Rows, Sheet, Text, useToast } from '../ui';
+
+export function fileSize(size: number | null | undefined): string | undefined {
+  if (size == null) return undefined;
+  return size > 1024 ? `${Math.round(size / 1024)}KB` : `${size}B`;
+}
+
+export function parentPath(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  const parts = path.split('/');
+  parts.pop();
+  return parts.length > 1 ? parts.join('/') : undefined;
+}
 
 export function FilesScreen() {
-  const { colors } = useTheme();
+  const toast = useToast();
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState<string | undefined>(undefined);
   const [fileContent, setFileContent] = useState<{ path: string; content: string } | null>(null);
@@ -29,114 +43,58 @@ export function FilesScreen() {
       setRefreshing(false);
     }
   }, []);
-
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+  useFocusEffect(useCallback(() => { setLoading(true); void load(); }, [load]));
 
   const openEntry = async (entry: FileEntry) => {
-    if (entry.is_dir) {
-      setLoading(true);
-      load(entry.path);
-    } else {
-      try {
-        const res = await filesApi.readFile(entry.path);
-        setFileContent({ path: entry.path, content: res.content });
-      } catch (e) {
-        Alert.alert('Read failed', String(e));
-      }
+    if (entry.is_dir) { setLoading(true); void load(entry.path); return; }
+    try {
+      const res = await filesApi.readFile(entry.path);
+      setFileContent({ path: entry.path, content: res.content });
+    } catch (e) {
+      toast(`Couldn't read ${entry.name}: ${String(e)}`, 'danger');
     }
   };
 
   const goUp = () => {
     if (!currentPath) return;
-    const parts = currentPath.split('/');
-    parts.pop();
-    const parent = parts.length > 1 ? parts.join('/') : undefined;
     setLoading(true);
-    load(parent);
+    void load(parentPath(currentPath));
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <View style={{ padding: spacing.base }}>
-          {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} height={44} style={{ marginBottom: spacing.xs }} />)}
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <ErrorState message={error} onRetry={() => load(currentPath)} />
-      </SafeAreaView>
-    );
-  }
-
-  if (entries.length === 0 && !fileContent) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <EmptyState title="No files" message="No files found in workspace" />
-      </SafeAreaView>
-    );
-  }
-
-  if (fileContent) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
-          <Pressable onPress={() => setFileContent(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="arrow-left" size="lg" color={colors.ink} />
-          </Pressable>
-          <Text variant="sm" style={{ color: colors.ink, marginLeft: spacing.sm, flex: 1, fontFamily: fonts.mono }} numberOfLines={1}>
-            {fileContent.path}
-          </Text>
-        </View>
-        <ScrollView contentContainerStyle={{ padding: spacing.base }}>
-          <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono }}>
-            {fileContent.content}
-          </Text>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
+  const dirs = entries.filter(e => e.is_dir).length;
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.base, borderBottomWidth: 1, borderBottomColor: colors.hairline }}>
-        {currentPath && (
-          <Pressable onPress={goUp} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="arrow-left" size="lg" color={colors.ink} />
-          </Pressable>
-        )}
-        <Text variant="sm" style={{ color: colors.ink3, marginLeft: spacing.sm, flex: 1 }} numberOfLines={1}>
-          {currentPath || '/'}
-        </Text>
-      </View>
-      <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(currentPath); }} />}
-        contentContainerStyle={{ padding: spacing.base }}
-      >
+    <PanelPage testID="files-screen" title="Files"
+      state={[{ text: currentPath || '/', tone: 'quiet' }, { text: `${dirs} folders · ${entries.length - dirs} files` }]}
+      loading={loading} error={error} onRetry={() => void load(currentPath)}
+      empty={!loading && !error && !entries.length ? { title: 'No files', message: 'No files found in workspace.' } : null}
+      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(currentPath); }}
+      toolbar={currentPath ? (
+        <View style={styles.toolbar}>
+          <Button label="Up" icon="arrow-left" variant="ghost" onPress={goUp} testID="files-up" />
+          <Text variant="monoSm" tone="ink3" numberOfLines={1} style={styles.flex}>{currentPath}</Text>
+        </View>
+      ) : undefined}>
+      <Rows label="Files">
         {entries.map(entry => (
-          <Pressable key={entry.path} onPress={() => openEntry(entry)} activeOpacity={0.7}>
-            <Card style={{ marginBottom: spacing.xs, minHeight: 44 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                <Icon
-                  name={entry.is_dir ? 'folder' : 'file'}
-                  size="md"
-                  color={entry.is_dir ? colors.ink2 : colors.ink3}
-                />
-                <Text variant="sm" style={{ flex: 1 }} numberOfLines={1}>{entry.name}</Text>
-                {!entry.is_dir && entry.size !== null && (
-                  <Text variant="xs" style={{ color: colors.ink3, fontVariant: ['tabular-nums'] }}>
-                    {entry.size > 1024 ? `${Math.round(entry.size / 1024)}KB` : `${entry.size}B`}
-                  </Text>
-                )}
-              </View>
-            </Card>
-          </Pressable>
+          <Row key={entry.path} testID={`file-${entry.name}`} title={`${entry.is_dir ? '▸ ' : ''}${entry.name}`}
+            when={entry.is_dir ? undefined : fileSize(entry.size)} onPress={() => void openEntry(entry)}
+            accessibilityLabel={`${entry.is_dir ? 'Folder' : 'File'} ${entry.name}`} />
         ))}
-      </ScrollView>
-    </SafeAreaView>
+      </Rows>
+      <Sheet visible={!!fileContent} onClose={() => setFileContent(null)} title={fileContent?.path.split('/').pop()} full testID="file-viewer">
+        {fileContent ? (
+          <View style={styles.viewer}>
+            <Text variant="monoSm" tone="ink3" numberOfLines={2}>{fileContent.path}</Text>
+            <Pre testID="file-content">{fileContent.content}</Pre>
+          </View>
+        ) : null}
+      </Sheet>
+    </PanelPage>
   );
 }
+
+const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  toolbar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  viewer: { gap: spacing.sm },
+});

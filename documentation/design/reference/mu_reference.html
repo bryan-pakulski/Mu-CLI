@@ -1,0 +1,342 @@
+<!doctype html>
+<!-- Mu reference (documentation/design/mu_style_guide.md). Static mockups built from the real Wash
+     tokens, fonts and ambient art. Open in a browser; #work, #orch, #chat, #sheet show one screen;
+     ?theme=dusk for the dark theme. -->
+<html lang="en" data-theme="paper">
+<head>
+<meta charset="utf-8">
+<title>Mu — reference</title>
+<link rel="stylesheet" href="../../../mu/gui/static/css/wash/tokens.css">
+<style>
+@font-face { font-family: "Inter"; src: url("../../../mu/gui/static/fonts/InterVariable.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "JetBrains Mono"; src: url("../../../mu/gui/static/fonts/JetBrainsMono-Variable.woff2") format("woff2"); font-weight: 100 900; }
+
+:root {
+  /* Mu tokens proposed in §12 */
+  --leaf: color-mix(in srgb, var(--wash-surface) 64%, transparent);
+  --leaf-margin: 16px;
+  --s1: 8px; --s2: 16px; --s3: 32px; --s4: 64px;
+  --row: 48px;
+  --sheet: 520px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { font: 14px/21px var(--wash-font-sans); color: var(--wash-ink); background: var(--wash-canvas);
+       -webkit-font-smoothing: antialiased; font-feature-settings: "cv11", "ss01"; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+/* ---------- frame: wash, rail, leaf ---------- */
+.screen { position: relative; width: 1440px; height: 900px; overflow: hidden; display: none;
+          background: var(--wash-canvas) var(--art) center / cover no-repeat; }
+.screen.show { display: grid; grid-template-columns: 208px 1fr; }
+.screen[data-art="lagoon"] { --art: url("../../../mu/gui/static/wash/art/ambient-lagoon-paper-1920.webp"); }
+.screen[data-art="dawn"]   { --art: url("../../../mu/gui/static/wash/art/ambient-dawn-paper-1920.webp"); }
+[data-theme="dusk"] .screen[data-art="lagoon"] { --art: url("../../../mu/gui/static/wash/art/ambient-lagoon-dusk-1920.webp"); }
+[data-theme="dusk"] .screen[data-art="dawn"]   { --art: url("../../../mu/gui/static/wash/art/ambient-dawn-dusk-1920.webp"); }
+/* the wash softens to paper under the rail */
+.screen::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 260px; pointer-events: none;
+                  background: linear-gradient(90deg, color-mix(in srgb, var(--wash-canvas) 86%, transparent) 60%, transparent); }
+
+.rail { position: relative; padding: 20px 12px; display: flex; flex-direction: column; gap: 2px; }
+.mark { width: 26px; height: 26px; margin: 0 0 22px 10px; border-radius: 7px;
+        background: url("../../../mu/gui/static/icons/mu-mark.png") center / cover; }
+.nav { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 999px;
+       color: var(--wash-ink-2); font-weight: 450; }
+.nav svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.6; flex: none; opacity: .8; }
+.nav[aria-current] { color: var(--wash-ink); font-weight: 500; background: var(--wash-glass-strong);
+                     box-shadow: var(--wash-glass-highlight), 0 1px 2px rgba(45,32,50,.06); }
+.count { margin-left: auto; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 999px; font-size: 11px;
+         line-height: 18px; text-align: center; font-weight: 600; color: var(--wash-attention-ink); background: var(--wash-attention-wash); }
+.rail .spacer { flex: 1; }
+.rail .group { margin: 24px 0 6px 10px; font-size: 12px; color: var(--wash-ink-3); display: flex; justify-content: space-between; padding-right: 10px; }
+.sess { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 999px; color: var(--wash-ink-2); font-size: 13px; }
+.sess[aria-current] { color: var(--wash-ink); background: var(--wash-glass-subtle); }
+.sess .run { margin-left: auto; }
+
+.leaf { position: relative; margin: var(--leaf-margin) var(--leaf-margin) var(--leaf-margin) 0; border-radius: var(--wash-radius-xl);
+        background: var(--leaf); backdrop-filter: blur(28px) saturate(1.4);
+        box-shadow: inset 0 0 0 1px var(--wash-glass-border), 0 0 0 1px var(--wash-glass-edge), 0 20px 60px rgba(45,32,50,.07);
+        overflow: hidden; }
+.page { padding: 44px 48px; height: 100%; overflow: hidden; }
+.col { max-width: 880px; }
+
+/* ---------- page header ---------- */
+.head { display: flex; align-items: baseline; gap: var(--s2); }
+h1 { font-size: 27px; line-height: 34px; font-weight: 500; letter-spacing: -0.022em; color: var(--wash-plum); }
+.head .grow { flex: 1; }
+.state { margin-top: 6px; color: var(--wash-ink-2); font-size: 13.5px; }
+.state .att { color: var(--wash-attention-ink); font-weight: 500; }
+.state .sep { color: var(--wash-ink-3); margin: 0 6px; }
+.primary { height: 34px; padding: 0 16px; border-radius: 999px; background: var(--wash-ink); color: var(--wash-on-ink);
+           font-weight: 500; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.text-btn { font-weight: 500; font-size: 13px; color: var(--wash-ink); }
+.quiet { font-size: 13px; color: var(--wash-ink-3); }
+.tabs { display: flex; gap: 24px; margin-top: 28px; font-size: 13px; color: var(--wash-ink-3); }
+.tabs span { padding-bottom: 8px; }
+.tabs .on { color: var(--wash-ink); font-weight: 500; box-shadow: inset 0 -2px 0 var(--wash-ink); }
+
+/* ---------- sections and rows ---------- */
+.section { margin-top: 48px; }
+h3 { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: -0.005em; color: var(--wash-ink); margin-bottom: 8px; }
+h3 .aside { font-weight: 400; color: var(--wash-ink-3); font-size: 13px; margin-left: 8px; }
+.row { position: relative; display: grid; grid-template-columns: 1fr auto; column-gap: 24px; padding: 13px 14px 13px 40px;
+       margin: 0 -14px 0 -40px; border-radius: 14px; }
+.row + .row::before { content: ""; position: absolute; top: 0; left: 40px; right: 14px; height: 1px; background: var(--wash-hairline); opacity: .8; }
+.row.hover { background: var(--wash-glass-subtle); }
+.row.hover::before, .row.hover + .row::before { opacity: 0; }
+.row .m { position: absolute; left: 16px; top: 14px; width: 14px; text-align: center; font-size: 12px; line-height: 20px; }
+.row .t { font-weight: 500; }
+.row .t .key { font-family: var(--wash-font-mono); font-size: 12px; color: var(--wash-ink-3); font-weight: 400; margin-right: 8px; }
+.row .s { grid-column: 1; color: var(--wash-ink-3); font-size: 12.5px; line-height: 19px; margin-top: 2px; }
+.row .s .att { color: var(--wash-attention-ink); }
+.row .s .dan { color: var(--wash-danger-ink); }
+.row .when { color: var(--wash-ink-3); font-size: 12.5px; text-align: right; }
+.row .acts { grid-column: 2; display: flex; gap: 18px; justify-content: flex-end; align-items: end; font-size: 13px; }
+.row .acts .go { font-weight: 500; color: var(--wash-ink); }
+.row .acts .mute { color: var(--wash-ink-3); }
+.m.att { color: var(--wash-attention-pigment); }
+.m.dan { color: var(--wash-danger-ink); font-size: 11px; }
+.m.done { color: var(--wash-ink-3); }
+.m.run { color: var(--wash-running-pigment); }
+.m.rest { color: var(--wash-ink-3); }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wash-running-pigment);
+       box-shadow: 0 0 0 4px color-mix(in srgb, var(--wash-running-pigment) 22%, transparent); vertical-align: 1px; }
+.bar { height: 2px; margin-top: 8px; width: 240px; background: linear-gradient(90deg, var(--wash-running-pigment) 60%, transparent 60%); border-radius: 2px; opacity: .8; }
+
+/* ---------- chat ---------- */
+.chat { max-width: 680px; margin: 0 auto; padding: 40px 0 0; height: 100%; position: relative; }
+.chat h1 { font-size: 17px; line-height: 24px; font-weight: 500; letter-spacing: -0.01em; color: var(--wash-ink); }
+.chat .sub { color: var(--wash-ink-3); font-size: 12.5px; }
+.msg { margin-top: 36px; font-size: 15px; line-height: 25px; color: var(--wash-ink); }
+.msg .who { font-size: 12px; color: var(--wash-ink-3); margin-bottom: 4px; }
+.msg p + p { margin-top: 12px; }
+code { font-family: var(--wash-font-mono); font-size: 12.5px; padding: 1px 5px; border-radius: 5px; background: var(--wash-sunken); }
+.tools { margin-top: 14px; font-size: 13px; color: var(--wash-ink-3); }
+.tools b { font-weight: 500; color: var(--wash-ink-2); }
+.decision { margin-top: 28px; padding: 20px 22px; border-radius: 20px; background: var(--wash-attention-wash); }
+.decision .q { font-weight: 500; font-size: 15px; color: var(--wash-ink); }
+.decision .r { margin-top: 4px; font-size: 13px; color: var(--wash-ink-2); }
+.decision pre { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--wash-surface) 72%, transparent);
+                font: 12.5px/19px var(--wash-font-mono); color: var(--wash-ink-2); white-space: pre-wrap; }
+.decision .acts { margin-top: 16px; display: flex; gap: 20px; align-items: center; }
+.composer { position: absolute; left: 0; right: 0; bottom: 28px; padding: 14px 16px 10px; border-radius: 24px;
+            background: var(--wash-glass-strong); backdrop-filter: blur(32px);
+            box-shadow: inset 0 0 0 1px var(--wash-glass-border), 0 0 0 1px var(--wash-glass-edge), 0 12px 40px rgba(45,32,50,.10); }
+.composer .ph { color: var(--wash-ink-3); font-size: 15px; }
+.composer .foot { margin-top: 14px; display: flex; gap: 18px; align-items: center; font-size: 12.5px; color: var(--wash-ink-3); }
+.composer .foot .grow { flex: 1; }
+.ring { width: 16px; height: 16px; border-radius: 50%; background: conic-gradient(var(--wash-lagoon-pigment) 10%, var(--wash-hairline) 0); }
+.send { width: 30px; height: 30px; border-radius: 50%; background: var(--wash-ink); color: var(--wash-on-ink); display: grid; place-items: center; font-size: 14px; }
+.locked { margin-top: 10px; font-size: 12.5px; color: var(--wash-attention-ink); }
+
+/* ---------- sheet ---------- */
+.dim { position: absolute; inset: 0; background: rgba(30,26,23,.04); }
+.sheet { position: absolute; top: 10px; right: 10px; bottom: 10px; width: var(--sheet); border-radius: 22px; padding: 32px 32px;
+         background: var(--wash-glass-strong); backdrop-filter: blur(32px);
+         box-shadow: inset 0 0 0 1px var(--wash-glass-border), 0 0 0 1px var(--wash-glass-edge), 0 24px 70px rgba(45,32,50,.16); }
+.sheet .x { position: absolute; top: 26px; right: 24px; color: var(--wash-ink-3); font-size: 18px; }
+.sheet h2 { font-size: 20px; line-height: 27px; font-weight: 500; letter-spacing: -0.015em; color: var(--wash-plum); padding-right: 32px; }
+.facts { display: grid; grid-template-columns: 120px 1fr; row-gap: 10px; margin-top: 28px; font-size: 13.5px; }
+.facts dt { color: var(--wash-ink-3); }
+.facts dd { color: var(--wash-ink); }
+.disclose { margin-top: 28px; font-size: 13px; color: var(--wash-ink-2); font-weight: 500; }
+.mono { font-family: var(--wash-font-mono); font-size: 12.5px; }
+
+/* index view: every screen stacked with a caption */
+body:not(.one) .screen { display: grid; grid-template-columns: 208px 1fr; margin: 0 auto 48px; transform-origin: top center; }
+body:not(.one) .cap { width: 1440px; margin: 40px auto 12px; font: 500 15px var(--wash-font-sans); color: var(--wash-ink-2); }
+body.one .cap { display: none; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3 21l2-5.4A8.4 8.4 0 1 1 21 11.5Z"/></symbol>
+  <symbol id="i-work" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-orch" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/></symbol>
+  <symbol id="i-env" viewBox="0 0 24 24"><path d="M12 3 21 8v8l-9 5-9-5V8Z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol>
+  <symbol id="i-ins" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+  <symbol id="i-set" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z"/></symbol>
+</svg>
+
+<template id="rail">
+  <nav class="rail">
+    <div class="mark"></div>
+    <a class="nav" data-k="chat"><svg><use href="#i-chat"/></svg>Chat</a>
+    <a class="nav" data-k="work"><svg><use href="#i-work"/></svg>Work<span class="count">1</span></a>
+    <a class="nav" data-k="orch"><svg><use href="#i-orch"/></svg>Orchestration<span class="count">2</span></a>
+    <a class="nav" data-k="env"><svg><use href="#i-env"/></svg>Environments</a>
+    <div class="sessions"></div>
+    <div class="spacer"></div>
+    <a class="nav"><svg><use href="#i-ins"/></svg>Insights</a>
+    <a class="nav"><svg><use href="#i-set"/></svg>Settings</a>
+  </nav>
+</template>
+
+<!-- ============================================================ Work -->
+<p class="cap">Work: Now, then running, then recent. One primary action, one state sentence.</p>
+<section class="screen" id="work" data-art="lagoon" data-nav="work">
+  <main class="leaf"><div class="page"><div class="col">
+    <div class="head"><h1>Work</h1><span class="grow"></span><button class="primary">+ New job</button></div>
+    <p class="state"><span class="att">1 needs you</span><span class="sep">·</span>1 running<span class="sep">·</span>$7.56 today</p>
+    <div class="tabs"><span class="on">Now</span><span>Jobs</span><span>Tickets</span><span>History</span><span>More ▾</span></div>
+
+    <div class="section">
+      <h3>Now</h3>
+      <div class="row">
+        <span class="m att">◆</span>
+        <div class="t"><span class="key">SCRUM-215</span>Soft delete &amp; modification</div><div class="when">23h</div>
+        <div class="s">Review done · ready to push to <span class="mono">feature/soft-delete</span></div>
+        <div class="acts"><span class="go">Review</span><span class="mute">Push</span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Running</h3>
+      <div class="row hover">
+        <span class="m run"><span class="dot"></span></span>
+        <div class="t"><span class="key">SCRUM-221</span>Rate-limit the login endpoint</div><div class="when">12m</div>
+        <div class="s">Implementing · step 3 of 5 · $1.20<div class="bar"></div></div>
+        <div class="acts"><span class="mute">Watch</span><span class="mute">⋯</span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Recent</h3>
+      <div class="row"><span class="m done">✓</span>
+        <div class="t"><span class="key">SCRUM-209</span>Export receipts as CSV</div><div class="when">Yesterday</div>
+        <div class="s">Merged · 6 files · $2.04</div></div>
+      <div class="row"><span class="m dan">✕</span>
+        <div class="t"><span class="key">SCRUM-204</span>Migrate session store to SQLite</div><div class="when">2d</div>
+        <div class="s"><span class="dan">Checks failed</span> · 3 tests in test_session_store.py</div></div>
+      <div class="row"><span class="m done">✓</span>
+        <div class="t"><span class="key">SCRUM-198</span>Wash tokens for Android</div><div class="when">3d</div>
+        <div class="s">Merged · 14 files · $3.31</div></div>
+      <div class="row"><span class="m rest">○</span>
+        <div class="t">Tidy the trace parser</div><div class="when">4d</div>
+        <div class="s">Discarded</div></div>
+    </div>
+  </div></div></main>
+</section>
+
+<!-- ============================================================ Orchestration -->
+<p class="cap">Orchestration: approvals are Now; the fleet is a sentence; the kill switch is quiet until it's on.</p>
+<section class="screen" id="orch" data-art="lagoon" data-nav="orch">
+  <main class="leaf"><div class="page"><div class="col">
+    <div class="head"><h1>Orchestration</h1><span class="grow"></span><button class="text-btn">Set up a node</button><button class="primary">New run</button></div>
+    <p class="state"><span class="att">2 need you</span><span class="sep">·</span>6 nodes, all online<span class="sep">·</span>10 tools<span class="sep">·</span>dispatching</p>
+    <div class="tabs"><span class="on">Now</span><span>Runs</span><span>Nodes</span><span>Catalog</span><span>More ▾</span></div>
+
+    <div class="section">
+      <h3>Now</h3>
+      <div class="row">
+        <span class="m att">◆</span>
+        <div class="t">Paused · sys.security-patch@1 on 2 nodes</div><div class="when">6m</div>
+        <div class="s">The canary failed on web-1: apt refused to remove a held package.</div>
+        <div class="acts"><span class="go">Continue</span><span class="go">Roll back</span><span class="mute">⋯</span></div>
+      </div>
+      <div class="row">
+        <span class="m att">◆</span>
+        <div class="t">Approve · test sys.security-patch@2 on web-1</div><div class="when">3m</div>
+        <div class="s">Proposed by the AI in orch-tool-studio · check mode · mutating</div>
+        <div class="acts"><span class="go">Approve</span><span class="mute">Reject</span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Recent runs</h3>
+      <div class="row"><span class="m run"><span class="dot"></span></span>
+        <div class="t">Test sys.security-patch@2 · check-default</div><div class="when">3m</div>
+        <div class="s">Running · 0 of 1 done</div></div>
+      <div class="row"><span class="m dan">✕</span>
+        <div class="t">sys.security-patch@1 on 6 nodes</div><div class="when">14m</div>
+        <div class="s">4 of 6 done · <span class="dan">2 failed</span> · mutating</div></div>
+      <div class="row"><span class="m done">✓</span>
+        <div class="t">Test sys.security-patch@1 · check-default</div><div class="when">5h</div>
+        <div class="s">1 of 1 done · by the AI</div></div>
+      <div class="row"><span class="m done">✓</span>
+        <div class="t">sys.memory@1 on all nodes</div><div class="when">Yesterday</div>
+        <div class="s">6 of 6 done · read-only</div></div>
+    </div>
+  </div></div></main>
+</section>
+
+<!-- ============================================================ Chat -->
+<p class="cap">Chat: prose on the leaf, tool activity in one line, the decision block as the only coloured surface, settings in the composer foot.</p>
+<section class="screen" id="chat" data-art="dawn" data-nav="chat" data-sessions="1">
+  <main class="leaf"><div class="chat">
+    <h1>orch-tool-studio</h1>
+    <div class="msg"><div class="who">You</div>Why did the patch fail on two nodes?</div>
+    <div class="msg">
+      <p>v1 passes all 16 security packages to a single <code>apt-get install --only-upgrade --no-remove</code>. Upgrading at least one of them needs another package removed, and <code>--no-remove</code> forbids that, so apt refused the whole batch.</p>
+      <p>v2 tests packages one at a time when the batch fails and reports each skipped package with the reason. I'd like to check it on web-1 first.</p>
+      <div class="tools">▸ <b>Read 3 files</b> · ran 2 commands · 1 test run</div>
+    </div>
+    <div class="decision">
+      <div class="q">Test sys.security-patch@2 on web-1 in check mode?</div>
+      <div class="r">Mutating tool, check mode only · 1 node · nothing is installed</div>
+      <pre>orch.test  sys.security-patch@2  nodes=web-1  check=true</pre>
+      <div class="acts"><button class="primary">Approve and test</button><button class="text-btn">Reject</button><span class="quiet">Details ▸</span></div>
+    </div>
+    <div class="composer">
+      <div class="ph">Ask μcli anything…</div>
+      <div class="locked">Decide above to continue</div>
+      <div class="foot"><span>+</span><span>Default ▾</span><span>claude-opus-5-5 ▾</span><span>Effort ▾</span><span class="grow"></span><span class="ring" title="10% of context"></span><span class="send">↑</span></div>
+    </div>
+  </div></main>
+</section>
+
+<!-- ============================================================ Sheet -->
+<p class="cap">Detail sheet: opens over the list, decision first, facts next, raw detail folded.</p>
+<section class="screen" id="sheet" data-art="lagoon" data-nav="orch">
+  <main class="leaf"><div class="page"><div class="col" style="opacity:.55">
+    <div class="head"><h1>Orchestration</h1></div>
+    <p class="state"><span class="att">2 need you</span><span class="sep">·</span>6 nodes, all online<span class="sep">·</span>10 tools</p>
+    <div class="tabs"><span class="on">Now</span><span>Runs</span><span>Nodes</span><span>Catalog</span></div>
+    <div class="section"><h3>Now</h3>
+      <div class="row hover"><span class="m att">◆</span><div class="t">Paused · sys.security-patch@1 on 2 nodes</div><div class="when">6m</div>
+        <div class="s">The canary failed on web-1.</div></div>
+      <div class="row"><span class="m att">◆</span><div class="t">Approve · test sys.security-patch@2 on web-1</div><div class="when">3m</div>
+        <div class="s">Proposed by the AI · check mode</div></div>
+    </div>
+  </div></div>
+  <div class="dim"></div>
+  <aside class="sheet">
+    <span class="x">×</span>
+    <h2>sys.security-patch@1 on 2 nodes</h2>
+    <p class="state"><span class="att">◆ Paused</span><span class="sep">·</span>the canary failed on web-1</p>
+    <div class="decision" style="margin-top:24px">
+      <div class="q">Continue to the next batch, or roll back web-1?</div>
+      <div class="r">1 node left: db-1 (prod). Roll back restores the 16 packages on web-1.</div>
+      <div class="acts"><button class="primary">Continue</button><button class="text-btn">Roll back</button><button class="text-btn" style="color:var(--wash-danger-ink)">Cancel run</button></div>
+    </div>
+    <dl class="facts">
+      <dt>Why</dt><dd>apt refused: upgrading <span class="mono">linux-image-amd64</span> needs a removal</dd>
+      <dt>Targets</dt><dd>env in (dev, prod) · 2 nodes, 2 batches</dd>
+      <dt>Effect</dt><dd>Mutating · rollback available</dd>
+      <dt>Approved</dt><dd>by you, 6m ago</dd>
+    </dl>
+    <div class="disclose">Details ▸</div>
+    <div class="disclose" style="margin-top:12px">Log from web-1 ▸</div>
+  </aside>
+  </main>
+</section>
+
+<script>
+  const q = new URLSearchParams(location.search);
+  if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme');
+  const rail = document.getElementById('rail');
+  document.querySelectorAll('.screen').forEach(s => {
+    const r = rail.content.cloneNode(true);
+    r.querySelector(`[data-k="${s.dataset.nav}"]`)?.setAttribute('aria-current', 'page');
+    if (s.dataset.sessions) {
+      r.querySelector('.sessions').innerHTML = '<div class="group"><span>Sessions</span><span>+</span></div>' +
+        [['Harvest-House'], ['mucli', 1], ['orch-tool-studio', 1, 1], ['pakulski.dev'], ['rsq-cloud'], ['wavebathy']]
+          .map(([n, run, cur]) => `<a class="sess"${cur ? ' aria-current="page"' : ''}>${n}${run ? '<span class="run"><span class="dot" style="width:6px;height:6px;box-shadow:none"></span></span>' : ''}${cur ? '<span class="count" style="margin-left:6px">1</span>' : ''}</a>`).join('');
+    }
+    s.prepend(r);
+  });
+  const one = location.hash.slice(1);
+  if (one && document.getElementById(one)) { document.body.classList.add('one'); document.getElementById(one).classList.add('show'); }
+</script>
+</body>
+</html>

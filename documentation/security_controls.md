@@ -157,5 +157,5 @@ db_url: postgres://localhost:5432/foo
 - Layer 3 wire-in: `mu/tools/_scrub.py` — `read_file`, `bash`,
   `get_chunk`, `search_for_string`, `search_references`.
 
-Tests live in `tests/test_secret_paths.py`,
-`tests/test_secret_scrubber.py`, and `tests/test_bash_secret_guard.py`.
+Tests live in `tests/tools/test_secret_paths.py`,
+`tests/tools/test_secret_scrubber.py`, and `tests/tools/test_bash_secret_guard.py`.

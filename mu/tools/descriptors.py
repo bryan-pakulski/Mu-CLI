@@ -273,16 +273,31 @@ OPTIONAL_TOOL_PHASES: dict[str, str] = {
     "trace": "agent-run trace analysis: list_traces/trace_summary/trace_series/trace_iteration",
     "browser": "headless-Chromium page snapshot + HTML self-review",
     "codex": "best_of_codex parallel read-only proposals",
+    "orchestration": "fleet orch_* tools (auto-on in orchestration sessions; unavailable elsewhere)",
+    "fleet": "read-only fleet_overview / fleet_results (auto-on once orchestration is set up on this machine)",
 }
 
 
 def infer_contextual_tool_phases(session) -> list[str]:
     """Optional phases that should be active because live session state
-    makes them relevant: peer threads present -> ``thread``; uploaded
-    attachments present -> ``attachment``. Best-effort and read-only."""
+    makes them relevant: an orchestration session -> ``orchestration``; peer
+    threads present -> ``thread``; uploaded attachments present ->
+    ``attachment``. Best-effort and read-only."""
     phases: list[str] = []
     if session is None:
         return phases
+    variables = getattr(session, "variables", None) or {}
+    if str(variables.get("session_type") or "").lower() == "orchestration":
+        phases.append("orchestration")
+        phases.append("fleet")
+    else:
+        # Read-only fleet tools in every session once orchestration exists here (never creates it).
+        try:
+            from mu.orchestration.attention import peek
+            if peek(max_age_s=60.0) is not None:
+                phases.append("fleet")
+        except Exception:  # noqa: BLE001 — never block prompt assembly
+            pass
     try:
         coordinator = getattr(session, "thread_coordinator", None)
         meta = getattr(session, "thread_meta", None)

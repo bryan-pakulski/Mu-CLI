@@ -117,3 +117,11 @@
     <svg class="w-icon" data-theme-icon="sun" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-sun"></use></svg>
 </button>
 {%- endmacro -%}
+
+{#- insights_tabs(active) — the page tabs shared by the Insights destination
+    (Mu §10.5): Runs (/trace), Jobs (/jobs/trace), Costs (/models/costs). -#}
+{%- macro insights_tabs(active) -%}
+{%- for key, href, label in [("runs", "/trace", "Runs"), ("jobs", "/jobs/trace", "Jobs"), ("costs", "/models/costs", "Costs")] -%}
+<a class="w-pagetabs__tab" href="{{ href }}"{% if active == key %} aria-current="page"{% endif %}>{{ label }}</a>
+{%- endfor -%}
+{%- endmacro -%}

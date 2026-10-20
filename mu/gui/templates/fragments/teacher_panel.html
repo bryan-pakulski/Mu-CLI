@@ -212,7 +212,7 @@
                          x-show="(($store.teacher.currentLesson().learning_objectives || [])).length">
                         <h5>Objectives</h5>
                         <ul>
-                            <template x-for="obj in $store.teacher.currentLesson().learning_objectives" :key="obj">
+                            <template x-for="(obj, oi) in ($store.teacher.currentLesson().learning_objectives || [])" :key="oi">
                                 <li x-text="obj"></li>
                             </template>
                         </ul>
@@ -281,7 +281,7 @@
                         <div class="detail-prompt" x-show="a.prompt"
                              x-text="a.prompt"></div>
                         <ul class="detail-rubric" x-show="a.rubric && a.rubric.length">
-                            <template x-for="r in a.rubric" :key="r.criterion">
+                            <template x-for="(r, ri) in (a.rubric || [])" :key="ri">
                                 <li>
                                     <span class="mono small" x-text="r.weight != null ? ('[' + r.weight + '] ') : ''"></span>
                                     <span x-text="r.criterion"></span>

@@ -1,0 +1,226 @@
+{
+ "actions": [
+  {
+   "available": true,
+   "check_available": false,
+   "danger": false,
+   "effect": "read_only",
+   "help": "Count pending package updates (read-only).",
+   "installed": true,
+   "key": "check_updates",
+   "label": "Check for updates",
+   "needs": "",
+   "params": {},
+   "reason": "",
+   "tool": "sys.pending-updates@1"
+  },
+  {
+   "available": true,
+   "check_available": true,
+   "danger": false,
+   "effect": "mutating",
+   "help": "Install packages with security updates; refused packages are skipped and reported.",
+   "installed": true,
+   "key": "security_updates",
+   "label": "Install security updates",
+   "needs": "",
+   "params": {
+    "refresh": true
+   },
+   "reason": "",
+   "tool": "os.security-updates@1"
+  },
+  {
+   "available": true,
+   "check_available": true,
+   "danger": false,
+   "effect": "mutating",
+   "help": "Upgrade every package. No removals unless allowed.",
+   "installed": true,
+   "key": "full_upgrade",
+   "label": "Upgrade all packages",
+   "needs": "",
+   "params": {
+    "allow_removals": false
+   },
+   "reason": "",
+   "tool": "os.full-upgrade@1"
+  },
+  {
+   "available": true,
+   "check_available": true,
+   "danger": true,
+   "effect": "mutating",
+   "help": "Schedule a reboot 30 seconds out; the node comes back on its own.",
+   "installed": true,
+   "key": "reboot",
+   "label": "Reboot",
+   "needs": "",
+   "params": {
+    "delay_s": 30,
+    "only_if_required": false
+   },
+   "reason": "",
+   "tool": "os.reboot@1"
+  },
+  {
+   "available": true,
+   "check_available": true,
+   "danger": false,
+   "effect": "mutating",
+   "help": "Restart, reload, start or stop one systemd unit.",
+   "installed": true,
+   "key": "service",
+   "label": "Restart a service",
+   "needs": "unit",
+   "params": {
+    "action": "restart"
+   },
+   "reason": "",
+   "tool": "os.service@1"
+  }
+ ],
+ "installed": true,
+ "kernel": "6.1.0",
+ "name": "web-1",
+ "node_id": "n_a1105c121a",
+ "open_runs": [
+  {
+   "actions": [
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "approveRun",
+     "input": null,
+     "label": "Approve and start",
+     "primary": true,
+     "reason": "",
+     "shortcut": "",
+     "tone": "ok"
+    },
+    {
+     "args": {},
+     "confirm": "Reject this proposed run?",
+     "danger": true,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "rejectRun",
+     "input": {
+      "arg": "reason",
+      "label": "Reason (optional)",
+      "multiline": false,
+      "optional": true
+     },
+     "label": "Reject",
+     "primary": false,
+     "reason": "",
+     "shortcut": "",
+     "tone": "danger"
+    },
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": false,
+     "hidden": false,
+     "id": "continueRun",
+     "input": null,
+     "label": "Continue",
+     "primary": true,
+     "reason": "run is not paused",
+     "shortcut": "",
+     "tone": "ok"
+    },
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": false,
+     "hidden": false,
+     "id": "pauseRun",
+     "input": null,
+     "label": "Pause",
+     "primary": false,
+     "reason": "run is not running",
+     "shortcut": "",
+     "tone": "warn"
+    },
+    {
+     "args": {},
+     "confirm": "Roll back this run? Every completed change with a rollback tool is undone, newest first.",
+     "danger": false,
+     "dialog": null,
+     "enabled": false,
+     "hidden": false,
+     "id": "rollbackRun",
+     "input": null,
+     "label": "Roll back",
+     "primary": false,
+     "reason": "run cannot roll back now",
+     "shortcut": "",
+     "tone": "warn"
+    },
+    {
+     "args": {},
+     "confirm": "Cancel this run? Queued work is dropped and nodes are told to stop running executions.",
+     "danger": true,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "cancelRun",
+     "input": null,
+     "label": "Cancel",
+     "primary": false,
+     "reason": "",
+     "shortcut": "",
+     "tone": "danger"
+    }
+   ],
+   "check_mode": false,
+   "created_at": 1792491810.905049,
+   "decision": {
+    "level": "confirm",
+    "rule": "Anything that changes a system is confirmed",
+    "summary": "needs confirmation by rule \u201cAnything that changes a system is confirmed\u201d"
+   },
+   "effect": "mutating",
+   "effect_style": {
+    "label": "mutating",
+    "semantic": "attention"
+   },
+   "here": "not started",
+   "id": "r_fd7f720abb75",
+   "nodes": 2,
+   "paused_reason": "",
+   "progress": "ready",
+   "proposed_by": "operator",
+   "state": "proposed",
+   "style": {
+    "glyph": "\u25c6",
+    "label": "awaiting approval",
+    "semantic": "attention",
+    "status": "waiting"
+   },
+   "summary": {},
+   "title": "Restart web"
+  }
+ ],
+ "os": "Debian 12",
+ "pending_updates": null,
+ "reboot": {
+  "packages": [],
+  "reasons": [],
+  "required": null,
+  "since": null
+ },
+ "recent": [],
+ "services": [],
+ "uptime_days": null
+}

@@ -67,12 +67,12 @@ export function JobSessionPicker({ sessions, value, onChange, loading, error }: 
               backgroundColor: on ? colors.accent.wash : pressed ? colors.sunken : colors.canvas,
             }]}>
             <View style={styles.head}>
-              <Text variant="xs" style={{ color: on ? colors.accent.ink : colors.ink3 }}>{on ? '◉' : '○'}</Text>
-              <Text variant="sm" style={{ fontWeight: fontWeights.semibold, flex: 1 }} numberOfLines={1}>{s.name}</Text>
-              {s.current ? <Text variant="xs" style={{ color: colors.ink3 }}>current</Text> : null}
+              <Text variant="xs" tone={on ? 'accent' : 'ink3'}>{on ? '◉' : '○'}</Text>
+              <Text variant="sm" style={styles.flexStrong} numberOfLines={1}>{s.name}</Text>
+              {s.current ? <Text variant="xs" tone="ink3">current</Text> : null}
             </View>
-            <Text variant="xs" style={{ color: colors.ink3, fontFamily: fonts.mono }} numberOfLines={1}>{s.workspace || 'no workspace'}</Text>
-            {meta ? <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={1}>{meta}{s.agent_mode && s.agent_mode !== 'default' ? ` · ${s.agent_mode}` : ''}</Text> : null}
+            <Text variant="xs" tone="ink3" style={styles.mono} numberOfLines={1}>{s.workspace || 'no workspace'}</Text>
+            {meta ? <Text variant="xs" tone="ink3" numberOfLines={1}>{meta}{s.agent_mode && s.agent_mode !== 'default' ? ` · ${s.agent_mode}` : ''}</Text> : null}
           </Pressable>
         );
       })}
@@ -92,7 +92,7 @@ export function JobSessionSheet({ visible, title = 'Choose session', intro, defa
   const chosen = value ?? (supported ? defaultJobSession(sessions, defaultSession) : defaultSession);
   return (
     <Sheet visible={visible} onClose={onClose} title={title}>
-      {intro ? <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>{intro}</Text> : null}
+      {intro ? <Text variant="xs" tone="ink3" style={styles.intro}>{intro}</Text> : null}
       {supported
         ? <JobSessionPicker sessions={sessions} value={chosen} onChange={setValue} loading={loading} error={error} />
         : <Text variant="sm">{defaultSession ? `Session: ${defaultSession}` : 'This server cannot list sessions. Open jobs from a session first.'}</Text>}
@@ -134,7 +134,7 @@ export function WorkspaceField({ sessions, value, onChange, hint, error, testID 
               <Pressable key={w} testID={`${testID}-${w}`} accessibilityRole="radio" accessibilityLabel={`Workspace ${w}`}
                 accessibilityState={{ selected: on, checked: on }} onPress={() => onChange(w)}
                 style={[styles.chip, { borderColor: on ? colors.accent.ink : colors.hairline, backgroundColor: on ? colors.accent.wash : colors.canvas }]}>
-                <Text variant="xs" style={{ color: on ? colors.accent.ink : colors.ink, fontFamily: fonts.mono }} numberOfLines={1}>
+                <Text variant="xs" tone={on ? 'accent' : 'ink'} style={styles.mono} numberOfLines={1}>
                   {w.split('/').filter(Boolean).pop() || w}
                 </Text>
               </Pressable>
@@ -142,7 +142,7 @@ export function WorkspaceField({ sessions, value, onChange, hint, error, testID 
           })}
         </View>
       ) : null}
-      {error ? <Text variant="xs" style={{ color: colors.danger.ink }}>{error}</Text> : null}
+      {error ? <Text variant="xs" tone="danger">{error}</Text> : null}
     </Field>
   );
 }
@@ -180,7 +180,7 @@ export function JobImportSheet({ visible, title = 'Import tickets', intro, defau
   const matchedSession = workspace.trim() && !isRepositoryUrl(workspace.trim()) ? sessionForWorkspace(sessions, workspace.trim()) : undefined;
   return (
     <Sheet visible={visible} onClose={onClose} title={title}>
-      {intro ? <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>{intro}</Text> : null}
+      {intro ? <Text variant="xs" tone="ink3" style={styles.intro}>{intro}</Text> : null}
       <WorkspaceField sessions={sessions} value={workspace} onChange={pick} testID="job-import-workspace"
         hint={workspaceHint(sessions, workspace, fallbackSession)} error={error} />
       <RunInPicker active={visible} workspace={workspace} session={matchedSession?.name || fallbackSession} sessionEnvironment={matchedSession?.environment || null}
@@ -197,6 +197,13 @@ export function JobImportSheet({ visible, title = 'Import tickets', intro, defau
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  strong: { fontWeight: fontWeights.semibold },
+  flexStrong: { flex: 1, fontWeight: fontWeights.semibold },
+  mono: { fontFamily: fonts.mono },
+  monoShrink: { flexShrink: 1, fontFamily: fonts.mono },
+  sectionGap: { fontWeight: fontWeights.semibold, marginTop: spacing.sm },
+  intro: { marginBottom: spacing.sm },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs },
   chip: { borderWidth: 1, borderRadius: radii.control, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, minHeight: 32, justifyContent: 'center', maxWidth: 200 },
   list: { gap: spacing.xs },

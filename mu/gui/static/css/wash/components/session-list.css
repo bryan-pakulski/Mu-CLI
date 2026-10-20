@@ -41,20 +41,21 @@
     display: flex;
     align-items: center;
     gap: var(--wash-space-2);
-    min-height: 36px;
+    min-height: 30px;
     padding: 0 var(--wash-space-2) 0 var(--wash-space-3);
-    border-radius: var(--wash-radius-sm);
+    border-radius: var(--wash-radius-pill);
     color: var(--wash-ink-2);
-    font-size: var(--wash-type-body-size);
+    font-size: var(--wash-type-label-size);
     cursor: pointer;
     transition: background-color var(--wash-motion-micro) var(--wash-ease-micro), color var(--wash-motion-micro) var(--wash-ease-micro);
 }
 .w-session:hover { background: var(--w-glass-fill-subtle); color: var(--wash-ink); }
 .w-session:focus-visible { outline-offset: -2px; }
+/* The current session: a quiet tint (the rail's one strong pill is the destination). */
 .w-session[aria-current="true"] {
-    background: var(--w-glass-fill-strong);
+    background: var(--w-glass-fill-subtle);
     color: var(--wash-ink);
-    box-shadow: var(--w-glass-lift-2);
+    box-shadow: none;
 }
 .w-session__icon { display: inline-flex; flex: none; width: 16px; height: 16px; color: var(--wash-ink-3); }
 .w-session__icon svg { width: 16px; height: 16px; }

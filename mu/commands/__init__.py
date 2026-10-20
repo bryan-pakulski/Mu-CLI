@@ -151,6 +151,7 @@ def _load_command_modules() -> None:
     from . import job_diagnostics  # noqa: F401 — registers /jobdiag
     from . import profile  # noqa: F401 — registers /profile
     from . import job_analysis  # noqa: F401 — registers /jobtrace
+    from . import orch  # noqa: F401 — registers /orch
 
 
 _load_command_modules()

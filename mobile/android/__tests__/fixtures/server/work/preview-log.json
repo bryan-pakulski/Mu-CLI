@@ -1,0 +1,8 @@
+{
+  "bytes": 81,
+  "kind": "log",
+  "name": "test.log",
+  "path": "artifacts/suite-1/test.log",
+  "text": "starting\nWARNING slow fixture\nERROR boom\nTraceback (most recent call last):\ndone\n",
+  "truncated": false
+}

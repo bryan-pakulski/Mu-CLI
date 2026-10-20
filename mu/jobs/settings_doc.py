@@ -7,8 +7,6 @@ the settings the GUI, Android app and ``/job settings`` actually offer.
     python3 -m mu.jobs.settings_doc            # print the table
     python3 -m mu.jobs.settings_doc --write    # rewrite documentation/configuration.md
     python3 -m mu.jobs.settings_doc --check    # exit 1 when the document is stale
-
-``tests/test_job_settings_doc.py`` asserts the committed table matches.
 """
 
 from __future__ import annotations

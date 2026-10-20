@@ -164,8 +164,12 @@ class CacheHint:
                   Cache entry for the system prompt + early history.
       * OpenAI  — cache is automatic on stable prefixes; this is informational
                   and used to report cache-hit telemetry back via usage.
-      * Ollama  — `keep_alive_seconds` is mapped to the `keep_alive` request
-                  field so the model stays resident across turns.
+      * Anthropic — explicit breakpoints on the tools, the system prompt and the
+                  history before the volatile tail (`volatile_tail_parts`), with
+                  `ttl`; otherwise top-level automatic caching.
+      * Ollama  — no request-level caching: the runner reuses the KV cache of the
+                  longest matching prefix while the model stays loaded (the
+                  `ollama_keep_alive` variable) and num_ctx doesn't change.
     """
 
     cache_system_prompt: bool = True
@@ -179,6 +183,9 @@ class CacheHint:
     # Stable per-session key for providers that route prompt caches by key (OpenAI
     # prompt_cache_key). Empty = none.
     cache_key: str = ""
+    # Anthropic cache lifetime for every breakpoint: "1h" or "5m" (the API default).
+    # Empty = the API default.
+    ttl: str = ""
 
 
 @dataclass

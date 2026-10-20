@@ -64,6 +64,10 @@ from mu.session.history import HistoryMixin
 from mu.session.manager import SessionManager  # noqa: E402, F401
 
 
+
+# Auto-expanded skill bodies get this fraction of the L1B budget each (see _build_skills_block).
+SKILL_BODY_BUDGET_SCALE = 0.4
+
 class Session:
     def __init__(
         self,
@@ -103,6 +107,9 @@ class Session:
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
         self._pending_user_text = ""
+        # Request-only context for the current turn (runtime_state.attach_turn_context).
+        self._turn_context_block = ""
+        self._turn_goal_context = None
         # Per-turn dedup for skill auto-expansion banners: which skills we
         # already announced for the current `_pending_user_text`, so a
         # re-assembly of the system prompt (retry / re-inject) doesn't
@@ -917,7 +924,7 @@ class Session:
             return ""
         return "\n\n".join(blocks)
 
-    def _build_skills_block(self, *, announce: bool = False) -> str:
+    def _build_skills_block(self, *, announce: bool = False, split: bool = False) -> str:
         """LAYER 1B — render the installed skills (from `mu/skills/`,
         `~/.mu/skills/`, and `<workspace>/.mu/skills/`) into a labelled
         system-prompt block. Capped by `skills_max_chars` (default 6144).
@@ -929,6 +936,11 @@ class Session:
         `invoke_skill` tool uses — so trigger-regex auto-expansion is
         visible, not silent. The `/memory` size-measurement path calls
         this with `announce=False` (the default) and never banners.
+
+        `split=True` (the prefix-stable agent loop) returns the index of every
+        skill without triggered bodies, so the system prompt doesn't change with
+        the user's message; the bodies come from `_build_triggered_skills_block`
+        and ride in the turn's request-only context instead.
         """
         try:
             from mu.skills import (
@@ -977,7 +989,10 @@ class Session:
         # on demand via `invoke_skill`. 0.4 caps a body at 40% of L1B —
         # enough head + front-matter to act on, tail dropped deliberately
         # (context-optimisation lever). Set 1.0 to restore legacy inline-all.
-        body_budget_scale = 0.4
+        body_budget_scale = SKILL_BODY_BUDGET_SCALE
+        if split and mode == "compact":
+            from mu.skills import render_skills_index
+            return render_skills_index(skills, budget=budget)
         return render_skills_block(
             skills,
             budget=budget,
@@ -985,6 +1000,34 @@ class Session:
             mode=mode,
             budget_scale=body_budget_scale,
         )
+
+    def _build_triggered_skills_block(self) -> str:
+        """Bodies of the skills whose trigger matches this turn's user message (compact
+        mode), capped like L1B auto-expansion; '' when none match. Pairs with
+        `_build_skills_block(split=True)`."""
+        try:
+            from mu.skills import discover_skills, render_triggered_skills
+        except ImportError:
+            return ""
+        mode = str(self.variables.get("skills_mode", "compact") or "compact").lower()
+        user_text = str(getattr(self, "_pending_user_text", "") or "")
+        if mode != "compact" or not user_text:
+            return ""
+        try:
+            budget = max(0, int(self.variables.get("skills_max_chars", 6144) or 0))
+        except (TypeError, ValueError):
+            budget = 6144
+        from mu.session.budgets import small_window
+        if budget == 0 or small_window(self):
+            return ""
+        folders = (
+            list(self.folder_context.folders)
+            if self.folder_context and self.folder_context.folders
+            else []
+        )
+        disabled = set(getattr(self, "disabled_skills", []) or [])
+        skills = [s for s in discover_skills(folders) if s.name not in disabled]
+        return render_triggered_skills(skills, user_text, budget=budget, budget_scale=SKILL_BODY_BUDGET_SCALE)
 
     def _announce_auto_expanded_skills(self, skills, user_text, announce_skill) -> None:
         """Print the activation banner for each skill whose trigger regex

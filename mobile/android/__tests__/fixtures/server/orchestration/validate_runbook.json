@@ -1,0 +1,110 @@
+{
+ "decision": {
+  "level": "allow",
+  "per_node": [],
+  "reasons": [],
+  "rule": "Operator read-only runs need no extra confirmation",
+  "summary": "allowed by rule \u201cOperator read-only runs need no extra confirmation\u201d"
+ },
+ "digest": "sha256:138556d8049dcab56c0eefe7680cfa5e31815cdda4e0c3a8b8e031761069624d",
+ "effect": "read_only",
+ "effect_style": {
+  "label": "read-only",
+  "semantic": "ok"
+ },
+ "ok": false,
+ "parses": true,
+ "preview": null,
+ "problems": [
+  {
+   "message": "choose a pinned tool version like 'sys.disk-usage@1'",
+   "path": "steps[1].tool",
+   "severity": "error"
+  }
+ ],
+ "spec": {
+  "effect": "read_only",
+  "id": "web.safe-check",
+  "inputs": {
+   "additionalProperties": false,
+   "properties": {},
+   "type": "object"
+  },
+  "steps": [
+   {
+    "name": "echo",
+    "nodes": "",
+    "on_failure": "stop",
+    "params": {
+     "message": "x"
+    },
+    "tool": "demo.echo@1",
+    "when": ""
+   },
+   {
+    "name": "bad",
+    "nodes": "",
+    "on_failure": "stop",
+    "params": {},
+    "tool": "",
+    "when": ""
+   }
+  ],
+  "summary": "",
+  "title": "Safe check",
+  "version": 1
+ },
+ "steps_info": [
+  {
+   "approval": "none",
+   "category": "diagnostics",
+   "check_mode": true,
+   "effect": "read_only",
+   "effect_style": {
+    "label": "read-only",
+    "semantic": "ok"
+   },
+   "index": 0,
+   "inputs": {
+    "additionalProperties": false,
+    "properties": {
+     "message": {
+      "default": "hi",
+      "maxLength": 200,
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "latest": 1,
+   "latest_ref": "demo.echo@1",
+   "name": "echo",
+   "ok": true,
+   "outputs": {
+    "properties": {
+     "message": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "preconditions": [],
+   "ref": "demo.echo@1",
+   "rollback": "",
+   "status": "published",
+   "summary": "test tool",
+   "title": "Tool demo.echo",
+   "tool": "demo.echo@1",
+   "tool_id": "demo.echo",
+   "version": 1
+  },
+  {
+   "index": 1,
+   "name": "bad",
+   "ok": false,
+   "tool": ""
+  }
+ ],
+ "yaml": "id: web.safe-check\nversion: 1\ntitle: Safe check\nsummary: ''\ninputs:\n  additionalProperties: false\n  properties: {}\n  type: object\nsteps:\n- name: echo\n  tool: demo.echo@1\n  params:\n    message: x\n  when: ''\n  on_failure: stop\n  nodes: ''\n- name: bad\n  tool: ''\n  params: {}\n  when: ''\n  on_failure: stop\n  nodes: ''\neffect: read_only\n",
+ "yaml_error": null
+}

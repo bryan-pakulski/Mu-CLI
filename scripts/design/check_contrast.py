@@ -2,7 +2,7 @@
 """WCAG contrast checks over mu/design/tokens.json (Wash spec §3.4).
 
 Exit status is non-zero when any pair falls below its floor. The same
-checks run in tests/test_wash_tokens.py.
+checks run in tests/design/test_wash_tokens.py.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import re  # noqa: E402
 
-from mu.design import THEMES, contrast_ratio, load_tokens  # noqa: E402
+from mu.design import THEMES, contrast_ratio, load_tokens, palettes  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 ART = ROOT / "mu/gui/static/wash/art"
@@ -56,6 +56,34 @@ def glass_backdrops(theme: str) -> list[tuple[str, tuple, tuple]]:
         ]
         pixels.sort(key=_lum)
         out.append((wash, pixels[0], pixels[-1]))
+    return out
+
+
+# The Wash glass leaf at full strength (patterns/shell.css: 100% − 20% opacity) over the full
+# scene paintings behind the persistent shell. Blur approximates the leaf's backdrop blur at
+# screen size (the painting at 400px wide, 6px Gaussian).
+GLASS_LEAF_ALPHA = 0.80          # blurred (Blur ≥ 60%)
+GLASS_LEAF_ALPHA_SHARP = 0.88    # no blur: the painting behind text is sharp
+
+
+def scene_backdrops(theme: str, alpha: float = GLASS_LEAF_ALPHA, *, sharp: bool = False) -> list[tuple[str, tuple, tuple]]:
+    """(scene, darkest, lightest) for the surface at ``alpha`` over each scene painting: blurred
+    like the leaf at 60% blur, or sharp (no blur, at 800px wide so fine detail counts)."""
+    from PIL import Image, ImageFilter
+
+    surface = _hex_rgb(load_tokens()["themes"][theme]["color"]["surface"])
+    out = []
+    for scene in load_tokens()["glass"]["ambient"]:
+        im = Image.open(ART / f"{scene}-{theme}-1600.webp").convert("RGB")
+        im = im.resize((800, 450)) if sharp else im.resize((400, 225)).filter(ImageFilter.GaussianBlur(6))
+        mixed = Image.blend(im, Image.new("RGB", im.size, surface), alpha)
+        # Extremes by luma, then exact luminance over the darkest and lightest few.
+        luma = list(mixed.convert("L").getdata())
+        order = sorted(range(len(luma)), key=luma.__getitem__)
+        rgb = list(mixed.getdata())
+        dark = min((rgb[i] for i in order[:64]), key=_lum)
+        light = max((rgb[i] for i in order[-64:]), key=_lum)
+        out.append((scene, dark, light))
     return out
 
 
@@ -101,6 +129,14 @@ def failures() -> list[tuple[str, str, str, float, float]]:
                 ratio = min(_ratio(_hex_rgb(fg), dark), _ratio(_hex_rgb(fg), light))
                 if ratio < TEXT_FLOOR:
                     out.append((theme, fg_name, f"glass/{wash}", ratio, TEXT_FLOOR))
+        # Glass leaf at full strength over the scene paintings (the persistent shell).
+        for label, backdrops in (("leaf", scene_backdrops(theme)),
+                                 ("leaf-sharp", scene_backdrops(theme, GLASS_LEAF_ALPHA_SHARP, sharp=True))):
+            for scene, dark, light in backdrops:
+                for fg_name, fg in fgs.items():
+                    ratio = min(_ratio(_hex_rgb(fg), dark), _ratio(_hex_rgb(fg), light))
+                    if ratio < TEXT_FLOOR:
+                        out.append((theme, fg_name, f"{label}/{scene}", ratio, TEXT_FLOOR))
         accent = pigments[tokens["semantic"]["accent"]]["ink"]
         ratio = contrast_ratio(accent, colors["surface"])
         if ratio < UI_FLOOR:
@@ -108,14 +144,51 @@ def failures() -> list[tuple[str, str, str, float, float]]:
     return out
 
 
+def _flat_failures(label: str, colors: dict, pigments: dict, accent_name: str) -> list:
+    """The text / wash / control / on-ink / focus floors for one flat colour set."""
+    out = []
+    fgs = {name: colors[name] for name in TEXT_TOKENS}
+    fgs.update({f"{name}.ink": spec["ink"] for name, spec in pigments.items()})
+    for fg_name, fg in fgs.items():
+        for bg_name in SURFACES:
+            ratio = contrast_ratio(fg, colors[bg_name])
+            if ratio < TEXT_FLOOR:
+                out.append((label, fg_name, bg_name, ratio, TEXT_FLOOR))
+    for name, spec in pigments.items():
+        ratio = contrast_ratio(spec["ink"], spec["wash"])
+        if ratio < TEXT_FLOOR:
+            out.append((label, f"{name}.ink", f"{name}.wash", ratio, TEXT_FLOOR))
+    ratio = contrast_ratio(colors["on-ink"], colors["ink"])
+    if ratio < TEXT_FLOOR:
+        out.append((label, "on-ink", "ink", ratio, TEXT_FLOOR))
+    for bg_name in ("surface", "sunken"):
+        ratio = contrast_ratio(colors["control-border"], colors[bg_name])
+        if ratio < UI_FLOOR:
+            out.append((label, "control-border", bg_name, ratio, UI_FLOOR))
+    ratio = contrast_ratio(pigments[accent_name]["ink"], colors["surface"])
+    if ratio < UI_FLOOR:
+        out.append((label, "accent focus ring", "surface", ratio, UI_FLOOR))
+    return out
+
+
+def palette_failures() -> list:
+    """Every alternative palette (flat surfaces: no glass), light and dark."""
+    accent = load_tokens()["semantic"]["accent"]
+    out = []
+    for name, spec in palettes().items():
+        for mode in ("light", "dark"):
+            out += _flat_failures(f"{name}/{mode}", spec[mode]["color"], spec[mode]["pigment"], accent)
+    return out
+
+
 def main() -> int:
-    bad = failures()
+    bad = failures() + palette_failures()
     if not bad:
         print("wash contrast: all pairs pass")
         return 0
     print(f"{'theme':6} {'foreground':22} {'background':16} ratio  floor")
     for theme, fg, bg, ratio, floor in bad:
-        print(f"{theme:6} {fg:22} {bg:16} {ratio:5.2f}  {floor}")
+        print(f"{theme:14} {fg:22} {bg:16} {ratio:5.2f}  {floor}")
     return 1
 
 

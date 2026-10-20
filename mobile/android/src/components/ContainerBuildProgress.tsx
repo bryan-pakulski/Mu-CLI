@@ -1,8 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, fonts, radii, spacing, typography, touchTarget } from '../theme/tokens';
-import { Pressable, Text, Icon } from '../ui';
+import { InkDrop, Pressable, Text, Icon } from '../ui';
 import { STATUS } from '../theme/status';
 import { useGlass } from '../ui/Glass';
 
@@ -55,7 +55,7 @@ export function ContainerBuildProgress({
         style={[styles.header, { backgroundColor: glass.tint(failed ? 'danger' : running ? 'running' : 'ok') }]}
       >
         {running ? (
-          <ActivityIndicator color={colors.running.ink} accessibilityLabel="in progress" />
+          <InkDrop tone="running" label="in progress" />
         ) : (
           <Text
             variant="base"

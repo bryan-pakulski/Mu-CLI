@@ -178,3 +178,185 @@
     else sync();
     document.addEventListener('alpine:initialized', sync);
 })();
+
+// Palette (Mu revision 2) — one controller for every page and the shell.
+// Preference (localStorage `mucli-palette`): "wash" (the default: watercolour Paper /
+// Dusk) | "darcula" | "one" | "material" | "tokyo". Any other value reads as wash.
+// Applied as html[data-palette] (removed for wash; the pre-paint bootstrap does the
+// same) and combined with html[data-theme] for light or dark: every palette has both.
+// Controls: any [data-palette-choice="<name>"] button (aria-pressed is kept in sync).
+// A change dispatches `mucli-palette-change` and `mucli-theme-change` (charts redraw
+// from the tokens on the latter).
+(function () {
+    'use strict';
+    var KEY = 'mucli-palette';
+    var NAMES = ['wash', 'darcula', 'one', 'material', 'tokyo'];
+    function normalize(value) { return NAMES.indexOf(String(value || '')) >= 0 ? String(value) : 'wash'; }
+    function preference() {
+        try { return normalize(localStorage.getItem(KEY)); } catch (_) { return 'wash'; }
+    }
+    function apply(pref, opts) {
+        var name = normalize(pref || preference());
+        var root = document.documentElement;
+        if (name === 'wash') root.removeAttribute('data-palette');
+        else root.setAttribute('data-palette', name);
+        document.querySelectorAll('[data-palette-choice]').forEach(function (button) {
+            button.setAttribute('aria-pressed', button.getAttribute('data-palette-choice') === name ? 'true' : 'false');
+        });
+        if (!(opts && opts.silent)) {
+            window.dispatchEvent(new CustomEvent('mucli-palette-change', { detail: { palette: name } }));
+            if (window.MuTheme) {
+                var wash = window.MuTheme.current();
+                window.dispatchEvent(new CustomEvent('mucli-theme-change', {
+                    detail: { theme: window.MuTheme.legacyName(wash), wash: wash, preference: window.MuTheme.preference(), palette: name },
+                }));
+            }
+        }
+        return name;
+    }
+    function set(value) {
+        var name = normalize(value);
+        try { localStorage.setItem(KEY, name); } catch (_) { /* private mode */ }
+        return apply(name);
+    }
+    document.addEventListener('click', function (event) {
+        var button = event.target.closest && event.target.closest('[data-palette-choice]');
+        if (button && !button.disabled) set(button.getAttribute('data-palette-choice'));
+    });
+    window.addEventListener('storage', function (event) { if (event.key === KEY) apply(event.newValue); });
+    window.MuPalette = { KEY: KEY, NAMES: NAMES, preference: preference, current: function () { return normalize(document.documentElement.getAttribute('data-palette')); }, set: set, apply: apply };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
+    else apply(null, { silent: true });
+})();
+
+// Glass (Mu revision 2; Wash theme only) — Settings → Appearance → Glass.
+// Preference (localStorage `mucli-glass`): 0–100, default 60. Applied as the CSS
+// variable --mu-glass (0–1) and html[data-glass] when above 0 (the pre-paint
+// bootstrap does the same); patterns/shell.css turns the leaf to frosted glass
+// only when no other palette is chosen and decoration isn't reduced.
+// Controls: any input[data-glass-range]; output[data-glass-value] shows the value.
+(function () {
+    'use strict';
+    var KEY = 'mucli-glass';
+    var DEFAULT = 60;
+    function clamp(value) {
+        var n = parseInt(value, 10);
+        if (isNaN(n)) return DEFAULT;
+        return Math.max(0, Math.min(100, Math.round(n / 5) * 5));
+    }
+    function preference() {
+        try { var raw = localStorage.getItem(KEY); return raw == null ? DEFAULT : clamp(raw); } catch (_) { return DEFAULT; }
+    }
+    function apply(value, opts) {
+        var v = clamp(value == null ? preference() : value);
+        var root = document.documentElement;
+        root.style.setProperty('--mu-glass', String(v / 100));
+        if (v > 0) root.setAttribute('data-glass', ''); else root.removeAttribute('data-glass');
+        document.querySelectorAll('[data-glass-range]').forEach(function (input) { if (String(input.value) !== String(v)) input.value = v; input.style.setProperty('--w-fill', v + '%'); });
+        document.querySelectorAll('[data-glass-value]').forEach(function (out) { out.textContent = v ? v + '%' : 'Off'; });
+        if (!(opts && opts.silent)) window.dispatchEvent(new CustomEvent('mucli-glass-change', { detail: { glass: v } }));
+        return v;
+    }
+    function set(value) {
+        var v = clamp(value);
+        try { localStorage.setItem(KEY, String(v)); } catch (_) { /* private mode */ }
+        return apply(v);
+    }
+    document.addEventListener('input', function (event) {
+        var input = event.target.closest && event.target.closest('[data-glass-range]');
+        if (input) set(input.value);
+    });
+    window.addEventListener('storage', function (event) { if (event.key === KEY) apply(event.newValue == null ? DEFAULT : event.newValue); });
+    window.MuGlass = { KEY: KEY, DEFAULT: DEFAULT, preference: preference, set: set, apply: apply };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
+    else apply(null, { silent: true });
+})();
+
+// Glass blur (Wash theme only) — Settings → Appearance → Blur, beside Glass.
+// Preference (localStorage `mucli-glass-blur`): 0–100, default 60 → --mu-blur (0–1);
+// patterns/shell.css scales the leaf's backdrop blur (up to 40px) and the frosted bars by it.
+// Controls: input[data-blur-range]; output[data-blur-value].
+(function () {
+    'use strict';
+    var KEY = 'mucli-glass-blur';
+    var DEFAULT = 60;
+    function clamp(value) {
+        var n = parseInt(value, 10);
+        if (isNaN(n)) return DEFAULT;
+        return Math.max(0, Math.min(100, Math.round(n / 5) * 5));
+    }
+    function preference() {
+        try { var raw = localStorage.getItem(KEY); return raw == null ? DEFAULT : clamp(raw); } catch (_) { return DEFAULT; }
+    }
+    function apply(value, opts) {
+        var v = clamp(value == null ? preference() : value);
+        document.documentElement.style.setProperty('--mu-blur', String(v / 100));
+        document.querySelectorAll('[data-blur-range]').forEach(function (input) { if (String(input.value) !== String(v)) input.value = v; input.style.setProperty('--w-fill', v + '%'); });
+        document.querySelectorAll('[data-blur-value]').forEach(function (out) { out.textContent = v ? v + '%' : 'Off'; });
+        if (!(opts && opts.silent)) window.dispatchEvent(new CustomEvent('mucli-glass-change', { detail: { blur: v } }));
+        return v;
+    }
+    function set(value) {
+        var v = clamp(value);
+        try { localStorage.setItem(KEY, String(v)); } catch (_) { /* private mode */ }
+        return apply(v);
+    }
+    document.addEventListener('input', function (event) {
+        var input = event.target.closest && event.target.closest('[data-blur-range]');
+        if (input) set(input.value);
+    });
+    window.addEventListener('storage', function (event) { if (event.key === KEY) apply(event.newValue == null ? DEFAULT : event.newValue); });
+    window.MuGlassBlur = { KEY: KEY, DEFAULT: DEFAULT, preference: preference, set: set, apply: apply };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
+    else apply(null, { silent: true });
+})();
+
+// Text size — Settings → Appearance → Text size (every theme). Preference (localStorage
+// `mucli-text-scale`): percent of the design, 85–120 in steps of 5 (tokens.json
+// density.text_scale), default 100. Applied as --mu-scale on <html> (the pre-paint bootstrap
+// does the same); tokens.css multiplies type, line heights, spacing and control sizes by it, so
+// a smaller size packs more on screen and keeps its proportions. Controls:
+// input[data-text-scale-range]; output[data-text-scale-value].
+(function () {
+    'use strict';
+    var KEY = 'mucli-text-scale';
+    var MIN = 85, MAX = 120, STEP = 5, DEFAULT = 100;
+    function clamp(value) {
+        var n = parseInt(value, 10);
+        if (isNaN(n)) return DEFAULT;
+        return Math.max(MIN, Math.min(MAX, Math.round(n / STEP) * STEP));
+    }
+    function preference() {
+        try { var raw = localStorage.getItem(KEY); return raw == null ? DEFAULT : clamp(raw); } catch (_) { return DEFAULT; }
+    }
+    function apply(value, opts) {
+        var v = clamp(value == null ? preference() : value);
+        var root = document.documentElement;
+        if (v === DEFAULT) root.style.removeProperty('--mu-scale');
+        else root.style.setProperty('--mu-scale', String(v / 100));
+        document.querySelectorAll('[data-text-scale-range]').forEach(function (input) {
+            if (String(input.value) !== String(v)) input.value = v;
+            input.style.setProperty('--w-fill', ((v - MIN) / (MAX - MIN) * 100) + '%');
+        });
+        document.querySelectorAll('[data-text-scale-value]').forEach(function (out) { out.textContent = v + '%'; });
+        if (!(opts && opts.silent)) window.dispatchEvent(new CustomEvent('mucli-text-scale-change', { detail: { textScale: v } }));
+        return v;
+    }
+    function set(value) {
+        var v = clamp(value);
+        try { localStorage.setItem(KEY, String(v)); } catch (_) { /* private mode */ }
+        return apply(v);
+    }
+    document.addEventListener('input', function (event) {
+        var input = event.target.closest && event.target.closest('[data-text-scale-range]');
+        if (input) set(input.value);
+    });
+    document.addEventListener('click', function (event) {
+        var reset = event.target.closest && event.target.closest('[data-text-scale-reset]');
+        if (reset) set(DEFAULT);
+    });
+    window.addEventListener('storage', function (event) { if (event.key === KEY) apply(event.newValue == null ? DEFAULT : event.newValue); });
+    window.MuTextScale = { KEY: KEY, MIN: MIN, MAX: MAX, STEP: STEP, DEFAULT: DEFAULT, preference: preference, set: set, apply: apply };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
+    else apply(null, { silent: true });
+})();

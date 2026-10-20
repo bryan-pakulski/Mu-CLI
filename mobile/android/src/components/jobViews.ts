@@ -170,9 +170,9 @@ export function runCounts(r: CheckRun): Counts {
 export const listOf = (x: unknown): string[] => (Array.isArray(x) ? x.map(v => (typeof v === 'string' ? v : JSON.stringify(v))) : []);
 export const countOf = (x: unknown): number => (Array.isArray(x) ? x.length : Number(x || 0));
 
-export const JOB_TABS = ['session', 'plan', 'diff', 'review', 'checks', 'diagnostics', 'costs'] as const;
+export const JOB_TABS = ['notes', 'session', 'plan', 'diff', 'review', 'checks', 'diagnostics', 'costs'] as const;
 export type JobTab = typeof JOB_TABS[number];
-export const JOB_TAB_LABELS: Record<JobTab, string> = { session: 'Session', plan: 'Plan', diff: 'Diff', review: 'Review', checks: 'Checks', diagnostics: 'Diagnostics', costs: 'Cost & audit' };
+export const JOB_TAB_LABELS: Record<JobTab, string> = { notes: 'Notes', session: 'Session', plan: 'Plan', diff: 'Diff', review: 'Review', checks: 'Checks', diagnostics: 'Diagnostics', costs: 'Cost & audit' };
 /** Pipeline step → tab. */
 export const STEP_TABS: Record<string, JobTab> = { plan: 'plan', approve: 'plan', implement: 'session', checks: 'checks', review: 'review', push: 'review' };
 
@@ -180,11 +180,22 @@ export const STEP_TABS: Record<string, JobTab> = { plan: 'plan', approve: 'plan'
 export function defaultTab(job: Pick<JobVM, 'state' | 'session'>): JobTab {
   if (job.session?.approval) return 'session';
   if (job.state === 'plan_review') return 'plan';
-  if (['review_done', 'pushed', 'done'].includes(job.state)) return 'review';
-  if (job.state === 'checking') return 'checks';
-  if (job.state === 'failed') return 'diagnostics';
-  return 'session';
+  return 'notes';
 }
+
+/** `?tab=` from a deep link, when it names a tab. */
+export function asJobTab(value: unknown): JobTab | null {
+  return typeof value === 'string' && (JOB_TABS as readonly string[]).includes(value) ? value as JobTab : null;
+}
+
+/** "Open a shell": the job's worktree is on the computer, so the command is a cd to paste into a
+ * terminal there (POSIX single-quoted, as the web). Nothing runs from the phone. */
+export function shellQuote(value: string): string {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+export const shellCommand = (job: Pick<JobVM, 'worktree'>) => `cd ${shellQuote(job.worktree)}`;
+
+export const NOTE_STAGE: Record<string, string> = { plan: 'Plan', implement: 'Implement', checks: 'Checks', review: 'Review', push: 'Push', you: 'You', job: 'Job' };
 
 /** Audit event → tone. */
 export function eventTone(e: string): 'danger' | 'ok' | 'warn' | 'accent' {

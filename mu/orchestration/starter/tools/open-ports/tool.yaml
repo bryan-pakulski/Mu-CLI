@@ -1,0 +1,25 @@
+id: sys.open-ports
+title: Listening ports
+summary: List listening TCP and UDP sockets with the owning process (ss).
+category: security
+effect: read_only
+idempotent: true
+targets: {requires: [ss]}
+privilege: {run_as: root}
+inputs: {type: object, properties: {}, additionalProperties: false}
+outputs:
+  type: object
+  properties:
+    listening:
+      type: array
+      items:
+        type: object
+        properties:
+          proto: {type: string}
+          address: {type: string}
+          port: {type: [integer, "null"]}
+          process: {type: string}
+    count: {type: integer}
+  required: [listening, count]
+implementation: {runtime: python3, entry: open_ports.py}
+limits: {timeout_s: 30, max_output_kb: 128}

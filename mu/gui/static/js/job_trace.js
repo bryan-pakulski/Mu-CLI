@@ -14,6 +14,9 @@
         tools: document.getElementById('jt-tools'), verifications: document.getElementById('jt-verifications'), incidents: document.getElementById('jt-incidents'),
         eventCount: document.getElementById('jt-event-count'), eventQuery: document.getElementById('jt-event-query'), eventCategory: document.getElementById('jt-event-category'), eventSeverity: document.getElementById('jt-event-severity'), events: document.getElementById('jt-events'),
         refresh: document.getElementById('jt-refresh'), debugExport: document.getElementById('jt-debug-export'), exportAnalysis: document.getElementById('jt-export-analysis'),
+        panes: document.getElementById('jt-panes'), jobList: document.getElementById('jt-job-list'), jobFilter: document.getElementById('jt-job-filter'), jobCount: document.getElementById('jt-job-count'),
+        glance: document.getElementById('jt-glance'), glanceEmpty: document.getElementById('jt-glance-empty'), openWork: document.getElementById('jt-open-work'),
+        back: document.getElementById('jt-back'), asideToggle: document.getElementById('jt-aside-toggle'),
     };
 
     const state = { jobs: [], analysis: null, comparison: null, resizeTimer: null };
@@ -35,18 +38,24 @@
     // Shared status vocabulary: done ✓ ok · active ● running · waiting ◆ warn ·
     // failed ✗ danger · skipped – muted · pending ○ muted. Glyph + label, never colour alone.
     const STATUS_KIND = { merged: 'done', ready_for_review: 'done', queued: 'pending', needs_human: 'waiting', conflicted: 'waiting', cancelled: 'skipped', failed: 'failed', timed_out: 'failed', budget_exceeded: 'failed', environment_error: 'failed' };
-    // Shared status vocabulary → glyph + Wash semantic (data-tone on .w-chip).
+    // Shared status vocabulary → glyph + Wash semantic. Mu §5.4: the status is a sign + word in the
+    // page header's state sentence (.w-signword / .w-sign keyed by the vocabulary status), never a pill.
     const KIND_GLYPH = { done: ['✓', 'ok'], active: ['●', 'running'], waiting: ['◆', 'attention'], failed: ['✗', 'danger'], skipped: ['–', 'neutral'], pending: ['○', 'neutral'] };
     function applyStatusChip(node, status, archived) {
         if (!node) return;
-        const [glyph, tone] = KIND_GLYPH[STATUS_KIND[String(status || '')] || (status ? 'active' : 'pending')];
-        node.className = 'w-chip jt-status-chip';
+        const kind = STATUS_KIND[String(status || '')] || (status ? 'active' : 'pending');
+        const [glyph, tone] = KIND_GLYPH[kind];
+        node.className = 'w-state__part w-signword jt-status-chip';
+        node.dataset.status = kind;
         node.dataset.tone = tone;
+        node.hidden = false;
         node.replaceChildren();
-        const g = document.createElement('span'); g.className = 'w-chip__glyph'; g.setAttribute('aria-hidden', 'true'); g.textContent = glyph;
+        const g = document.createElement('span'); g.className = 'w-sign'; g.dataset.status = kind; g.setAttribute('aria-hidden', 'true'); g.textContent = glyph;
         const label = document.createElement('span'); label.textContent = `${statusLabel(status)}${archived ? ' · archived' : ''}`;
         node.append(g, label);
     }
+    // Terminal colour codes (ESC[…m) in captured check output are noise in a summary line.
+    function plain(value) { return String(value ?? '').replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').replace(/\[[0-9;]{1,8}m(?!\])/g, ''); }
     function statusLabel(value) { return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase()); }
     function fmtNum(value, digits = 0) { const n = Number(value || 0); return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: digits }) : '—'; }
     function fmtMoney(value) { return `$${Number(value || 0).toFixed(2)}`; }
@@ -93,29 +102,84 @@
         const options = state.jobs.map(job => {
             const execution = job.execution || {};
             const runtime = [execution.provider, execution.model].filter(Boolean).join(' · ');
-            const meta = [statusLabel(job.status), runtime, job.archived ? 'archived' : ''].filter(Boolean).join(' · ');
+            // The selected job's status is in the state sentence; the picker names the job.
+            const meta = [runtime, job.archived ? 'archived' : ''].filter(Boolean).join(' · ');
             return `<option value="${esc(job.id)}">${esc(job.title)} · ${esc(job.id.slice(0, 8))}${meta ? ` · ${esc(meta)}` : ''}</option>`;
         }).join('');
         els.jobSelect.innerHTML = '<option value="">Select a job…</option>' + options;
-        els.compareSelect.innerHTML = '<option value="">Compare with…</option>' + options;
+        if (els.compareSelect) els.compareSelect.innerHTML = '<option value="">Compare with…</option>' + options;
+        renderJobList();
     }
 
+    // The list pane (Mu §11b): one row per job — status sign, title, the status in words
+    // with wall time and cost, and how long ago it started. The select above stays the
+    // keyboard picker; a row and the select make the same choice.
+    function ago(epoch) {
+        const d = Math.max(0, Date.now() / 1000 - Number(epoch || 0));
+        if (!epoch) return '';
+        if (d < 3600) return `${Math.max(1, Math.floor(d / 60))}m`;
+        if (d < 86400) return `${Math.floor(d / 3600)}h`;
+        return `${Math.floor(d / 86400)}d`;
+    }
+    function renderJobList() {
+        if (!els.jobList) return;
+        const q = (els.jobFilter && els.jobFilter.value || '').trim().toLowerCase();
+        const jobs = state.jobs.filter(job => !q || `${job.title} ${job.id} ${job.status}`.toLowerCase().includes(q));
+        const current = state.analysis ? state.analysis.job.id : els.jobSelect.value;
+        if (els.jobCount) els.jobCount.textContent = state.jobs.length ? String(state.jobs.length) : '';
+        els.jobList.innerHTML = jobs.length ? jobs.map(job => {
+            const kind = STATUS_KIND[String(job.status || '')] || (job.status ? 'active' : 'pending');
+            const glyph = KIND_GLYPH[kind][0];
+            const facts = [statusLabel(job.status), job.archived ? 'archived' : '', Number(job.elapsed_seconds) ? fmtDuration(job.elapsed_seconds) : '', Number(job.cost_usd) ? fmtMoney(job.cost_usd) : ''].filter(Boolean).join(' · ');
+            return `<li class="w-row jt-jobrow" role="option" data-job="${esc(job.id)}" aria-selected="${job.id === current ? 'true' : 'false'}">
+                <span class="w-sign" data-status="${kind}" aria-hidden="true">${glyph}</span>
+                <button type="button" class="w-row__main" data-job-open="${esc(job.id)}"><span class="w-row__title">${esc(job.title)}</span><span class="w-row__sub">${esc(facts)}</span></button>
+                <span class="w-row__when">${esc(ago(job.created_at))}</span></li>`;
+        }).join('') : `<li class="w-pane__empty">${state.jobs.length ? 'No job matches.' : 'No jobs yet.'}</li>`;
+    }
+    function showPane(which) { if (els.panes) els.panes.dataset.show = which; }
+
+    // The state sentence (Mu §4.2): status · wall time · cost · changed files. The job
+    // picker below names the job, so the sentence never repeats its title.
+    function paintState(a, costLabel) {
+        const s = a.summary || {};
+        const parts = [
+            s.elapsed_seconds ? [fmtDuration(s.elapsed_seconds), 'Wall time'] : null,
+            [fmtMoney(s.model_api_cost_usd != null ? s.model_api_cost_usd : s.cost_usd), costLabel],
+            s.changed_files ? [`${fmtNum(s.changed_files)} file${Number(s.changed_files) === 1 ? '' : 's'} changed`, 'Changed files'] : null,
+        ].filter(Boolean);
+        const sentence = els.status && els.status.parentElement;
+        if (!sentence) return;
+        sentence.querySelectorAll('[data-jt-fact]').forEach(node => node.remove());
+        sentence.insertAdjacentHTML('beforeend', parts.map(([text, title]) => `<span class="w-state__part" data-jt-fact title="${esc(title)}">${esc(text)}</span>`).join(''));
+    }
     function card(label, value, cls = '') { return `<div class="trace-card ${cls}"><div class="tc-label">${esc(label)}</div><div class="tc-val">${esc(value)}</div></div>`; }
 
     function renderOverview(a) {
         const s = a.summary || {};
         const tokenTotal = Object.values(s.tokens || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
         const costLabel = (s.billing_modes || []).includes('estimated_token') ? 'model cost est.' : 'model cost';
+        // Mu §6.1 / §5.5: status, wall time and cost are in the state sentence; a card that
+        // would read 0 / — is left out (the signals below still say "no failures").
+        const nz = v => Number(v || 0) !== 0;
         els.overview.innerHTML = [
-            card('status', statusLabel(a.job.status)), card('wall time', fmtDuration(s.elapsed_seconds)), card('active execution', fmtDuration(s.active_seconds)),
-            card('passive residence', fmtDuration(s.passive_seconds), (s.passive_seconds || 0) > 0 ? 'trace-card--warn' : ''),
-            card('stopped after errors', fmtDuration(s.stopped_seconds), (s.stopped_seconds || 0) > 0 ? 'trace-card--warn' : ''),
-            card('verification', fmtDuration(s.verification_seconds)), card('attempts', String(s.attempts || 0)), card('additional attempts', String(s.retries || 0), (s.retries || 0) > 0 ? 'trace-card--warn' : ''),
-            card(costLabel, fmtMoney(s.model_api_cost_usd != null ? s.model_api_cost_usd : s.cost_usd)), card('tokens recorded', tokenTotal ? fmtNum(tokenTotal) : '—'),
-            card('tool calls', fmtNum(s.tool_calls)), card('unique tools', fmtNum(s.unique_tools)), card('human gates', fmtNum(s.human_gates), (s.human_gates || 0) > 0 ? 'trace-card--warn' : ''),
-            card('verification runs', fmtNum(s.verification_runs)), card('verification failures', fmtNum(s.verification_failures), (s.verification_failures || 0) > 0 ? 'trace-card--warn' : ''),
-            card('runtime failures', fmtNum(s.failures), (s.failures || 0) > 0 ? 'trace-card--warn' : ''), card('changed files', fmtNum(s.changed_files)), card('diff', `+${fmtNum(s.additions)} / -${fmtNum(s.deletions)}`),
-        ].join('');
+            nz(s.active_seconds) && card('active execution', fmtDuration(s.active_seconds)),
+            nz(s.passive_seconds) && card('passive residence', fmtDuration(s.passive_seconds), 'trace-card--warn'),
+            nz(s.stopped_seconds) && card('stopped after errors', fmtDuration(s.stopped_seconds), 'trace-card--warn'),
+            nz(s.verification_seconds) && card('verification', fmtDuration(s.verification_seconds)),
+            card('attempts', String(s.attempts || 0)),
+            nz(s.retries) && card('additional attempts', String(s.retries), 'trace-card--warn'),
+            tokenTotal && card('tokens recorded', fmtNum(tokenTotal)),
+            nz(s.tool_calls) && card('tool calls', fmtNum(s.tool_calls)),
+            nz(s.unique_tools) && card('unique tools', fmtNum(s.unique_tools)),
+            nz(s.human_gates) && card('human gates', fmtNum(s.human_gates), 'trace-card--warn'),
+            nz(s.verification_runs) && card('verification runs', fmtNum(s.verification_runs)),
+            nz(s.verification_failures) && card('verification failures', fmtNum(s.verification_failures), 'trace-card--warn'),
+            nz(s.failures) && card('runtime failures', fmtNum(s.failures), 'trace-card--warn'),
+            nz(s.changed_files) && card('changed files', fmtNum(s.changed_files)),
+            (nz(s.additions) || nz(s.deletions)) && card('diff', `+${fmtNum(s.additions)} / -${fmtNum(s.deletions)}`),
+        ].filter(Boolean).join('');
+        paintState(a, costLabel);
 
         const firstPass = s.first_pass_verification;
         const firstPassValue = firstPass == null ? 'not measured' : firstPass ? 'passed' : 'needed another verification pass';
@@ -125,8 +189,8 @@
         const passivePct = s.elapsed_seconds ? (Number(s.passive_seconds || 0) / Number(s.elapsed_seconds) * 100) : 0;
         els.signals.innerHTML = `
             <div class="jt-signal" data-tone="${firstTone}"><div class="jt-signal-label">First verification</div><div class="jt-signal-value">${esc(firstPassValue)}</div><div class="jt-signal-detail">${fmtNum(s.verification_passes)} passed · ${fmtNum(s.verification_failures)} failed verification runs</div></div>
-            <div class="jt-signal" data-tone="${autonomyTone}"><div class="jt-signal-label">Autonomy</div><div class="jt-signal-value">${fmtNum(s.human_gates)} human gate${Number(s.human_gates) === 1 ? '' : 's'}</div><div class="jt-signal-detail">${fmtNum(s.human_responses)} recorded human responses</div></div>
-            <div class="jt-signal" data-tone="${failureTone}"><div class="jt-signal-label">Execution stability</div><div class="jt-signal-value">${fmtNum(s.failures)} failure signal${Number(s.failures) === 1 ? '' : 's'}</div><div class="jt-signal-detail">${fmtNum(s.recoveries)} recovery transition${Number(s.recoveries) === 1 ? '' : 's'}</div></div>
+            <div class="jt-signal" data-tone="${autonomyTone}"><div class="jt-signal-label">Autonomy</div><div class="jt-signal-value">${fmtNum(s.human_gates)} human gate${Number(s.human_gates) === 1 ? '' : 's'}</div>${nz(s.human_responses) ? `<div class="jt-signal-detail">${fmtNum(s.human_responses)} recorded human response${Number(s.human_responses) === 1 ? '' : 's'}</div>` : ''}</div>
+            <div class="jt-signal" data-tone="${failureTone}"><div class="jt-signal-label">Execution stability</div><div class="jt-signal-value">${nz(s.failures) ? `${fmtNum(s.failures)} failure signal${Number(s.failures) === 1 ? '' : 's'}` : 'no failures'}</div>${nz(s.recoveries) ? `<div class="jt-signal-detail">${fmtNum(s.recoveries)} recovery transition${Number(s.recoveries) === 1 ? '' : 's'}</div>` : ''}</div>
             <div class="jt-signal" data-tone="${passivePct > 35 ? 'attention' : 'ok'}"><div class="jt-signal-label">Passive share</div><div class="jt-signal-value">${passivePct.toFixed(1)}%</div><div class="jt-signal-detail">queue + human wait + stopped/error + review residence; not active agent work</div></div>`;
     }
 
@@ -180,7 +244,7 @@
     function renderIntervals(a) {
         const intervals = a.phase_intervals || [];
         if (!intervals.length) { els.intervals.innerHTML = '<p class="trace-muted">No lifecycle intervals recorded.</p>'; return; }
-        els.intervals.innerHTML = `<div class="jt-interval-head"><strong>State drill-down</strong><span>Expand any residence to see the transition cause and what actually occurred while the job remained in that state.</span></div>` + intervals.map((interval, index) => {
+        els.intervals.innerHTML = intervals.map((interval, index) => {
             const classification = interval.classification || phaseClass(interval.status); const eventRows = interval.events || [];
             const activity = Number(interval.activity_event_count || 0); const agent = Number(interval.agent_event_count || 0);
             return `<details class="jt-interval" data-class="${esc(classification)}" ${STOPPED.has(interval.status) ? 'open' : ''}>
@@ -200,19 +264,82 @@
         ctx.strokeStyle = css('--wash-hairline'); ctx.beginPath(); ctx.moveTo(left, top + plotH); ctx.lineTo(width - right, top + plotH); ctx.stroke(); const points = [];
         attempts.forEach((attempt, index) => { const cx = left + slot * (index + .5); const bh = plotH * Number(attempt.duration_seconds || 0) / maxDur; ctx.fillStyle = css(attempt.status === 'completed' ? '--wash-ok-pigment' : attempt.status === 'needs_human' ? '--wash-attention-pigment' : '--wash-danger-pigment'); ctx.globalAlpha = .66; ctx.fillRect(cx - barW / 2, top + plotH - bh, barW, bh); ctx.globalAlpha = 1; const py = top + plotH - plotH * Number(attempt.cost_usd || 0) / maxCost; points.push([cx, py]); ctx.fillStyle = css('--wash-ink-3'); ctx.font = canvasFont(9, 'mono'); ctx.textAlign = 'center'; ctx.fillText(`#${attempt.number}`, cx, height - 16); });
         ctx.strokeStyle = css('--wash-ink-2'); ctx.lineWidth = 1.7; ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke(); points.forEach(([x, y]) => { ctx.beginPath(); ctx.fillStyle = css('--wash-ink-2'); ctx.arc(x, y, 3.4, 0, Math.PI * 2); ctx.fill(); }); ctx.textAlign = 'left';
+        const table = els.attemptTable.closest('table');
+        if (table) {
+            table.classList.toggle('jt-no-tools', attempts.every(x => !Number(x.tool_calls || 0)));
+            table.classList.toggle('jt-no-messages', attempts.every(x => !Number(x.agent_messages || 0)));
+            table.classList.toggle('jt-no-errors', attempts.every(x => !Number(x.runtime_errors || 0)));
+            table.classList.toggle('jt-no-tokens', attempts.every(x => tokenCompact(x.tokens) === '—'));
+        }
         els.attemptTable.innerHTML = attempts.map(row => `<tr><td>#${row.number}</td><td>${esc(statusLabel(row.status))}</td><td data-num>${esc(fmtDuration(row.duration_seconds))}</td><td data-num>${esc(fmtMoney(row.cost_usd))}</td><td data-num>${fmtNum(row.tool_calls)}</td><td data-num>${fmtNum(row.agent_messages)}</td><td data-num>${fmtNum(row.runtime_errors)}</td><td title="${esc(JSON.stringify(row.tokens || {}))}">${esc(tokenCompact(row.tokens))}</td></tr>`).join('');
     }
 
-    function renderTools(a) { const tools = a.tools || []; if (!tools.length) { els.tools.innerHTML = '<p class="trace-muted">No tool-call telemetry recorded.</p>'; return; } const max = Math.max(1, ...tools.map(x => Number(x.count || 0))); els.tools.innerHTML = tools.slice(0, 24).map(tool => `<div class="jt-tool-row"><div class="jt-tool-name" title="${esc(tool.name)}">${esc(tool.name)}</div><div class="jt-tool-track"><div class="jt-tool-fill" style="width:${(Number(tool.count || 0) / max * 100).toFixed(1)}%"></div></div><div class="jt-tool-value">${fmtNum(tool.count)}</div></div>`).join(''); }
+    // With no tool telemetry the section steps aside (Verification takes the row) and the
+    // fact is said once, in Verification's caption line.
+    function renderTools(a) { const tools = a.tools || []; const section = els.tools.closest('section'); if (section) section.hidden = !tools.length; if (!tools.length) { els.tools.innerHTML = '<p class="trace-muted">No tool-call telemetry recorded.</p>'; return; } const max = Math.max(1, ...tools.map(x => Number(x.count || 0))); els.tools.innerHTML = tools.slice(0, 24).map(tool => `<div class="jt-tool-row"><div class="jt-tool-name" title="${esc(tool.name)}">${esc(tool.name)}</div><div class="jt-tool-track"><div class="jt-tool-fill" style="width:${(Number(tool.count || 0) / max * 100).toFixed(1)}%"></div></div><div class="jt-tool-value">${fmtNum(tool.count)}</div></div>`).join(''); }
     function renderVerifications(a) { const rows = a.verifications || []; if (!rows.length) { els.verifications.innerHTML = '<p class="trace-muted">No deterministic verification runs recorded.</p>'; return; } els.verifications.innerHTML = rows.map((row, index) => `<div class="jt-verification" data-pass="${row.passed}"><div class="jt-verification-mark">${row.passed ? '✓' : '✗'}</div><div class="jt-verification-main"><div class="jt-verification-title">Run ${index + 1} · ${esc(statusLabel(row.status))}</div><div class="jt-verification-meta">${fmtNum(row.checks_passed)}/${fmtNum(row.checks)} checks · ${fmtNum(row.changed_files)} files · +${fmtNum(row.additions)} / -${fmtNum(row.deletions)}${row.dirty ? ' · dirty' : ''}</div></div><div class="jt-verification-time">${esc(fmtDuration(row.duration_seconds))}</div></div>`).join(''); }
-    function incidentRows(rows, kind) { if (!rows.length) return '<p class="trace-muted">None recorded.</p>'; return `<div class="jt-incident-list">${rows.slice().reverse().slice(0, 30).map(row => `<div class="jt-incident"><div class="jt-incident-head"><span class="jt-incident-kind">${esc(kind === 'gate' ? (row.reason || 'Human gate') : statusLabel(row.event_type || 'Failure'))}</span><span class="jt-incident-time">${esc(fmtWhen(row.created_at))}</span></div><div class="jt-incident-copy">${esc(kind === 'gate' ? JSON.stringify(row.payload || {}).slice(0, 600) : (row.summary || ''))}</div></div>`).join('')}</div>`; }
-    function renderIncidents(a) { els.incidents.innerHTML = `<div class="jt-incident-group"><div class="jt-incident-title">Human gates · ${(a.human_gates || []).length}</div>${incidentRows(a.human_gates || [], 'gate')}</div><div class="jt-incident-group"><div class="jt-incident-title">Failures · ${(a.failures || []).length}</div>${incidentRows(a.failures || [], 'failure')}</div>`; }
+    // A human gate's payload as a sentence ("Needs work · merge readiness 75% · review done"),
+    // never raw JSON; the full payload stays one click away.
+    function gateSummary(payload) {
+        const p = payload || {};
+        const parts = [];
+        if (p.verdict) parts.push(statusLabel(p.verdict));
+        if (p.merge_readiness != null) parts.push(`merge readiness ${fmtNum(p.merge_readiness)}%`);
+        if (p.attention_reason) parts.push(String(p.attention_reason).replaceAll('_', ' '));
+        const core = p.core_state || {};
+        if (core.state && core.state !== p.attention_reason) parts.push(`state ${String(core.state).replaceAll('_', ' ')}`);
+        if (core.fix_attempts) parts.push(`${fmtNum(core.fix_attempts)} fix attempt${Number(core.fix_attempts) === 1 ? '' : 's'}`);
+        if (!parts.length) {
+            for (const [key, value] of Object.entries(p)) {
+                if (value == null || typeof value === 'object') continue;
+                parts.push(`${key.replaceAll('_', ' ')} ${value}`);
+                if (parts.length >= 4) break;
+            }
+        }
+        return parts.join(' · ');
+    }
+    function incidentRows(rows, kind) { return `<div class="jt-incident-list">${rows.slice().reverse().slice(0, 30).map(row => {
+        const copy = kind === 'gate' ? gateSummary(row.payload) : (row.summary || '');
+        const raw = kind === 'gate' && row.payload ? `<details class="w-disclose jt-incident-raw"><summary>Payload</summary><pre class="jt-event-json">${esc(JSON.stringify(row.payload, null, 2))}</pre></details>` : '';
+        return `<div class="jt-incident"><div class="jt-incident-head"><span class="jt-incident-kind">${esc(kind === 'gate' ? (row.reason || 'Human gate') : statusLabel(row.event_type || 'Failure'))}</span><span class="jt-incident-time">${esc(fmtWhen(row.created_at))}</span></div>${copy ? `<div class="jt-incident-copy">${esc(copy)}</div>` : ''}${raw}</div>`;
+    }).join('')}</div>`; }
+    function renderIncidents(a) {
+        const gates = a.human_gates || [], failures = a.failures || [];
+        const groups = [];
+        if (gates.length) groups.push(`<div class="jt-incident-group"><div class="jt-incident-title">Human gates</div>${incidentRows(gates, 'gate')}</div>`);
+        if (failures.length) groups.push(`<div class="jt-incident-group"><div class="jt-incident-title">Failures</div>${incidentRows(failures, 'failure')}</div>`);
+        const quiet = [!gates.length && 'no human gates', !failures.length && 'no failures'].filter(Boolean);
+        els.incidents.innerHTML = groups.join('') + (quiet.length ? `<p class="trace-muted jt-incidents-quiet">${esc(quiet.join(' · ').replace(/^./, c => c.toUpperCase()))} recorded.</p>` : '');
+    }
 
     function renderEvents() {
         const a = state.analysis; if (!a) return; const q = String(els.eventQuery.value || '').trim().toLowerCase(); const category = els.eventCategory.value; const severity = els.eventSeverity.value;
         const rows = (a.timeline || []).filter(event => { if (category !== 'all' && event.category !== category) return false; if (severity !== 'all' && event.severity !== severity) return false; if (!q) return true; return `${event.title} ${event.summary} ${event.reason} ${event.category} ${JSON.stringify(event.payload || {})}`.toLowerCase().includes(q); }).slice().reverse();
-        els.eventCount.textContent = `${rows.length} shown · ${a.timeline_total_events || (a.timeline || []).length} durable events`;
-        els.events.innerHTML = rows.length ? rows.map(event => `<details class="jt-event" data-severity="${esc(event.severity)}"><summary><span class="jt-event-elapsed">+${esc(fmtDuration(event.elapsed_seconds))}</span><span class="jt-event-category">${esc(event.category)}</span><span class="jt-event-title">${esc(event.title)}</span><span class="jt-event-summary">${esc(event.summary || event.reason || '')}</span><span class="jt-event-time">${esc(fmtWhen(event.created_at))}</span></summary><div class="jt-event-detail"><pre class="jt-event-json">${esc(JSON.stringify(event, null, 2))}</pre></div></details>`).join('') : '<p class="trace-muted">No events match the current filter.</p>';
+        const total = a.timeline_total_events || (a.timeline || []).length;
+        els.eventCount.textContent = rows.length === total ? `${fmtNum(total)} events` : `${fmtNum(rows.length)} of ${fmtNum(total)} events`;
+        // Mu §5.1: a burst of the same event (same title, category and severity in a row —
+        // sandbox events, check output lines) is one row with a count and a time span;
+        // expand it for each event. Pairs stay separate unless they are identical.
+        const runs = [];
+        for (const event of rows) {
+            const key = `${event.category}|${event.severity}|${event.title}`;
+            const last = runs[runs.length - 1];
+            if (last && last.key === key) last.items.push(event); else runs.push({ key, items: [event] });
+        }
+        const groups = [];
+        for (const run of runs) {
+            const same = run.items.every(e => (e.summary || e.reason || '') === (run.items[0].summary || run.items[0].reason || ''));
+            if (run.items.length >= 3 || same) groups.push(run); else run.items.forEach(item => groups.push({ key: run.key, items: [item] }));
+        }
+        const clock = epoch => { const text = fmtWhen(epoch); return text.includes(', ') ? text.split(', ').pop() : text; };
+        const one = event => `<details class="jt-event" data-severity="${esc(event.severity)}"><summary><span class="jt-event-elapsed">+${esc(fmtDuration(event.elapsed_seconds))}</span><span class="jt-event-category">${esc(event.category)}</span><span class="jt-event-title">${esc(event.title)}</span><span class="jt-event-summary">${esc(plain(event.summary || event.reason || ''))}</span><span class="jt-event-time">${esc(fmtWhen(event.created_at))}</span></summary><div class="jt-event-detail"><pre class="jt-event-json">${esc(JSON.stringify(event, null, 2))}</pre></div></details>`;
+        const many = group => {
+            const first = group.items[0], last = group.items[group.items.length - 1];
+            const summaries = new Set(group.items.map(e => e.summary || e.reason || ''));
+            const summary = summaries.size === 1 ? plain(first.summary || first.reason || '') : `${fmtNum(summaries.size)} different lines`;
+            return `<details class="jt-event jt-event--group" data-severity="${esc(first.severity)}"><summary><span class="jt-event-elapsed">+${esc(fmtDuration(first.elapsed_seconds))}</span><span class="jt-event-category">${esc(first.category)}</span><span class="jt-event-title">${esc(first.title)} <span class="jt-event-count">×${group.items.length}</span></span><span class="jt-event-summary">${esc(summary)}</span><span class="jt-event-time" title="${esc(fmtWhen(last.created_at))} – ${esc(fmtWhen(first.created_at))}">${esc(clock(last.created_at))}–${esc(clock(first.created_at))}</span></summary><div class="jt-event-detail jt-event-burst">${group.items.slice(0, 200).map(one).join('')}${group.items.length > 200 ? `<p class="trace-muted">${fmtNum(group.items.length - 200)} more not shown.</p>` : ''}</div></details>`;
+        };
+        els.events.innerHTML = groups.length ? groups.map(g => g.items.length > 1 ? many(g) : one(g.items[0])).join('') : '<p class="trace-muted">No events match the current filter.</p>';
     }
 
     function formatCompare(value, unit) { if (value == null) return '—'; if (unit === 'seconds') return fmtDuration(value); if (unit === 'usd') return fmtMoney(value); return fmtNum(value, 2); }
@@ -223,8 +350,11 @@
     async function loadComparison() { const compareId = els.compareSelect.value; if (!compareId || !state.analysis || compareId === state.analysis.job.id) { state.comparison = null; els.compareSection.hidden = true; return; } try { const data = await api(`/api/jobs/analysis/compare?job_id=${encodeURIComponent(state.analysis.job.id)}&compare_id=${encodeURIComponent(compareId)}`); state.comparison = data; renderComparison(data); } catch (error) { els.compareSection.hidden = true; showError(error.message); } }
 
     function renderAll(a) {
-        state.analysis = a; els.title.textContent = a.job.title; applyStatusChip(els.status, a.job.status, a.job.archived); els.debugExport.href = `/api/jobs/${encodeURIComponent(a.job.id)}/debug-export`;
+        state.analysis = a; if (els.title) els.title.textContent = a.job.title; applyStatusChip(els.status, a.job.status, a.job.archived); els.debugExport.href = `/api/jobs/${encodeURIComponent(a.job.id)}/debug-export`;
         renderOverview(a); renderRuntimeTrace(a); renderPhaseChart(a); renderAttemptChart(a); renderTools(a); renderVerifications(a); renderIncidents(a); renderEvents(); els.main.hidden = false; els.empty.hidden = true; els.loading.hidden = true; els.error.hidden = true;
+        if (els.glance) els.glance.hidden = false; if (els.glanceEmpty) els.glanceEmpty.hidden = true;
+        if (els.openWork) els.openWork.href = `/work#/job/${encodeURIComponent(a.job.id)}`;
+        els.jobList && els.jobList.querySelectorAll('.jt-jobrow').forEach(row => row.setAttribute('aria-selected', row.dataset.job === a.job.id ? 'true' : 'false'));
     }
     function showError(message) { els.error.textContent = String(message || 'Unknown error'); els.error.hidden = false; els.loading.hidden = true; }
     async function loadJob(jobId, { updateUrl = true } = {}) {
@@ -239,7 +369,20 @@
     async function init() { try { await loadJobs(); const qs = new URLSearchParams(window.location.search); const jobId = (qs.get('job') || '').trim(); const compareId = (qs.get('compare') || '').trim(); if (compareId) els.compareSelect.value = compareId; if (jobId) await loadJob(jobId, { updateUrl: false }); else { els.loading.hidden = true; els.empty.hidden = false; } } catch (error) { showError(error.message); } }
 
     els.jobSelect.addEventListener('change', () => loadJob(els.jobSelect.value));
-    els.compareSelect.addEventListener('change', async () => { const url = new URL(window.location.href); if (els.compareSelect.value) url.searchParams.set('compare', els.compareSelect.value); else url.searchParams.delete('compare'); history.replaceState(null, '', url); await loadComparison(); });
+    if (els.jobList) els.jobList.addEventListener('click', event => {
+        const button = event.target.closest('[data-job-open]');
+        if (!button) return;
+        showPane('main');
+        if (!state.analysis || state.analysis.job.id !== button.dataset.jobOpen) loadJob(button.dataset.jobOpen);
+    });
+    if (els.jobFilter) els.jobFilter.addEventListener('input', renderJobList);
+    if (els.back) els.back.addEventListener('click', () => showPane('list'));
+    if (els.asideToggle) els.asideToggle.addEventListener('click', () => {
+        const open = els.panes.dataset.aside !== 'open';
+        if (open) els.panes.dataset.aside = 'open'; else delete els.panes.dataset.aside;
+        els.asideToggle.setAttribute('aria-pressed', String(open));
+    });
+    if (els.compareSelect) els.compareSelect.addEventListener('change', async () => { const url = new URL(window.location.href); if (els.compareSelect.value) url.searchParams.set('compare', els.compareSelect.value); else url.searchParams.delete('compare'); history.replaceState(null, '', url); await loadComparison(); });
     els.refresh.addEventListener('click', async () => { await loadJobs(); if (state.analysis) await loadJob(state.analysis.job.id, { updateUrl: false }); });
     window.addEventListener('mucli-theme-change', syncTheme); els.exportAnalysis.addEventListener('click', exportAnalysis);
     // Command palette (static/js/wash/palette.js): this analyzer's actions.
@@ -249,7 +392,7 @@
             { id: 'jt:refresh', group: 'Actions', label: 'Refresh job analysis', icon: 'refresh-cw', run: () => els.refresh.click() },
             { id: 'jt:export', group: 'Actions', label: 'Export analysis as JSON', icon: 'download', enabled: !!state.analysis, run: exportAnalysis },
             { id: 'jt:work', group: 'Navigate', label: 'Open this job in Work', icon: 'briefcase', enabled: !!state.analysis,
-              run: () => { location.href = `/work#/job/${encodeURIComponent(state.analysis.job.id)}`; } },
+              run: () => { const href = `/work#/job/${encodeURIComponent(state.analysis.job.id)}`; if (window.MuNav) window.MuNav.go(href); else location.href = href; } },
         ], { priority: 10 });
     }
     [els.eventQuery, els.eventCategory, els.eventSeverity].forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', renderEvents));

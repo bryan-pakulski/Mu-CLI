@@ -112,7 +112,7 @@ export function JobStageModelsForm({ active, onSaved, onCancel }: JobStageModels
   return (
     <View style={styles.root}>
       <Panel title="Stage models">
-        <Text variant="xs" style={{ color: colors.ink3 }}>
+        <Text variant="xs" tone="ink3">
           Default model for each pipeline stage. A model set on a job itself takes priority; a blank stage uses the job’s session model.
         </Text>
         {JOB_STAGE_NAMES.map(stage => {

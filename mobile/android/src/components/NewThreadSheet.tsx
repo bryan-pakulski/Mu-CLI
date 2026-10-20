@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { threadsApi, type CreateThreadResponse } from '../api/threads';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, radii, spacing, typography } from '../theme/tokens';
-import { Button, Sheet, Text } from '../ui';
+import { Button, Sheet, Text, TextField } from '../ui';
 
 export type NewThreadSheetProps = {
   visible: boolean;
@@ -58,12 +58,11 @@ export function NewThreadSheet({
           Chat history and working memory start clean.
         </Text>
         <Text variant="xs" style={[styles.label, { color: colors.ink3 }]}>Thread title</Text>
-        <TextInput
+        <TextField
           testID="thread-title-input"
           value={title}
           onChangeText={setTitle}
           placeholder="Investigate the parser"
-          placeholderTextColor={colors.ink3}
           maxLength={120}
           autoCapitalize="sentences"
           autoCorrect

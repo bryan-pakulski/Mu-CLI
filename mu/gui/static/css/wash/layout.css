@@ -1,98 +1,64 @@
-/* Wash layout layer — the shared app shell (G§8.1, §8.2).
+/* Wash layout layer — the shared frame (Mu §2–§3, G§8).
  *
- *   .w-shell             grid: top bar over sidebar + stage
- *   .w-topbar            56px sticky bar: menu, wordmark, breadcrumb, chips, tools
- *   .w-wordmark/.w-mark  μcli wordmark with the μ mark
- *   .w-sidebar           264px nav; 64px icon rail below 1200; drawer below 840
- *   .w-stage             the page content region
+ *   .w-shell             grid: the rail beside the leaf; no top bar
+ *   .w-shell::before     the leaf's glass plane (the only level-1 glass on a page)
+ *   .w-shell__menu       the navigation button, phones only (below 840)
+ *   .w-wordmark/.w-mark  μcli wordmark with the μ mark, at the top of the rail
+ *   .w-sidebar           the rail (size-sidebar) on the painted wash; icon rail
+ *                        (size-rail) below 1200 or when collapsed
+ *                        (html[data-sidebar="collapsed"]); drawer below 840.
+ *                        A size container: patterns/shell.css styles its contents
+ *                        as an icon rail whenever it is rail-width.
+ *   .w-stage             the leaf: the page, scrolled inside the glass
  *   .w-page              centred content column (max 1200, gutters 24/16)
- *   .w-hero              page hero band: art that dissolves into the canvas
+ *   .w-hero              retired on working screens (Mu §2.2); kept for first-run
  *   .w-scrim             backdrop behind the off-canvas sidebar
  *
- * Responsive visibility (.w-optional hides below 840; the menu button shows
- * only below 840) lives in utilities.css so it beats component display rules.
- *
+ * The page header, rows, state sentence and sheet are components (mu.css).
  * Breakpoints (the only ones allowed): 600, 840, 1200, 1600.
  */
 
 /* ------------------------------------------------------------ shell */
 .w-shell {
     --w-sidebar-w: var(--wash-size-sidebar);
+    --w-leaf-gap: var(--wash-size-leaf-gap);
     display: grid;
     grid-template-columns: var(--w-sidebar-w) minmax(0, 1fr);
-    grid-template-rows: var(--wash-size-topbar) minmax(0, 1fr);
-    grid-template-areas:
-        "top top"
-        "side stage";
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "side stage";
     height: 100dvh;
     min-height: 0;
     background: transparent;
     color: var(--wash-ink);
+    transition: grid-template-columns var(--wash-motion-medium) var(--wash-ease-medium);
 }
-/* The stage's glass plane (G§3.3 level 1). It is a pseudo-element grid item
- * in the stage's own cell rather than a backdrop-filter on .w-stage: a
- * filtered element becomes the containing block of position:fixed
- * descendants, and the stage holds the page's modals, drawers and floating
- * popouts. The plane does not scroll, so the blur stays put under content. */
+/* The leaf (Mu §2.1): one glass sheet laid on the wash, inset from the window
+ * on the top, right and bottom. It is a pseudo-element grid item in the
+ * stage's own cell rather than a backdrop-filter on .w-stage: a filtered
+ * element becomes the containing block of position:fixed descendants, and the
+ * stage holds the page's modals, sheets and floating popouts. The plane does
+ * not scroll, so the blur stays put under content. */
 .w-shell::before {
     content: "";
     grid-area: stage;
     min-width: 0;
     min-height: 0;
-    background: var(--w-glass-fill);
-    backdrop-filter: var(--w-glass-filter);
-    -webkit-backdrop-filter: var(--w-glass-filter);
+    margin: var(--w-leaf-gap) var(--w-leaf-gap) var(--w-leaf-gap) 0;
+    border-radius: var(--wash-radius-xl);
+    background: var(--w-leaf-fill, var(--w-glass-fill));
+    box-shadow: var(--w-leaf-lift);
+    backdrop-filter: var(--w-glass-filter-leaf, var(--w-glass-filter));
+    -webkit-backdrop-filter: var(--w-glass-filter-leaf, var(--w-glass-filter));
     pointer-events: none;
 }
 .w-shell[data-shell="bare"] {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-        "top"
-        "stage";
+    grid-template-areas: "stage";
 }
+.w-shell[data-shell="bare"]::before { margin-left: var(--w-leaf-gap); }
 
-/* ------------------------------------------------------------ top bar */
-.w-topbar {
-    grid-area: top;
-    position: sticky;
-    top: 0;
-    z-index: var(--wash-z-sticky);
-    display: flex;
-    align-items: center;
-    gap: var(--wash-space-3);
-    min-width: 0;
-    height: var(--wash-size-topbar);
-    padding: 0 var(--wash-space-6);
-    border-bottom: 1px solid var(--wash-glass-edge);
-    background: var(--w-glass-fill);
-    box-shadow: var(--wash-glass-highlight);
-    backdrop-filter: var(--w-glass-filter);
-    -webkit-backdrop-filter: var(--w-glass-filter);
-}
-.w-topbar__spacer { flex: 1 1 auto; min-width: var(--wash-space-2); }
-.w-topbar__chips {
-    display: flex;
-    align-items: center;
-    gap: var(--wash-space-2);
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    overflow: hidden;
-}
-.w-topbar__chips > li { display: flex; min-width: 0; }
-.w-topbar__tools {
-    display: flex;
-    align-items: center;
-    gap: var(--wash-space-1);
-    flex: none;
-}
-.w-topbar__divider {
-    width: 1px;
-    height: 20px;
-    margin: 0 var(--wash-space-1);
-    background: var(--wash-hairline);
-}
+/* The navigation button (phones only; utilities.css hides it from 840) floats
+ * over the leaf's top-left corner: patterns/shell.css, above .w-btn. */
 
 /* ------------------------------------------------------------ wordmark */
 .w-wordmark {
@@ -122,19 +88,23 @@
     50% { transform: scale(1.12); }
 }
 
-/* ------------------------------------------------------------ sidebar */
+/* ------------------------------------------------------------ sidebar (the rail) */
+/* The rail sits on the wash, which softens to paper beneath it (Mu §2.2). */
 .w-sidebar {
     grid-area: side;
     display: flex;
     flex-direction: column;
     gap: var(--wash-space-1);
     min-height: 0;
-    padding: var(--wash-space-4) var(--wash-space-3);
+    padding: calc(var(--w-leaf-gap) + var(--wash-space-2)) var(--wash-space-3) var(--w-leaf-gap);
+    overflow-x: hidden;
     overflow-y: auto;
-    border-right: 1px solid var(--wash-glass-edge);
-    background: var(--w-glass-fill);
-    backdrop-filter: var(--w-glass-filter);
-    -webkit-backdrop-filter: var(--w-glass-filter);
+    container: w-sidebar / inline-size;
+    background: linear-gradient(90deg, var(--w-rail-veil) 70%, transparent);
+}
+.w-sidebar__mark {
+    align-self: flex-start;
+    margin: 0 0 var(--wash-space-5) var(--wash-space-3);
 }
 .w-sidebar__section {
     display: flex;
@@ -145,23 +115,27 @@
     list-style: none;
 }
 .w-sidebar__heading {
-    margin: var(--wash-space-4) var(--wash-space-3) var(--wash-space-1);
+    margin: var(--wash-space-5) var(--wash-space-3) var(--wash-space-1);
     color: var(--wash-ink-3);
     font-size: var(--wash-type-caption-size);
-    font-weight: var(--wash-type-eyebrow-weight);
+    font-weight: var(--wash-type-label-weight);
     line-height: var(--wash-type-caption-line);
 }
-.w-sidebar__foot { margin-top: auto; }
+.w-sidebar__foot { margin-top: auto; padding-top: var(--wash-space-5); }
 
-/* ------------------------------------------------------------ stage */
+/* ------------------------------------------------------------ stage (the leaf) */
 .w-stage {
     grid-area: stage;
     position: relative;
     min-width: 0;
     min-height: 0;
+    margin: var(--w-leaf-gap) var(--w-leaf-gap) var(--w-leaf-gap) 0;
+    border-radius: var(--wash-radius-xl);
     overflow: auto;
+    overscroll-behavior: contain;
     background: transparent;
 }
+.w-shell[data-shell="bare"] .w-stage { margin-left: var(--w-leaf-gap); }
 .w-stage:focus { outline: none; }
 .w-page {
     width: 100%;
@@ -296,24 +270,24 @@
     .w-page { padding-left: var(--wash-space-7); padding-right: var(--wash-space-7); }
 }
 
-/* lg: the sidebar collapses to a 64px icon rail. */
+/* lg, or collapsed: the rail becomes icons (contents: patterns/shell.css). */
 @media (width < 1200px) {
     .w-shell { --w-sidebar-w: var(--wash-size-rail); }
-    .w-sidebar { padding: var(--wash-space-3) var(--wash-space-2); align-items: center; }
+    .w-sidebar { padding-inline: var(--wash-space-2); }
 }
-@media (840px <= width < 1200px) {
-    .w-sidebar .w-sidebar__heading { display: none; }
+@media (width >= 840px) {
+    :root[data-sidebar="collapsed"] .w-shell { --w-sidebar-w: var(--wash-size-rail); }
+    :root[data-sidebar="collapsed"] .w-sidebar { padding-inline: var(--wash-space-2); }
 }
 
-/* md: the sidebar becomes an off-canvas drawer opened from the top bar. */
+/* md: the rail becomes an off-canvas drawer; the leaf fills the window. */
 @media (width < 840px) {
     .w-shell {
+        --w-leaf-gap: 0px;
         grid-template-columns: minmax(0, 1fr);
-        grid-template-areas:
-            "top"
-            "stage";
+        grid-template-areas: "stage";
     }
-    .w-topbar { padding: 0 var(--wash-space-4); gap: var(--wash-space-2); }
+    .w-shell::before, .w-stage { margin: 0; border-radius: 0; }
     .w-sidebar {
         position: fixed;
         top: 0;

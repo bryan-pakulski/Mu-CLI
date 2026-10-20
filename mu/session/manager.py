@@ -8,10 +8,10 @@ token-budget-aware history-roll helpers from `HistoryMixin`.
 `mu.session.session.SessionManager` re-exports this class for backward
 compatibility — callers that import via the old path still work.
 
-Tests: `tests/test_session.py` (load/save/switch/delete),
-`tests/test_session_picker_state.py` (session-list interactions),
-`tests/test_startup_session_picker.py` (numbered-picker fallback),
-`tests/test_mu_session_history.py` (HistoryMixin round-trip via this class).
+Tests: `tests/sessions/` (load/save/switch/delete),
+`tests/terminal/` (session-list interactions),
+`tests/terminal/test_startup_session_picker.py` (numbered-picker fallback),
+`tests/context/` (HistoryMixin round-trip via this class).
 """
 
 from __future__ import annotations

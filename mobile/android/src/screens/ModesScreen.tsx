@@ -1,12 +1,13 @@
-import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+// Modes: choose the operating harness. A mode changes how the model investigates and acts; its
+// panel presents the facts, evidence and controls of that workflow.
+
+import React, { useCallback, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { useTheme } from '../theme/ThemeContext';
-import { modesApi, ModeInfo } from '../api/modes';
-import { spacing, fontWeights, radii, tracking } from '../theme/tokens';
-import { EmptyState, ErrorState, Pressable, Skeleton, Text, Icon } from '../ui';
-import { useGlass } from '../ui/Glass';
+import { modesApi, type ModeInfo } from '../api/modes';
+import { PanelPage, PanelSection } from '../components/chat/PanelPage';
+import { spacing } from '../theme/tokens';
+import { Banner, Chip, Row, Text } from '../ui';
 
 const MODE_SURFACES: Record<string, { title: string; lenses: string[]; purpose: string }> = {
   default: { title: 'General workspace', lenses: ['plan', 'tools', 'verification'], purpose: 'Flexible coding and codebase assistance.' },
@@ -19,12 +20,11 @@ const MODE_SURFACES: Record<string, { title: string; lenses: string[]; purpose: 
 };
 
 export function ModesScreen() {
-  const { colors } = useTheme();
-  const glass = useGlass();
   const [modes, setModes] = useState<ModeInfo[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectError, setSelectError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selecting, setSelecting] = useState<string | null>(null);
   const [hasWorkspace, setHasWorkspace] = useState(false);
@@ -47,128 +47,59 @@ export function ModesScreen() {
       setRefreshing(false);
     }
   }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      setLoading(true);
-      load();
-    }, [load]),
-  );
+  useFocusEffect(useCallback(() => { setLoading(true); void load(); }, [load]));
 
   const selectMode = async (name: string) => {
     setSelecting(name);
+    setSelectError(null);
     try {
       await modesApi.set(name);
       setCurrent(name);
       setModes(prev => prev.map(m => ({ ...m, is_current: m.name === name })));
     } catch (e) {
-      setError(String(e));
+      setSelectError(String(e));
     } finally {
       setSelecting(null);
     }
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <View style={{ padding: spacing.base }}>
-          {[1, 2, 3, 4].map(i => (
-            <Skeleton key={i} height={64} style={{ marginBottom: spacing.sm }} />
-          ))}
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <ErrorState message={error} onRetry={load} />
-      </SafeAreaView>
-    );
-  }
-
-  if (modes.length === 0) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <EmptyState title="No modes" message="No agent modes available" />
-      </SafeAreaView>
-    );
-  }
-
+  const where = sessionType === 'container' ? 'container workspace' : hasWorkspace ? 'workspace attached' : 'chat only';
+  const currentTitle = current ? (MODE_SURFACES[current]?.title || modes.find(m => m.name === current)?.display_name || current) : null;
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-      <FlatList
-        data={modes}
-        keyExtractor={item => item.name}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
-        contentContainerStyle={{ padding: spacing.base, paddingBottom: spacing['2xl'] }}
-        ListHeaderComponent={
-          <View style={[styles.header, { borderBottomColor: colors.hairline }]}>
-            <View style={styles.eyebrowRow}>
-              <Text variant="xs" style={{ color: colors.ink3, fontWeight: fontWeights.semibold }}>Modes</Text>
-              <Text variant="xs" style={{ color: colors.ink3 }}>/</Text>
-              <Text variant="xs" style={{ color: hasExecutionWorkspace ? colors.ok.ink : colors.attention.ink }}>
-                {sessionType === 'container' ? 'container workspace' : hasWorkspace ? 'workspace attached' : 'chat only'}
-              </Text>
-            </View>
-            <Text variant="lg" style={styles.headerTitle}>Choose the operating harness</Text>
-            <Text variant="xs" style={[styles.headerCopy, { color: colors.ink2 }]}>
-              A mode changes how the model investigates and acts. Its explorer presents the facts, evidence, and controls that belong to that workflow.
-            </Text>
-          </View>
-        }
-        renderItem={({ item }) => {
-          const isActive = current === item.name;
+    <PanelPage testID="modes-screen" title="Modes"
+      state={[currentTitle ? { text: currentTitle } : null, { text: where, tone: hasExecutionWorkspace ? 'ok' : 'attention' }]}
+      loading={loading} error={error} onRetry={() => void load()}
+      empty={!loading && !error && !modes.length ? { title: 'No modes', message: 'No agent modes available.' } : null}
+      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }}>
+      <Text variant="body" tone="ink2" style={styles.lede}>
+        Choose the operating harness. A mode changes how the model investigates and acts; its panel presents the facts, evidence and controls that belong to that workflow.
+      </Text>
+      {selectError ? <Banner tone="danger" title="Couldn't switch mode" testID="modes-error">{selectError}</Banner> : null}
+      <PanelSection title="Harnesses" count={modes.length}>
+        {modes.map(item => {
+          const active = current === item.name;
           const surface = MODE_SURFACES[item.name] || { title: item.display_name, lenses: [], purpose: item.description };
-          const accent = modeAccent(item.name, colors);
           return (
-            <Pressable
-              onPress={() => !item.disabled && selectMode(item.name)}
-              disabled={item.disabled || selecting !== null}
-              activeOpacity={0.7}
-              style={[
-                styles.modeRow,
-                // Active mode: a glass-strong pill, never a coloured side bar (G§3.4, G§9.4).
-                isActive && glass.activePill,
-                { opacity: item.disabled ? 0.42 : 1 },
-              ]}
-            >
-              <View style={[styles.modeDot, { backgroundColor: accent }]} />
-              <View style={styles.modeCopy}>
-                <View style={styles.modeTitleRow}>
-                  <Text variant="base" style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{surface.title}</Text>
-                  {isActive && <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.medium }}>Current</Text>}
-                  {item.disabled && <Text variant="xs" style={{ color: colors.attention.ink }}>Workspace required</Text>}
+            <Row key={item.name} testID={`mode-row-${item.name}`} selected={active}
+              status={active ? 'done' : selecting === item.name ? 'active' : undefined}
+              title={surface.title} when={active ? 'current' : undefined}
+              accessibilityLabel={`${surface.title}${active ? ', current' : ''}${item.disabled ? ', workspace required' : ''}`}
+              onPress={item.disabled || selecting !== null ? undefined : () => void selectMode(item.name)}
+              sub={(
+                <View style={styles.sub}>
+                  <Text variant="caption" tone="ink2">{surface.purpose}</Text>
+                  {surface.lenses.length ? <Text variant="caption" tone="ink3">{surface.lenses.join('  ·  ')}</Text> : null}
+                  {item.disabled ? <Chip variant="meta" tone="attention" label="Workspace required" /> : null}
                 </View>
-                <Text variant="xs" style={{ color: colors.ink2, marginTop: spacing.xs }}>{surface.purpose}</Text>
-                <Text variant="xs" style={[styles.lenses, { color: colors.ink3 }]}>{surface.lenses.join('  ·  ')}</Text>
-              </View>
-              {isActive && <Icon name="check" size="md" color={accent} />}
-              {selecting === item.name && !isActive && <Icon name="hourglass" size="sm" color={colors.ink3} />}
-            </Pressable>
+              )} />
           );
-        }}
-      />
-    </SafeAreaView>
+        })}
+      </PanelSection>
+    </PanelPage>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { paddingTop: spacing.sm, paddingBottom: spacing.lg, marginBottom: spacing.xs, borderBottomWidth: 1 },
-  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  headerTitle: { fontWeight: fontWeights.semibold, marginTop: spacing.lg, letterSpacing: tracking.tight },
-  headerCopy: { marginTop: spacing.xs, maxWidth: 430 },
-  modeRow: { minHeight: 96, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.base, paddingHorizontal: spacing.md, borderRadius: radii.md, borderWidth: 1, borderColor: 'transparent' },
-  // The mode's categorical pigment dot (G§1.4), on every row.
-  modeDot: { width: 8, height: 8, borderRadius: radii.pill, marginRight: spacing.md },
-  modeCopy: { flex: 1 },
-  modeTitleRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm, flexWrap: 'wrap' },
-  lenses: { marginTop: spacing.sm },
+  lede: { marginBottom: spacing.base },
+  sub: { gap: spacing.xs, alignItems: 'flex-start' },
 });
-
-// Mode identity is neutral: the active mode is carried by its label plus the
-// single accent (selection), never by a per-mode colour.
-function modeAccent(_mode: string, colors: ReturnType<typeof useTheme>['colors']) {
-  return colors.accent.ink;
-}

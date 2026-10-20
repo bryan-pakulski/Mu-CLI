@@ -41,7 +41,7 @@ export function StageAgentsField({ status, value, onChange, stageDefaults }: {
     onChange({ ...value, [stage]: { ...value[stage], ...patch, touched: true } });
   return (
     <View style={styles.col} testID="stage-agents-field">
-      <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>Agent per stage</Text>
+      <Text variant="sm" style={styles.strong}>Agent per stage</Text>
       {AGENT_STAGES.map(stage => {
         const draft = value[stage];
         const problem = agentProblem(status, draft.agent);
@@ -72,7 +72,7 @@ export function StageAgentsField({ status, value, onChange, stageDefaults }: {
         );
       })}
       {value.implement.agent === 'codex' ? <Banner tone="warn" glyph="◆" testID="codex-implement-warning" title={CODEX_IMPLEMENT_WARNING} /> : null}
-      <Text variant="xs" style={{ color: colors.ink3 }}>A blank model uses Settings → Stage models, then the session’s model. Claude Code and Codex run in the same sandbox with one copied credential.</Text>
+      <Text variant="xs" tone="ink3">A blank model uses Settings → Stage models, then the session’s model. Claude Code and Codex run in the same sandbox with one copied credential.</Text>
     </View>
   );
 }
@@ -98,7 +98,7 @@ export function AgentsSettings({ active }: { active: boolean }) {
   return (
     <Panel title="Agent harnesses" testID="agents-settings">
       {loading && !status ? <Loading label="Checking Claude Code and Codex…" /> : null}
-      {error ? <Text variant="xs" style={{ color: colors.ink3 }}>Unavailable: {error}</Text> : null}
+      {error ? <Text variant="xs" tone="ink3">Unavailable: {error}</Text> : null}
       {status ? (
         <>
           <KV label="Defaults"><Text variant="xs">{AGENT_STAGES.map(s => `${s} ${AGENT_LABELS[status.defaults?.[s] as AgentName] || status.defaults?.[s] || 'mucli'}`).join(' · ')}</Text></KV>
@@ -107,13 +107,13 @@ export function AgentsSettings({ active }: { active: boolean }) {
             if (!item) return null;
             return (
               <View key={agent} style={styles.col} testID={`agent-status-${agent}`}>
-                <Text variant="sm" style={{ fontWeight: fontWeights.semibold, color: item.ready ? colors.ok.ink : colors.attention.ink }}>
+                <Text variant="sm" tone={item.ready ? 'ok' : 'attention'} style={styles.strong}>
                   {item.ready ? STATUS.done.icon : STATUS.waiting.icon} {item.label || AGENT_LABELS[agent]} · {item.ready ? 'ready' : 'not ready'}
                 </Text>
                 {item.binary ? <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]} numberOfLines={2}>{item.version || 'unknown version'} · {item.binary}</Text> : null}
-                {item.credential ? <Text variant="xs" style={{ color: colors.ink3 }}>credential: {item.credential}{item.credential_source ? ` (${item.credential_source})` : ''}</Text> : null}
-                {(item.problems || []).map((p, i) => <Text key={`p${i}`} variant="xs" style={{ color: colors.danger.ink }}>✗ {p}</Text>)}
-                {(item.warnings || []).map((w, i) => <Text key={`w${i}`} variant="xs" style={{ color: colors.attention.ink }}>◆ {w}</Text>)}
+                {item.credential ? <Text variant="xs" tone="ink3">credential: {item.credential}{item.credential_source ? ` (${item.credential_source})` : ''}</Text> : null}
+                {(item.problems || []).map((p, i) => <Text key={`p${i}`} variant="xs" tone="danger">✗ {p}</Text>)}
+                {(item.warnings || []).map((w, i) => <Text key={`w${i}`} variant="xs" tone="attention">◆ {w}</Text>)}
                 {!item.ready ? (status.setup?.[agent] || []).map((step, i) => <Text key={`s${i}`} variant="xs" selectable>→ {step}</Text>) : null}
               </View>
             );
@@ -133,10 +133,16 @@ export function AgentsSettings({ active }: { active: boolean }) {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  strong: { fontWeight: fontWeights.semibold },
+  flexStrong: { flex: 1, fontWeight: fontWeights.semibold },
+  mono: { fontFamily: fonts.mono },
+  monoShrink: { flexShrink: 1, fontFamily: fonts.mono },
+  sectionGap: { fontWeight: fontWeights.semibold, marginTop: spacing.sm },
+  intro: { marginBottom: spacing.sm },
   col: { gap: spacing.xs },
   row: { flexDirection: 'row', gap: spacing.sm },
   provider: { width: 110 },
   grow: { flex: 1 },
   rowEnd: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
-  mono: { fontFamily: fonts.mono },
 });

@@ -37,7 +37,7 @@ No Expo account needed. Produces a shareable `.apk` you can install on multiple 
 ```bash
 cd mobile/android
 npm install        # one-time
-make apk           # builds dist/mucli-mobile-0.5.0.apk
+make apk           # builds dist/mucli-mobile-0.6.2.apk
 ```
 
 Install to a connected device:
@@ -45,7 +45,7 @@ Install to a connected device:
 make install       # builds + installs via adb (USB debugging enabled)
 ```
 
-Or transfer `dist/mucli-mobile-0.5.0.apk` to any device, enable "Install unknown apps", tap to install.
+Or transfer `dist/mucli-mobile-0.6.2.apk` to any device, enable "Install unknown apps", tap to install.
 
 ### Build (EAS cloud)
 
@@ -60,13 +60,36 @@ eas login
 eas build --platform android --profile preview
 ```
 
-## Connection
+## What's new in 0.6
 
-1. Open the app — without a server it shows the **Connect** screen
-2. Tap **Connect** (or **More → Connection**)
-3. Enter your mucli instance URL (e.g. `http://192.168.1.100:30311`)
-4. Tap **Test Connection** — the status chip turns to Live on success
-5. baseUrl persists across app restarts via AsyncStorage
+Parity with the Mu GUI (`documentation/plans/mobile_parity.md`):
+
+- **Sign in by pairing.** Scan the code from Settings → Devices on the computer; the token lives
+  in the keystore and signs every request, stream and terminal. Unpaired phones are refused.
+- **Six destinations** — Chat, Work, Orchestration, Environments, Insights, More — each with a
+  page header (title, state sentence, tabs), rows instead of cards, and its own accent.
+- **Chat:** inline approvals with breadcrumbs, the web's tool lists, a composer with the session
+  controls and a mic (speech to text), one drawer for sessions and threads.
+- **Work:** Now board, Notes, diff review mode, the check-artifact browser (logs, JUnit, XML,
+  CSV, packet captures, archives, hex), server-driven job actions, "Open a shell".
+- **Orchestration:** presence and busy nodes, maintenance, run decisions with typed
+  confirmation, results tables, the catalog, Studio (tool drafts and runbooks) and the fleet chat.
+- **Environments** with the terminal, **Insights** with costs, and themes: palettes and glass.
+- Removed: the Workspace tab, the Audio and History screens, the settings sheets.
+
+## Connection and sign-in
+
+The phone signs in by **pairing** (see `documentation/security.md` §8).
+
+1. On the computer, run the GUI so the phone can reach it:
+   `MUCLI_GUI_ALLOW_REMOTE=1 mucli --gui --host 0.0.0.0`.
+2. Open **Settings → Devices → Pair a device** in the browser (or run `mucli gui pair`). It shows
+   a QR code and an 8-character code, valid for 10 minutes.
+3. In the app, open **More → Settings → Devices** (or tap **Pair** on the banner) and scan the
+   code, or type the address and the code.
+4. The token is kept in the Android keystore (expo-secure-store), one per server, and signs every
+   request, stream and terminal. Revoke it from the computer at any time
+   (`mucli gui devices revoke NAME`); the app then asks to pair again.
 
 ## Architecture
 
@@ -81,7 +104,7 @@ mobile/android/
 │   ├── api/                 # Typed HTTP/SSE client modules (1:1 with mucli GUI routers)
 │   ├── ui/                  # The Wash component kit — every screen imports primitives from here
 │   ├── components/          # Feature components (PromptHost, job views, sheets, drawers, CodeBlock)
-│   ├── navigation/          # Root stack + bottom tabs (Chat, Work, Workspace, More)
+│   ├── navigation/          # Root stack + six tabs; routes/<destination>.tsx per tab
 │   ├── screens/             # Feature screens (Settings lives under More)
 │   ├── store/connection.ts  # Zustand store: baseUrl, active session, provider/model, offline queue state
 │   └── theme/
@@ -93,15 +116,22 @@ mobile/android/
 
 ### Navigation
 
-A native stack wraps four bottom tabs. The edge-swipe drawers (sessions from
-the left, modes from the right) remain as shortcuts.
+Six tabs, the web GUI's destinations in the rail's order (`src/navigation/routes/<destination>.tsx`
+owns each tab, its stack screens and its params). Switching tab cross-fades the destination's
+watercolour and accent (1.4 s; instant with reduced motion).
 
 | Tab | Contents |
 |-----|----------|
-| Chat | Conversation with tool cards, approvals, composer; header links to trace, work and settings |
-| Work | Engineering jobs dashboard (Jobs, Activity, Tickets, History, Job settings pages) |
-| Workspace | Workspace tools grouped by intent (memory, files, skills, modes, shell, …) |
-| More | Settings, connection, provider, modes, threads, session files, trace, pending prompts |
+| Chat | The conversation: tool lists, inline approvals, the composer (mode, model, effort, plan, auto-approve, context ring, mic). Sessions and threads in the left drawer; the workspace panel (mode panels, Context, Files, Session files, Skills) from ⋯ |
+| Work | Now board, Jobs, Tickets, History; job page with Notes, Session, Plan, Diff (review mode), Review, Checks (artifact browser), Diagnostics, Cost & audit |
+| Orchestration | Now, Runs, Nodes, Catalog; Studio (tool drafts, runbooks); Settings (read-only); fleet chat from Ask |
+| Environments | Environments and templates with live meters; environment page with actions, charts, sessions and the terminal |
+| Insights | Runs (traces), Jobs analysis, Costs (model pricing) |
+| More | Settings (Appearance, Devices, Areas), Connection, Provider and model |
+
+Deep links mirror the web's hash routes: `mucli://pair?code=…&url=…`, `mucli://work/job/<id>?tab=diff`,
+`mucli://orchestration/run/<id>`, `…/node/<id>`, `…/tool/<id>/<version>`, `mucli://environments/env/<name>`,
+`mucli://insights/costs`.
 
 ### Design system: Wash
 
@@ -109,10 +139,12 @@ The app follows the Wash design guide
 (`documentation/design/wash_design_guide.md`, mobile notes marked "M:") and
 shares one token and vocabulary source with the web GUI and the terminal.
 
-- **Themes:** Paper (light, `canvas #F8F6F1`) and Dusk (dark, `canvas #16131B`).
-  The preference is System / Paper / Dusk under **More → Settings → Appearance**
-  and persists across restarts. **Reduce decoration** replaces watercolour art
-  with a flat wash.
+- **Themes:** Wash and the palettes from `tokens.json` (theme cards under **More → Settings →
+  Appearance**), each with a light (Paper) and a dark (Dusk) side: System / Light / Dark.
+  **Glass** (Wash only) sets how much watercolour shows through surfaces, floor-clamped so text
+  stays readable; palettes and **Reduce decoration** are flat. **Text size** (85–120%, shared
+  with the web GUI's setting via `tokens.json` `density.text_scale`) scales text and line heights
+  on top of the phone's own font size; smaller packs more on screen.
 - **Colour:** components use semantic tokens only — `canvas`, `surface`,
   `sunken`, `raised`, `hairline`, `ink`/`ink2`/`ink3`, `plum`, and
   `accent` (lagoon), `running` (sky), `ok` (meadow), `attention` (apricot,

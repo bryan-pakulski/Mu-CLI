@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from mu.design import (  # noqa: E402
-    SEMANTICS, STEPS, THEMES, TOKENS_PATH, VOCABULARY_PATH, load_tokens, load_vocabulary,
+    SEMANTICS, STEPS, THEMES, TOKENS_PATH, VOCABULARY_PATH, destinations, load_tokens, load_vocabulary, palettes,
 )
 
 CSS_OUT = ROOT / "mu/gui/static/css/wash/tokens.css"
@@ -51,8 +51,52 @@ def _px(value: float) -> str:
     return "0" if value == 0 else f"{value}px"
 
 
+def _scaled(value: float, floor: float = 0) -> str:
+    """A length times the user's text size (--mu-scale, set on <html> by route_theme.js
+    MuTextScale; 1 when unset), never below ``floor``."""
+    if value == 0:
+        return "0"
+    expr = f"calc({value}px * var(--mu-scale, 1))"
+    return f"max({_num(floor)}px, {expr})" if floor else expr
+
+
 def _em(value: float) -> str:
     return "0" if value == 0 else f"{value}em"
+
+
+# --- web density --------------------------------------------------------------
+
+
+def _round(value: float, step: float = 1.0) -> float:
+    out = int(value / step + 0.5) * step
+    return _num(out)
+
+
+def _num(value: float) -> float:
+    return int(value) if float(value).is_integer() else value
+
+
+def web_scale(tokens: dict) -> dict:
+    """``type``/``space``/``radius``/``size`` as the web GUI uses them: the design scale times
+    ``density.web`` (text rounded to half pixels and kept at ``min_text`` or above; sizes in
+    ``density.keep`` unscaled). Android uses the design scale as is."""
+    density = tokens.get("density") or {}
+    k = float(density.get("web", 1.0))
+    if k == 1.0:
+        return {name: tokens[name] for name in ("type", "space", "radius", "size")}
+    floor = float(density.get("min_text", 0))
+    keep = set(density.get("keep") or [])
+    type_ = {}
+    for name, spec in tokens["type"].items():
+        size = _num(max(_round(spec["size"] * k, 0.5), min(floor, spec["size"])))
+        line = max(_round(spec["line"] * k), _round(size * 1.25))
+        type_[name] = dict(spec, size=size, line=line)
+    return {
+        "type": type_,
+        "space": [max(2, _round(v * k)) for v in tokens["space"]],
+        "radius": {n: v if v >= 999 else max(2, _round(v * k)) for n, v in tokens["radius"].items()},
+        "size": {n: v if n in keep else _round(v * k) for n, v in tokens["size"].items()},
+    }
 
 
 # --- CSS ---------------------------------------------------------------------
@@ -73,12 +117,69 @@ def _theme_block(theme: str) -> list[str]:
     for name, value in spec.get("glass", {}).items():
         var = "--wash-glass" if name == "surface" else f"--wash-glass-{name}"
         lines.append(f"  {var}: {value};")
+    art = "/static/wash/art"
     for wash in tokens["glass"]["ambient"]:
-        lines.append(f"  --wash-art-ambient-{wash}: url(\"/static/wash/art/ambient-{wash}-{theme}-1920.webp\");")
-    lines.append(f"  --wash-art-hero: url(\"/static/wash/art/dawn-{theme}-1600.webp\");")
-    lines.append(f"  --wash-art-work: url(\"/static/wash/art/lagoon-{theme}-1600.webp\");")
-    lines.append(f"  --wash-art-env: url(\"/static/wash/art/meadow-{theme}-1600.webp\");")
+        # Ambient: the painting flattened at 24% over the canvas (text may sit near it).
+        lines.append(f"  --wash-art-ambient-{wash}: image-set(url(\"{art}/ambient-{wash}-{theme}-1920.webp\") 1x, "
+                     f"url(\"{art}/ambient-{wash}-{theme}-3840.webp\") 2x);")
+        # Scene: the full painting, for behind the glass leaf (the shell's watercolour).
+        lines.append(f"  --wash-art-scene-{wash}: image-set(url(\"{art}/{wash}-{theme}-1600.webp\") 1x, "
+                     f"url(\"{art}/{wash}-{theme}-3840.webp\") 2x);")
+    for role, scene in (("hero", "dawn"), ("work", "lagoon"), ("env", "meadow")):
+        lines.append(f"  --wash-art-{role}: image-set(url(\"{art}/{scene}-{theme}-1600.webp\") 1x, "
+                     f"url(\"{art}/{scene}-{theme}-3840.webp\") 2x);")
     return lines
+
+
+def _palette_block(name: str, mode: str) -> list[str]:
+    """A palette's colours for light (paper) or dark (dusk). Surfaces are flat, so no glass;
+    the watercolour belongs to Wash, so the art is switched off (the mode tint remains)."""
+    tokens = load_tokens()
+    spec = palettes()[name][mode]
+    lines = [f"  color-scheme: {mode};"]
+    for key, value in spec["color"].items():
+        lines.append(f"  --wash-{key}: {value};")
+    for pig, steps in spec["pigment"].items():
+        for step in STEPS:
+            lines.append(f"  --wash-{pig}-{step}: {steps[step]};")
+    tint = spec["shadow"]["tint"]
+    for level, value in tokens["elevation"].items():
+        lines.append(f"  --wash-elevation-{level}: {value.replace('{tint}', tint)};")
+    for wash in tokens["glass"]["ambient"]:
+        lines.append(f"  --wash-art-ambient-{wash}: none;")
+        lines.append(f"  --wash-art-scene-{wash}: none;")
+    for art in ("hero", "work", "env"):
+        lines.append(f"  --wash-art-{art}: none;")
+    return lines
+
+
+def _destination_css() -> str:
+    """The shell's per-destination accent and ambient scene: [data-mode] sets --mu-accent(-ink/-wash)
+    and --mu-ambient-art / --mu-ambient-tint (shell.css animates and paints them)."""
+    out = []
+    dest = destinations()
+    default = dest.get("insights") or next(iter(dest.values()))
+    def block(spec):
+        pig, scene = spec["accent"], spec["ambient"]
+        return (f"  --mu-accent: var(--wash-{pig}-pigment);\n  --mu-accent-ink: var(--wash-{pig}-ink);\n"
+                f"  --mu-accent-wash: var(--wash-{pig}-wash);\n  --mu-ambient-art: var(--wash-art-scene-{scene});\n"
+                f"  --mu-ambient-tint: var(--wash-{pig}-wash);\n")
+    out.append(":root {\n" + block(default) + "}\n")
+    for name, spec in dest.items():
+        out.append(f'[data-mode="{name}"] {{\n' + block(spec) + "}\n")
+    return "\n/* destinations: accent + ambient scene (tokens.json destination) */\n" + "".join(out)
+
+
+def _palette_css() -> str:
+    """Every palette × mode as one block keyed on html[data-palette] + [data-theme]."""
+    out = []
+    for name, spec in palettes().items():
+        for mode in ("light", "dark"):
+            themes = ("paper", "light") if mode == "light" else ("dusk", "dark")
+            selector = ", ".join(f'[data-palette="{name}"][data-theme="{t}"]' for t in themes)
+            out.append(f"\n/* palette: {spec['label']} ({mode}) */\n{selector} {{\n"
+                       + "\n".join(_palette_block(name, mode)) + "\n}\n")
+    return "".join(out)
 
 
 def _static_block() -> list[str]:
@@ -109,17 +210,22 @@ def _static_block() -> list[str]:
     for role, ref in tokens["syntax"].items():
         target = f"var(--wash-{ref})" if ref.startswith("ink") else f"var(--wash-{ref}-ink)"
         lines.append(f"  --wash-syntax-{role}: {target};")
-    for name, spec in tokens["type"].items():
-        lines.append(f"  --wash-type-{name}-size: {_px(spec['size'])};")
-        lines.append(f"  --wash-type-{name}-line: {_px(spec['line'])};")
+    web = web_scale(tokens)
+    density = tokens.get("density") or {}
+    keep = set(density.get("keep") or [])
+    min_px = float((density.get("text_scale") or {}).get("min_px", 0))
+    lines.append(f"  --wash-density: {density.get('web', 1)};")
+    for name, spec in web["type"].items():
+        lines.append(f"  --wash-type-{name}-size: {_scaled(spec['size'], floor=min_px)};")
+        lines.append(f"  --wash-type-{name}-line: {_scaled(spec['line'], floor=_round(min_px * 1.25, 0.5))};")
         lines.append(f"  --wash-type-{name}-weight: {spec['weight']};")
         lines.append(f"  --wash-type-{name}-tracking: {_em(spec['tracking'])};")
-    for index, value in enumerate(tokens["space"], start=1):
-        lines.append(f"  --wash-space-{index}: {_px(value)};")
-    for name, value in tokens["radius"].items():
+    for index, value in enumerate(web["space"], start=1):
+        lines.append(f"  --wash-space-{index}: {_scaled(value)};")
+    for name, value in web["radius"].items():
         lines.append(f"  --wash-radius-{name}: {_px(value)};")
-    for name, value in tokens["size"].items():
-        lines.append(f"  --wash-size-{name}: {_px(value)};")
+    for name, value in web["size"].items():
+        lines.append(f"  --wash-size-{name}: {_px(value) if name in keep else _scaled(value)};")
     for name, spec in tokens["motion"].items():
         lines.append(f"  --wash-motion-{name}: {spec['duration']}ms;")
         lines.append(f"  --wash-ease-{name}: {spec['easing']};")
@@ -150,6 +256,8 @@ def build_css() -> str:
         + "[data-theme=\"dusk\"],\n[data-theme=\"dark\"] {\n" + dusk + "\n}\n\n"
         + "@media (prefers-color-scheme: dark) {\n  :root:not([data-theme]) {\n"
         + "\n".join("  " + line for line in _theme_block("dusk")) + "\n  }\n}\n"
+        + _palette_css()
+        + _destination_css()
         + "}\n"
     )
 
@@ -180,6 +288,21 @@ def build_hljs() -> str:
 # --- JS / TS -------------------------------------------------------------------
 
 
+def _flat(spec: dict) -> dict:
+    tokens = load_tokens()
+    flat = dict(spec["color"])
+    for name, steps in spec["pigment"].items():
+        for step in STEPS:
+            flat[f"{name}-{step}"] = steps[step]
+    for role in SEMANTICS:
+        for step in STEPS:
+            flat[f"{role}-{step}"] = spec["pigment"][tokens["semantic"][role]][step]
+    flat["neutral-wash"] = spec["color"]["sunken"]
+    flat["neutral-pigment"] = spec["color"]["ink-3"]
+    flat["neutral-ink"] = spec["color"]["ink-3"]
+    return flat
+
+
 def _flat_theme(theme: str) -> dict:
     tokens = load_tokens()
     spec = tokens["themes"][theme]
@@ -196,8 +319,10 @@ def _flat_theme(theme: str) -> dict:
     return flat
 
 
-def _payload() -> dict:
+def _payload(*, web: bool = True) -> dict:
+    """``web``: the density-scaled sizes the GUI uses (wash_tokens.js); Android gets the design scale."""
     tokens = load_tokens()
+    scaled = web_scale(tokens) if web else {name: tokens[name] for name in ("type", "space", "radius", "size")}
     return {
         "themes": {theme: _flat_theme(theme) for theme in THEMES},
         "semantic": tokens["semantic"],
@@ -207,10 +332,10 @@ def _payload() -> dict:
         "series": tokens["series"],
         "syntax": tokens["syntax"],
         "font": tokens["font"],
-        "type": tokens["type"],
-        "space": tokens["space"],
-        "radius": tokens["radius"],
-        "size": tokens["size"],
+        "type": scaled["type"],
+        "space": scaled["space"],
+        "radius": scaled["radius"],
+        "size": scaled["size"],
         "breakpoint": tokens["breakpoint"],
         "motion": tokens["motion"],
         "z": tokens["z"],
@@ -218,6 +343,11 @@ def _payload() -> dict:
         "glass": {theme: tokens["themes"][theme]["glass"] for theme in THEMES},
         "glassEffect": tokens["glass"],
         "vocabulary": load_vocabulary(),
+        "palettes": {name: {"label": spec["label"], "note": spec["note"],
+                            "paper": _flat(spec["light"]), "dusk": _flat(spec["dark"])}
+                     for name, spec in palettes().items()},
+        "destination": destinations(),
+        "textScale": {k: v for k, v in (tokens.get("density") or {}).get("text_scale", {}).items() if not k.startswith("_")},
     }
 
 
@@ -245,8 +375,14 @@ def build_js() -> str:
         + "    var t = document.documentElement.getAttribute('data-theme');\n"
         + "    return (t === 'dusk' || t === 'dark') ? 'dusk' : 'paper';\n"
         + "  };\n"
+        + "  WASH.palette = function () {\n"
+        + "    var p = document.documentElement.getAttribute('data-palette');\n"
+        + "    return p && WASH.palettes && WASH.palettes[p] ? p : null;\n"
+        + "  };\n"
         + "  WASH.color = function (name, theme) {\n"
-        + "    return WASH.themes[theme || WASH.theme()][name];\n"
+        + "    var t = theme || WASH.theme();\n"
+        + "    var p = WASH.palette();\n"
+        + "    return (p ? WASH.palettes[p][t][name] : null) || WASH.themes[t][name];\n"
         + "  };\n"
         + "  root.WASH = WASH;\n"
         + "})(typeof window !== 'undefined' ? window : globalThis);\n"
@@ -254,7 +390,7 @@ def build_js() -> str:
 
 
 def build_ts() -> str:
-    payload = _payload()
+    payload = _payload(web=False)
     themes = payload.pop("themes")
     vocabulary = payload.pop("vocabulary")
     lines = [header("//").rstrip("\n"), ""]

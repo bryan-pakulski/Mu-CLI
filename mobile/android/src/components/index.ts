@@ -1,7 +1,7 @@
 // Feature components. UI primitives live in src/ui (the Wash kit).
 export { CodeBlock } from './CodeBlock';
 export { ConflictBanner } from './ConflictBanner';
-export { ModeWorkspaceHeader, useModeWorkspaceView } from './ModeWorkspace';
+export { ModeWorkspaceIntro, useModeWorkspaceView, workspaceState, workspaceTabs } from './ModeWorkspace';
 export {
   SessionStatusBadge,
   sessionState,

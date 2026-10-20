@@ -17,12 +17,11 @@
                 role="tab">Context map</button>
     </div>
 
-    <section class="memory-knowledge" x-show="$store.memory.tab === 'knowledge'">
+    <section class="memory-knowledge" role="tabpanel" x-show="$store.memory.tab === 'knowledge'">
         <div class="panel-head">
             <div>
                 <div class="panel-subject">Memory ledger</div>
-                <div class="panel-meta">Scoped cross-session memory · automatic · no approval prompts</div>
-                <div class="panel-meta"><span class="w-count" x-text="$store.memory.durable.stats.total || 0"></span> scoped memories</div>
+                <div class="panel-meta"><span x-show="$store.memory.durable.stats.total"><span x-text="$store.memory.durable.stats.total"></span> scoped memories · </span>cross-session memory, saved automatically, no approval prompts</div>
             </div>
             <button type="button" class="memory-refresh w-btn" data-variant="icon"
                     @click="$store.memory.loadDurable()"
@@ -226,7 +225,7 @@
         </section>
     </section>
 
-    <section x-show="$store.memory.tab === 'context'" class="context-observatory">
+    <section role="tabpanel" x-show="$store.memory.tab === 'context'" class="context-observatory">
         <div class="panel-empty w-empty" data-size="sm" data-tone="plan" x-show="!$store.memory.active">
             <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-brain"></use></svg></div>
             <h3 class="w-empty__title">Context observatory is ready</h3>
@@ -238,7 +237,6 @@
         <div x-show="$store.memory.active" class="memory-body">
             <header class="context-hero">
                 <div>
-                    <span class="context-kicker w-eyebrow"><i class="w-eyebrow__swatch" aria-hidden="true"></i>Model input · live</span>
                     <h3>Context Observatory</h3>
                     <p>See the prompt evolve at every provider call.</p>
                 </div>

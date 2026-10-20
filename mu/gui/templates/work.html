@@ -1,8 +1,15 @@
-{#- Engineering work (/work) on the shared Wash shell (G§8.2, spec W4).
+{#- Engineering work (/work) on the Mu frame (mu_style_guide.md §10.2).
     The body is the jobs app root (#work-app): work.js reads its data-session
-    and data-density, and every route section, chip and nav link lives under
-    it. Hash routes: #/ dashboard, #/jobs, #/job/<id>?tab=…, #/activity,
-    #/boards (Tickets), #/history, #/settings, #/setup and #/doctor. -#}
+    and data-density, and every route section, tab and menu link lives under
+    it. Hash routes: #/ (Now), #/jobs, #/job/<id>?tab=…, #/activity,
+    #/boards (Tickets), #/history, #/settings, #/setup and #/doctor.
+
+    Page header: title per route (work.js → WashHead.set: "Work", or the job's
+    title with "← Jobs" on a job), the state sentence (#work-state: needs you ·
+    running · checks · spend today, zeros left out), tabs Now · Jobs · Tickets ·
+    History + More (Activity, Settings, Setup), one primary action (New job)
+    and a ⋯ menu with the page tools. Connection and Docker health show only
+    when broken, as the leaf alert. -#}
 {% extends "_layout.html" %}
 {% import "macros/wash.html" as w %}
 {% block title %}Work · μcli{% endblock %}
@@ -13,131 +20,120 @@
     <script src="/static/vendor/marked.min.js" defer></script>
     <script src="/static/vendor/highlight.min.js" defer></script>
 {% endblock %}
+{% set nav_active = "work" %}
 {% block ambient %}lagoon{% endblock %}
 {% block body_class %}work-app work-product-app{% endblock %}
 {% block body_attrs %} id="work-app" data-session="{{ session_name or '' }}"{% endblock %}
 
-{% block crumbs_attrs %} id="work-crumbs" class="work-crumbs"{% endblock %}
-{% block crumbs %}<li class="w-breadcrumb__item"><a href="#/">Work</a></li><li class="w-breadcrumb__item"><span aria-current="page">Dashboard</span></li>{% endblock %}
-
-{% block topbar_chips_attrs %} id="work-chips"{% endblock %}
-{% block topbar_chips %}
-<li class="w-optional"><a href="#/activity" class="w-chip work-chip" data-tone="neutral" data-chip="agents" title="Running agents"><span class="w-chip__glyph" aria-hidden="true">●</span><span data-chip-text>0 agents</span></a></li>
-<li class="w-optional"><a href="#/activity" class="w-chip work-chip" data-tone="neutral" data-chip="checks" title="Running builds and tests"><span class="w-chip__glyph" aria-hidden="true">●</span><span data-chip-text>0 checks</span></a></li>
-<li><a href="#/" class="w-chip work-chip" data-tone="neutral" data-chip="needs" title="Jobs waiting for you"><span class="w-chip__glyph" aria-hidden="true">◆</span><span data-chip-text>0 need you</span></a></li>
-<li class="w-optional" data-chip-slot="engine" hidden><a href="#/activity" class="w-chip work-chip" data-tone="neutral" data-chip="engine" title="Container engine"><span class="w-chip__glyph" aria-hidden="true">⬢</span><span data-chip-text>docker</span></a></li>
-<li><span class="w-chip work-chip" data-tone="caution" data-chip="live" title="Reconnecting…"><span class="w-chip__glyph" aria-hidden="true" data-chip-glyph>○</span><span data-chip-text>offline</span></span></li>
-<li class="w-optional"><span class="w-chip work-session-context" data-variant="meta" id="work-session-context" title="Session context"></span></li>
+{% block leaf_alert %}
+<span class="work-alert" data-alert="live" hidden><span aria-hidden="true">○</span> Reconnecting to mucli…</span>
+<span class="work-alert" data-alert="engine" hidden><span aria-hidden="true">✗</span> <span data-alert-text>Docker isn’t running.</span> <a class="w-textbtn" href="#/setup">Open setup</a></span>
 {% endblock %}
 
-{% block topbar_tools %}
-<div class="work-tools" role="group" aria-label="Work tools">
-    <button type="button" class="w-btn work-header-icon" data-variant="icon" id="work-palette-open" aria-label="Command palette (ctrl+k)" title="Command palette (ctrl+k)">{{ w.icon("command") }}</button>
-    {#- work_analysis_link.js points this at the selected job's analysis. -#}
-    <a class="w-btn work-header-icon w-optional" data-variant="icon" href="/jobs/trace" title="Analyze jobs" aria-label="Analyze jobs">{{ w.icon("bar-chart-3") }}</a>
-    <button type="button" class="w-btn work-header-icon work-tool-optional w-optional" data-variant="icon" id="work-notify" aria-pressed="false" aria-label="Turn desktop notifications on" title="Desktop notifications when a job needs you"><svg class="w-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-notify-icon="off"><path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7M10.3 21a1.94 1.94 0 0 0 3.4 0M2 2l20 20"/></svg><svg class="w-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-notify-icon="on" hidden><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></button>
-    <button type="button" class="w-btn work-header-icon work-tool-optional w-optional" data-variant="icon" id="work-density" aria-label="Density: comfortable" title="Density: comfortable">{{ w.icon("maximize-2", attrs={"data-density-icon": "comfortable"}) }}{{ w.icon("minimize-2", attrs={"data-density-icon": "compact", "hidden": true}) }}</button>
-    <button type="button" class="w-btn work-header-icon w-optional" data-variant="icon" id="work-help-open" aria-label="Keyboard shortcuts (?)" title="Keyboard shortcuts (?)">{{ w.icon("keyboard") }}</button>
+{% block page_title %}Work{% endblock %}
+{% block state_attrs %} id="work-state" aria-live="polite"{% endblock %}
+{% block page_actions %}
+<button type="button" class="w-btn" data-variant="primary" id="work-new" aria-keyshortcuts="n" title="New job (n)">{{ w.icon("plus") }}<span>New job</span></button>
+<div class="work-menu-wrap work-tools" data-menu-wrap>
+    <button type="button" class="w-btn" data-variant="icon" id="work-tools-toggle" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-controls="work-tools-menu" aria-label="More" title="More">{{ w.icon("more-horizontal") }}</button>
+    <div class="w-menu work-menu" role="menu" id="work-tools-menu" aria-label="Work tools" data-menu hidden>
+        <button type="button" class="w-menu__item" role="menuitem" id="work-refresh" aria-label="Refresh jobs">{{ w.icon("refresh-cw") }}<span class="w-menu__label">Refresh</span></button>
+        <button type="button" class="w-menu__item work-header-icon" role="menuitem" id="work-palette-open" aria-label="Command palette (ctrl+k)">{{ w.icon("command") }}<span class="w-menu__label">Command palette</span><kbd class="w-menu__shortcut" aria-hidden="true">ctrl k</kbd></button>
+        {#- work_analysis_link.js points this at the selected job's analysis. -#}
+        <a class="w-menu__item work-header-icon" role="menuitem" href="/jobs/trace" title="Analyze jobs" aria-label="Analyze jobs">{{ w.icon("bar-chart-3") }}<span class="w-menu__label">Analyze jobs</span></a>
+        <button type="button" class="w-menu__item work-header-icon" role="menuitem" id="work-notify" aria-pressed="false" aria-label="Turn desktop notifications on" title="Desktop notifications when a job needs you"><svg class="w-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-notify-icon="off"><path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7M10.3 21a1.94 1.94 0 0 0 3.4 0M2 2l20 20"/></svg><svg class="w-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-notify-icon="on" hidden><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="w-menu__label" data-notify-label>Desktop notifications</span></button>
+        <button type="button" class="w-menu__item work-header-icon" role="menuitem" id="work-density" aria-label="Density: comfortable" title="Density: comfortable">{{ w.icon("maximize-2", attrs={"data-density-icon": "comfortable"}) }}{{ w.icon("minimize-2", attrs={"data-density-icon": "compact", "hidden": true}) }}<span class="w-menu__label">Density</span></button>
+        <button type="button" class="w-menu__item work-header-icon" role="menuitem" id="work-help-open" aria-label="Keyboard shortcuts (?)">{{ w.icon("keyboard") }}<span class="w-menu__label">Keyboard shortcuts</span><kbd class="w-menu__shortcut" aria-hidden="true">?</kbd></button>
+    </div>
 </div>
 {% endblock %}
-
-{% block sidebar_extra %}
-<p class="w-sidebar__heading" id="w-sidebar-work">Work</p>
-<ul class="w-sidebar__section work-side" aria-labelledby="w-sidebar-work">
-    <li><a href="#/" class="w-nav__item work-navlink" data-nav="dashboard" title="Dashboard (g h)">{{ w.icon("layout-dashboard") }}<span class="w-nav__label">Dashboard</span></a></li>
-    <li><a href="#/jobs" class="w-nav__item work-navlink" data-nav="jobs" title="Jobs (g t)">{{ w.icon("list-checks") }}<span class="w-nav__label">Jobs</span><span class="w-count" id="work-total">0</span></a></li>
-    <li><a href="#/activity" class="w-nav__item work-navlink" data-nav="activity" title="Activity (g a)">{{ w.icon("activity") }}<span class="w-nav__label">Activity</span></a></li>
-    <li><a href="#/boards" id="work-jira-open" class="w-nav__item work-navlink" data-nav="boards" aria-label="Browse Jira tickets" title="Tickets (g b)">{{ w.icon("ticket") }}<span class="w-nav__label">Tickets</span></a></li>
-    <li><a href="#/history" id="work-manage" class="w-nav__item work-navlink" data-nav="history" title="Manage jobs" aria-label="Manage jobs">{{ w.icon("history") }}<span class="w-nav__label">History</span></a></li>
-    <li><a href="#/settings" id="work-jira-settings-open" class="w-nav__item work-navlink" data-nav="settings" aria-label="Job settings" title="Job settings (g s)">{{ w.icon("settings") }}<span class="w-nav__label">Settings</span></a></li>
-    <li><a href="#/setup" class="w-nav__item work-navlink" data-nav="setup" aria-label="Jobs setup and doctor" title="Setup and doctor (g u)">{{ w.icon("shield-check") }}<span class="w-nav__label">Setup</span><span class="w-count" data-tone="attention" id="work-setup-badge" hidden>!</span></a></li>
-</ul>
+{#- Tabs (Mu §4.3): no counts; the Jobs total stays for screen readers only. -#}
+{% block page_tabs %}
+<a href="#/" class="w-pagetabs__tab work-navlink" data-nav="dashboard" title="Now (g h)">Now</a>
+<a href="#/jobs" class="w-pagetabs__tab work-navlink" data-nav="jobs" title="Jobs (g t)">Jobs<span class="w-visually-hidden">, <span id="work-total">0</span> in all</span></a>
+<a href="#/boards" id="work-jira-open" class="w-pagetabs__tab work-navlink" data-nav="boards" aria-label="Browse Jira tickets" title="Tickets (g b)">Tickets</a>
+<a href="#/history" id="work-manage" class="w-pagetabs__tab work-navlink" data-nav="history" title="Manage jobs" aria-label="Manage jobs">History</a>
+<span class="work-menu-wrap" data-menu-wrap>
+    <button type="button" class="w-pagetabs__tab work-more" data-menu-toggle data-nav-group="activity settings setup" aria-haspopup="menu" aria-expanded="false" aria-controls="work-more-menu">More<span class="w-count work-more__badge work-tab-dot" data-tone="attention" id="work-setup-badge" hidden>setup to do</span> <span aria-hidden="true">▾</span></button>
+    <div class="w-menu work-menu" role="menu" id="work-more-menu" aria-label="More Work pages" data-menu hidden>
+        <a href="#/activity" class="w-menu__item work-navlink" role="menuitem" data-nav="activity" title="Activity (g a)">{{ w.icon("activity") }}<span class="w-menu__label">Activity</span></a>
+        <a href="#/settings" id="work-jira-settings-open" class="w-menu__item work-navlink" role="menuitem" data-nav="settings" aria-label="Job settings" title="Job settings (g s)">{{ w.icon("settings") }}<span class="w-menu__label">Settings</span></a>
+        <a href="#/setup" class="w-menu__item work-navlink" role="menuitem" data-nav="setup" aria-label="Jobs setup and doctor" title="Setup and doctor (g u)">{{ w.icon("shield-check") }}<span class="w-menu__label">Setup and doctor</span></a>
+    </div>
+</span>
 {% endblock %}
 
 {% block content %}
-<div class="work-main work-layout" id="work-main">
-    {#- Dashboard: the launcher layout shared with the chat welcome (components/launcher.css):
-        Lagoon hero, three live choice cards (filled by work/view.js), then the sections. -#}
-    <section class="work-route w-launcher work-launcher" data-route="dashboard">
-        <header class="w-hero work-hero" data-art="work" data-size="lg">
-            <span class="w-eyebrow" data-tone="accent"><i class="w-eyebrow__swatch"></i>Engineering work</span>
-            <h1 class="w-hero__title">What should we ship next?</h1>
-            <p class="w-hero__lede">Delegate engineering jobs, then step in only when one needs you.</p>
-            <div class="w-btn-row w-launcher__actions work-pane-head-controls">
-                <button type="button" class="w-btn" data-variant="primary" data-size="lg" id="work-new" aria-keyshortcuts="n">{{ w.icon("plus") }}<span>New job</span><kbd class="w-keycap" aria-hidden="true">n</kbd></button>
-                <a class="w-btn" data-variant="secondary" data-size="lg" href="#/boards">Browse tickets <span class="w-btn__chevron" aria-hidden="true">›</span></a>
-                <button type="button" class="w-btn work-board-refresh" data-variant="icon" id="work-refresh" title="Refresh" aria-label="Refresh jobs">{{ w.icon("refresh-cw") }}</button>
-            </div>
-        </header>
-        <div class="w-choice-grid work-choices" id="work-choices" role="list" aria-label="Work overview">
-            <a class="w-choice" role="listitem" href="#needs-you"><span class="w-choice__icon" data-tone="attention" aria-hidden="true">{{ w.icon("alert-circle") }}</span>
-                <span class="w-choice__copy"><strong class="w-choice__title">Needs you</strong><small class="w-choice__meta">Loading…</small></span>
-                <span class="w-choice__arrow" aria-hidden="true">›</span></a>
-            <a class="w-choice" role="listitem" href="#running-now"><span class="w-choice__icon" data-tone="running" aria-hidden="true">{{ w.icon("activity") }}</span>
-                <span class="w-choice__copy"><strong class="w-choice__title">Running now</strong><small class="w-choice__meta">Loading…</small></span>
-                <span class="w-choice__arrow" aria-hidden="true">›</span></a>
-            <a class="w-choice" role="listitem" href="#/history"><span class="w-choice__icon" data-tone="ok" aria-hidden="true">{{ w.icon("history") }}</span>
-                <span class="w-choice__copy"><strong class="w-choice__title">Done this week</strong><small class="w-choice__meta">Loading…</small></span>
-                <span class="w-choice__arrow" aria-hidden="true">›</span></a>
-        </div>
-        <div class="w-launcher__body work-dashboard-body">
-            <div class="w-banner work-setup-cta" data-tone="caution" id="work-setup-cta" role="status" hidden>
-                <span class="w-banner__glyph" aria-hidden="true">◆</span>
-                <p class="w-banner__msg" data-cta-text>Jobs aren’t fully set up yet. The setup checklist checks Docker, the runtime image, agents and the sandbox.</p>
-                <a href="#/setup" class="w-btn" data-variant="tonal" data-tone="caution" data-size="sm">Open setup</a>
-                <button type="button" class="w-banner__dismiss" data-cta-dismiss aria-label="Dismiss setup reminder" title="Dismiss">{{ w.icon("x") }}</button>
-            </div>
-            <div class="work-board" id="work-board"><div class="work-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading…</div></div>
-        </div>
-        <footer class="w-launcher__foot">Jobs run in isolated sandboxes. Your models, repositories and credentials stay on this host.</footer>
+{#- Mu §11b (revision 2): Work is a workspace of panes. The list pane (compact job rows:
+    Now, Running, Recent, with a filter) stays beside the board (Now) and beside the job
+    (#/job/<id>), which renders in place in the main pane with its context — actions,
+    stages, facts, budget, receipts — in the aside. Jobs, Activity, Tickets, History,
+    Settings and Setup use the main pane alone (work.css by data-route-name). Below 1200
+    the aside opens over the job on demand; below 840 one pane shows at a time. -#}
+<div class="w-panes work-panes" id="work-panes" data-layout="list-main" data-show="main">
+<section class="w-pane work-list-pane" data-pane="list" aria-label="Jobs list">
+    <header class="w-pane__head"><h2 class="w-pane__title">Jobs</h2><span class="work-meta work-num" id="work-list-count"></span></header>
+    <div class="work-list-filter" role="search" aria-label="Filter the jobs list">
+        <input class="w-input" type="search" id="work-list-filter" placeholder="Filter jobs…" aria-label="Filter jobs">
+        <label class="w-check"><input class="w-check__input" type="checkbox" id="work-list-needs"><span>Needs me</span></label>
+    </div>
+    <div id="work-list" class="work-list"></div>
+    <div class="w-pane-resize" data-pane-resize aria-hidden="true"></div>
+</section>
+<section class="w-pane work-main work-layout" data-pane="main" id="work-main">
+    {#- Now (Mu §5.2, §10.2): what needs you, then running, then recent, as rows
+        (filled by work/view.js). The setup reminder is a pinned row in Now until
+        setup is complete (work/setup.js toggles it). -#}
+    <section class="work-route w-leafbody work-dashboard" data-route="dashboard" aria-label="Now">
+        <div class="work-board" id="work-board"><div class="work-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading…</div></div>
+        <ul class="w-rows work-setup-host" hidden>
+            <li class="w-row work-setup-cta" id="work-setup-cta" data-pinned role="status" hidden>
+                <span class="w-sign" data-status="waiting" aria-hidden="true">◆</span>
+                <a class="w-row__main" href="#/setup"><span class="w-row__title">Finish setting up jobs</span><span class="w-row__sub" data-cta-text>The setup checklist checks Docker, the runtime image, agents and the sandbox.</span></a>
+                <span class="w-row__actions"><a href="#/setup" class="w-textbtn" data-cta-link>Open setup</a><button type="button" class="w-textbtn" data-tone="quiet" data-cta-dismiss aria-label="Dismiss setup reminder" title="Dismiss">Dismiss</button></span>
+            </li>
+        </ul>
     </section>
 
-    <section class="work-route w-page" data-route="jobs" hidden><div id="work-jobs"></div></section>
-    <section class="work-route w-page work-detail-pane" data-route="job" id="work-detail" aria-live="polite" hidden></section>
+    <section class="work-route w-leafbody" data-route="jobs" hidden><div id="work-jobs"></div></section>
+    <section class="work-route w-leafbody work-detail-pane" data-route="job" id="work-detail" aria-live="polite" hidden></section>
 
-    <section class="work-route w-page" data-route="activity" id="work-activity" aria-labelledby="work-activity-title" hidden>
-        <header class="w-page__head work-page-head">
-            <h1 class="w-page__title" id="work-activity-title">Activity</h1>
+    <section class="work-route w-leafbody" data-route="activity" id="work-activity" aria-labelledby="work-activity-title" hidden>
+        <h2 class="w-visually-hidden" id="work-activity-title">Activity</h2>
+        <div class="work-toolbar work-page-tools">
             <span data-activity-engine></span>
             <span class="work-spacer"></span>
             <span class="work-meta" data-activity-updated role="status"></span>
-            <button type="button" class="w-btn" data-variant="icon" id="work-activity-refresh" title="Refresh" aria-label="Refresh activity">{{ w.icon("refresh-cw") }}</button>
-        </header>
+            <button type="button" class="w-textbtn" data-tone="quiet" id="work-activity-refresh" title="Refresh" aria-label="Refresh activity">{{ w.icon("refresh-cw", size="sm") }}<span>Refresh</span></button>
+        </div>
         <div class="work-stack" data-activity-body><div class="work-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading activity…</div></div>
     </section>
 
-    <section class="work-route w-page" data-route="boards" aria-labelledby="work-jira-title" hidden>
-        <header class="w-page__head work-page-head">
-            <div>
-                <h1 class="w-page__title" id="work-jira-title">Tickets</h1>
-                <p class="w-page__lede">Pick up Jira tickets as jobs.</p>
-            </div>
-            <span class="work-spacer"></span>
-            <a href="#/settings" class="w-btn" data-variant="secondary">Jira link settings</a>
-        </header>
+    <section class="work-route w-leafbody" data-route="boards" aria-labelledby="work-jira-title" hidden>
+        <h2 class="w-visually-hidden" id="work-jira-title">Tickets</h2>
         <div class="work-jira-page work-stack" id="work-jira-backdrop">
-            <section class="w-card" id="work-jira-unlinked" hidden>
+            <section class="work-plain" id="work-jira-unlinked" hidden>
                 {% call w.empty_state("Jira isn’t linked yet", body="Add your Jira URL and token in Settings, then pick tickets here.", icon="ticket", tone="accent", size="sm") %}
-                <button type="button" class="w-btn" data-variant="primary" id="work-jira-browse-settings">Open settings</button>
+                <button type="button" class="w-textbtn" id="work-jira-browse-settings">Open settings</button>
                 {% endcall %}
             </section>
             <div id="work-jira-browser" class="work-stack" hidden>
-                <section class="w-card" aria-label="Ticket filters">
-                    <div class="w-card__body work-card-body">
+                <section class="work-filters" aria-label="Ticket filters">
+                    <div class="work-card-body">
                         <div class="work-jira-row work-jira-filters">
                             <span class="w-select"><select class="w-select__control" id="jira-browse-board" aria-label="Board"></select></span>
                             <span class="w-select"><select class="w-select__control" id="jira-browse-sprint" aria-label="Sprint"></select></span>
                             <input class="w-input" id="jira-browse-jql" type="search" placeholder="JQL filter (optional)" aria-label="JQL filter">
                             <label class="w-check work-jira-inline"><input class="w-check__input" id="jira-browse-mine" type="checkbox"><span>Mine</span></label>
                             <label class="w-check work-jira-inline"><input class="w-check__input" id="jira-browse-done" type="checkbox"><span>Show done</span></label>
-                            <button type="button" class="w-btn" data-variant="secondary" id="jira-browse-load">Load</button>
+                            <button type="button" class="w-textbtn" id="jira-browse-load">Load</button>
                         </div>
                         <div class="work-jira-chips work-jira-status-chips" id="jira-browse-statuses" role="group" aria-label="Filter by status"></div>
                         <p class="work-jira-message" id="jira-browse-message" role="status" hidden></p>
                     </div>
                 </section>
                 <section class="work-section" aria-labelledby="work-jira-tickets-h">
-                    <header class="work-section__head"><h2 class="work-section__title" id="work-jira-tickets-h">Tickets</h2><span class="work-spacer"></span><button type="button" class="w-btn" data-variant="primary" data-size="sm" id="jira-import-selected" disabled>Create jobs from selected</button></header>
+                    <header class="w-group__head"><h2 class="w-group__title" id="work-jira-tickets-h">Tickets</h2><a href="#/settings" class="w-group__more">Jira link settings</a><button type="button" class="w-textbtn" id="jira-import-selected" disabled>Create jobs from selected</button></header>
                     <div class="w-table-wrap work-jira-table-wrap">
                         <table class="w-table work-jira-table">
                             <thead>
@@ -158,16 +154,11 @@
         </div>
     </section>
 
-    <section class="work-route w-page" data-route="history" aria-labelledby="work-management-title" hidden>
-        <header class="w-page__head work-page-head">
-            <div>
-                <h1 class="w-page__title" id="work-management-title">History</h1>
-                <p class="w-page__lede">Query past work, review outcomes, archive records and export debugging evidence.</p>
-            </div>
-        </header>
+    <section class="work-route w-leafbody" data-route="history" aria-labelledby="work-management-title" data-width="full" hidden>
+        <h2 class="w-visually-hidden" id="work-management-title">History</h2>
         <div class="work-management-page work-stack" id="work-management-backdrop">
-            <section class="w-card" data-variant="sunken" aria-label="Query">
-                <div class="w-card__body work-card-body work-management-query">
+            <section class="work-filters" aria-label="Query">
+                <div class="work-card-body work-management-query">
                     <input class="w-input" id="work-management-query-text" type="search" placeholder="Search title, ID, description, branch…" aria-label="Search jobs">
                     <span class="w-select"><select class="w-select__control" id="work-management-status" aria-label="Filter by status">
                         <option value="all">All statuses</option>
@@ -201,8 +192,8 @@
                         <option value="90">Last 90 days</option>
                     </select></span>
                     <div class="w-btn-row">
-                        <button class="w-btn" data-variant="secondary" id="work-management-apply" type="button">Apply</button>
-                        <button class="w-btn" data-variant="ghost" id="work-management-reset" type="button">Reset</button>
+                        <button class="w-textbtn" id="work-management-apply" type="button">Apply</button>
+                        <button class="w-textbtn" data-tone="quiet" id="work-management-reset" type="button">Reset</button>
                     </div>
                 </div>
             </section>
@@ -214,18 +205,18 @@
             </section>
 
             <section class="work-section work-management-results-wrap" aria-labelledby="work-management-results-h">
-                <header class="work-section__head work-management-toolbar">
-                    <h2 class="work-section__title" id="work-management-results-h">Jobs</h2>
-                    <span class="w-chip work-management-selection" id="work-management-selection">0 selected</span>
+                <header class="w-group__head work-management-toolbar">
+                    <h2 class="w-group__title" id="work-management-results-h">Jobs</h2>
+                    <span class="work-meta work-management-selection" id="work-management-selection">0 selected</span>
                     <div class="w-btn-row work-management-toolbar-left">
-                        <button type="button" class="w-btn" data-variant="secondary" data-size="sm" id="work-management-archive-selected" disabled>Archive</button>
-                        <button type="button" class="w-btn" data-variant="secondary" data-size="sm" id="work-management-restore-selected" disabled>Restore</button>
-                        <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-tone="danger" id="work-management-delete-selected" disabled>Delete</button>
+                        <button type="button" class="w-textbtn" id="work-management-archive-selected" disabled>Archive</button>
+                        <button type="button" class="w-textbtn" id="work-management-restore-selected" disabled>Restore</button>
+                        <button type="button" class="w-textbtn" data-tone="danger" id="work-management-delete-selected" disabled>Delete</button>
                     </div>
                     <span class="work-spacer"></span>
                     <div class="w-btn-row work-management-toolbar-right">
-                        <a class="w-btn" data-variant="ghost" data-size="sm" id="work-management-export-json" href="#">{{ w.icon("download") }}<span>Export report JSON</span></a>
-                        <a class="w-btn" data-variant="ghost" data-size="sm" id="work-management-export-csv" href="#">{{ w.icon("download") }}<span>Export CSV</span></a>
+                        <a class="w-textbtn" data-tone="quiet" id="work-management-export-json" href="#">{{ w.icon("download", size="sm") }}<span>Export report JSON</span></a>
+                        <a class="w-textbtn" data-tone="quiet" id="work-management-export-csv" href="#">{{ w.icon("download", size="sm") }}<span>Export CSV</span></a>
                     </div>
                 </header>
                 <div class="w-table-wrap work-management-table-scroll">
@@ -251,27 +242,25 @@
                     <span class="work-meta" id="work-management-range">0–0 of 0</span>
                     <span class="work-spacer"></span>
                     <div class="w-btn-row work-management-pager">
-                        <button type="button" class="w-btn" data-variant="secondary" data-size="sm" id="work-management-previous">{{ w.icon("chevron-left") }}<span>Previous</span></button>
-                        <button type="button" class="w-btn" data-variant="secondary" data-size="sm" id="work-management-next"><span>Next</span>{{ w.icon("chevron-right") }}</button>
+                        <button type="button" class="w-textbtn" id="work-management-previous">{{ w.icon("chevron-left", size="sm") }}<span>Previous</span></button>
+                        <button type="button" class="w-textbtn" id="work-management-next"><span>Next</span>{{ w.icon("chevron-right", size="sm") }}</button>
                     </div>
                 </footer>
             </section>
         </div>
     </section>
 
-    <section class="work-route w-page" data-route="setup" aria-labelledby="work-setup-title" hidden>
-        <header class="w-page__head work-page-head">
-            <h1 class="w-page__title" id="work-setup-title">Setup</h1>
-        </header>
+    <section class="work-route w-leafbody" data-route="setup" aria-labelledby="work-setup-title" hidden>
+        <h2 class="w-visually-hidden" id="work-setup-title">Setup</h2>
         <div class="w-tabs work-setup-tabs" role="tablist" aria-label="Setup">
-            <a href="#/setup" class="w-tabs__tab" role="tab" id="work-setup-tab-checklist" data-setup-tab="checklist" aria-controls="work-setup-panel-checklist" aria-selected="true">Checklist <span class="w-count" data-tone="attention" id="work-setup-tab-badge" hidden>!</span></a>
-            <a href="#/doctor" class="w-tabs__tab" role="tab" id="work-setup-tab-doctor" data-setup-tab="doctor" aria-controls="work-setup-panel-doctor" aria-selected="false">Doctor <span class="w-count" id="work-doctor-badge"></span></a>
+            <a href="#/setup" class="w-tabs__tab" role="tab" id="work-setup-tab-checklist" data-setup-tab="checklist" aria-controls="work-setup-panel-checklist" aria-selected="true">Checklist <span class="w-count work-tab-dot" data-tone="attention" id="work-setup-tab-badge" hidden>to do</span></a>
+            <a href="#/doctor" class="w-tabs__tab" role="tab" id="work-setup-tab-doctor" data-setup-tab="doctor" aria-controls="work-setup-panel-doctor" aria-selected="false">Doctor <span class="w-count work-tab-dot" id="work-doctor-badge" hidden></span></a>
         </div>
         <div class="work-stack" role="tabpanel" id="work-setup-panel-checklist" data-setup-panel="checklist" aria-labelledby="work-setup-tab-checklist">
             <div class="work-toolbar">
                 <span class="work-meta" id="work-setup-summary">Each step checks your machine live; re-run any time</span>
                 <span class="work-spacer"></span>
-                <button type="button" class="w-btn" data-variant="secondary" id="work-setup-recheck">Check all again</button>
+                <button type="button" class="w-textbtn" id="work-setup-recheck">Check all again</button>
                 <button type="button" class="w-btn" data-variant="primary" id="work-setup-finish" disabled>Finish setup</button>
             </div>
             <div class="w-progress work-setup-progress" aria-hidden="true"><span class="w-progress__bar" id="work-setup-bar"></span></div>
@@ -279,30 +268,27 @@
         </div>
         <div class="work-stack" role="tabpanel" id="work-setup-panel-doctor" data-setup-panel="doctor" aria-labelledby="work-setup-tab-doctor" hidden>
             <div class="work-toolbar">
-                <span class="work-meta">Pass, warn and fail report of everything jobs depend on</span>
+                <p class="w-state work-meta" id="work-doctor-summary" aria-live="polite"><span class="w-state__part" data-tone="quiet">Everything jobs depend on, checked</span></p>
                 <span class="work-spacer"></span>
-                <button type="button" class="w-btn" data-variant="secondary" id="work-doctor-run">Run again</button>
-                <button type="button" class="w-btn" data-variant="secondary" id="work-doctor-deep" title="Starts real stage containers for every ready agent; no model calls">Deep check (sandbox self-test)</button>
+                <button type="button" class="w-textbtn" id="work-doctor-run">Run again</button>
+                <button type="button" class="w-textbtn" id="work-doctor-deep" title="Starts real stage containers for every ready agent; no model calls">Deep check (sandbox self-test)</button>
             </div>
             <div id="work-doctor"><div class="work-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Running checks…</div></div>
         </div>
     </section>
 
-    <section class="work-route w-page" data-route="settings" aria-labelledby="work-jira-settings-title" hidden>
-        <header class="w-page__head work-page-head">
-            <div>
-                <h1 class="w-page__title" id="work-jira-settings-title">Settings</h1>
-                <p class="w-page__lede">Job defaults, run rules and the Jira link.</p>
-            </div>
-            <span class="work-spacer"></span>
-            <a class="w-btn" data-variant="secondary" href="/models/costs" title="Model pricing">Model pricing <span class="w-btn__chevron" aria-hidden="true">›</span></a>
-        </header>
+    <section class="work-route w-leafbody" data-route="settings" aria-labelledby="work-jira-settings-title" hidden>
+        <h2 class="w-visually-hidden" id="work-jira-settings-title">Settings</h2>
         <div class="work-settings-page work-stack" id="work-jira-settings-backdrop">
-            <section class="w-card" aria-labelledby="work-stage-models-title">
-                <header class="w-card__head"><span class="w-eyebrow">Models</span><h2 class="w-card__title" id="work-stage-models-title">Stage models</h2></header>
-                <form id="work-stage-models-form" class="w-card__body work-form" autocomplete="off" aria-labelledby="work-stage-models-title">
+            {#- Mu §10.6: form sections — what a section is on the left, its fields on the
+                right (two columns from 1200px), separated by hairlines. Run rules
+                (work/rules.js) render the same way. -#}
+            <section class="w-formsection" aria-labelledby="work-stage-models-title">
+                <header class="w-formsection__head"><h2 class="w-formsection__title" id="work-stage-models-title">Stage models</h2>
+                    <p class="w-formsection__lede">Default provider and model for each pipeline stage. A job's own override wins; a blank stage uses the model of the job's session.</p>
+                    <a class="w-textbtn" data-tone="quiet" href="/models/costs" title="Model pricing">Model pricing ›</a></header>
+                <form id="work-stage-models-form" class="w-formsection__body work-form" autocomplete="off" aria-labelledby="work-stage-models-title">
                     <p class="work-jira-message" id="work-stage-models-warning" role="alert" hidden></p>
-                    <p class="work-jira-muted">Default provider and model for each pipeline stage. A job's own override wins; a blank stage uses the model of the job's session.</p>
                     <div id="work-stage-model-rows"></div>
                     <label class="w-check work-jira-inline"><input class="w-check__input" id="work-plan-approval" type="checkbox" checked><span>Ask me to approve the plan and acceptance criteria before implementation</span></label>
                     <p class="work-jira-message" id="work-stage-models-message" role="status" hidden></p>
@@ -312,9 +298,11 @@
                 </form>
             </section>
             <div class="work-stack" id="work-run-rules" aria-label="Run rules"><div class="work-loading" role="status"><span class="w-inkdrop" aria-hidden="true"></span>Loading run rules…</div></div>
-            <section class="w-card" aria-labelledby="work-jira-link-title">
-                <header class="w-card__head"><span class="w-eyebrow">Integrations</span><h2 class="w-card__title" id="work-jira-link-title">Jira link</h2><span class="w-card__meta work-jira-status" id="work-jira-link-status" role="status"></span></header>
-                <form id="work-jira-settings-form" class="w-card__body work-form" autocomplete="off" aria-labelledby="work-jira-link-title">
+            <section class="w-formsection" aria-labelledby="work-jira-link-title">
+                <header class="w-formsection__head"><h2 class="w-formsection__title" id="work-jira-link-title">Jira link</h2>
+                    <p class="w-formsection__lede">Pick tickets from your boards and turn them into jobs.</p>
+                    <p class="work-meta work-jira-status" id="work-jira-link-status" role="status"></p></header>
+                <form id="work-jira-settings-form" class="w-formsection__body work-form" autocomplete="off" aria-labelledby="work-jira-link-title">
                     <label class="w-field work-field work-field-wide">
                         <span class="w-field__label">Jira URL</span>
                         <input class="w-input" id="jira-base-url" type="url" placeholder="https://acme.atlassian.net">
@@ -346,21 +334,23 @@
                         <ul class="work-jira-chips" id="jira-preferred-boards" aria-label="Preferred boards"></ul>
                         <div class="work-jira-row">
                             <input class="w-input" id="jira-board-query" type="search" placeholder="Filter boards" aria-label="Filter boards">
-                            <button type="button" class="w-btn" data-variant="secondary" id="jira-board-find">Refresh</button>
+                            <button type="button" class="w-textbtn" id="jira-board-find">Refresh</button>
                         </div>
                         <p class="w-field__hint work-jira-muted">Boards load automatically. Suggested ones have open tickets assigned to you. Star a board to make it preferred.</p>
                         <ul class="work-jira-list" id="jira-board-results" aria-label="Board search results"></ul>
                     </div>
                     <p class="work-jira-message" id="jira-settings-message" role="status" hidden></p>
                     <footer class="work-form-actions">
-                        <button type="button" class="w-btn" data-variant="secondary" data-tone="danger" id="jira-unlink">Unlink</button>
-                        <button type="button" class="w-btn" data-variant="secondary" id="jira-test">Test connection</button>
+                        <button type="button" class="w-textbtn" data-tone="danger" id="jira-unlink">Unlink</button>
+                        <button type="button" class="w-textbtn" id="jira-test">Test connection</button>
                         <button type="submit" class="w-btn" data-variant="primary">Save</button>
                     </footer>
                 </form>
             </section>
         </div>
     </section>
+</section>
+<aside class="w-pane work-aside-pane" data-pane="aside" id="work-aside" aria-label="Job context"></aside>
 </div>
 {% endblock %}
 
@@ -369,8 +359,7 @@
     <section class="w-modal__dialog work-modal" role="dialog" aria-modal="true" aria-labelledby="work-create-title" data-size="md">
         <header class="w-modal__head work-modal-head">
             <div class="work-modal-titles">
-                <span class="w-eyebrow work-eyebrow">Delegate work</span>
-                <h2 class="w-modal__title" id="work-create-title">New engineering job</h2>
+                <h2 class="w-modal__title" id="work-create-title">New job</h2>
             </div>
             <button type="button" class="w-btn" data-variant="icon" id="work-create-close" aria-label="Close" title="Close">{{ w.icon("x") }}</button>
         </header>
@@ -389,8 +378,8 @@
                     <div class="work-runin-host" id="job-run-in" role="group" aria-labelledby="job-environments-label"></div>
                     <div class="w-btn-row work-env-field" role="group" aria-label="Build environments">
                         <span class="work-grow work-meta" id="job-environments-summary" aria-live="polite">Choose a workspace to see the build environments.</span>
-                        <button type="button" class="w-btn" data-variant="ghost" data-size="sm" id="job-environments-change">Advanced…</button>
-                        <button type="button" class="w-btn" data-variant="ghost" data-size="sm" id="job-environments-reset" hidden>Use default</button>
+                        <button type="button" class="w-textbtn" id="job-environments-change">Advanced…</button>
+                        <button type="button" class="w-textbtn" data-tone="quiet" id="job-environments-reset" hidden>Use default</button>
                     </div>
                     <small class="w-field__hint" id="job-environments-hint">Each job snapshots its environment at start and removes it when it ends.</small>
                 </div>
@@ -445,7 +434,7 @@
                 <p class="w-field__error work-form-error" id="work-create-error" role="alert"></p>
             </div>
             <footer class="w-modal__foot work-modal-actions">
-                <button type="button" class="w-btn" data-variant="secondary" id="work-create-cancel">Cancel</button>
+                <button type="button" class="w-textbtn" data-tone="quiet" id="work-create-cancel">Cancel</button>
                 <button type="submit" class="w-btn" data-variant="primary" id="work-create-submit">Queue job</button>
             </footer>
         </form>
@@ -461,6 +450,7 @@
 <script src="/static/js/work/run_in_picker.js"></script>
 <script src="/static/js/work/agents.js"></script>
 <script src="/static/js/wash/diff.js"></script>
+<script src="/static/js/work/artifacts.js"></script>
 <script src="/static/js/work/view.js"></script>
 <script src="/static/js/work/activity.js"></script>
 <script src="/static/js/work.js"></script>

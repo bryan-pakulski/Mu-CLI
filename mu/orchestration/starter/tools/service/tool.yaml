@@ -1,0 +1,26 @@
+id: os.service
+title: Restart a service
+summary: Restart, reload, start or stop one systemd unit and report its state afterwards. Check mode confirms the unit exists and reports its current state.
+category: maintenance
+effect: mutating
+idempotent: false
+targets: {requires: [systemd]}
+privilege: {run_as: root}
+inputs:
+  type: object
+  properties:
+    unit: {type: string, pattern: "^[A-Za-z0-9@_:][A-Za-z0-9@._:\\-]{0,127}$", description: "Unit name, e.g. nginx or nginx.service"}
+    action: {type: string, enum: [restart, reload, start, stop], default: restart}
+  required: [unit]
+  additionalProperties: false
+outputs:
+  type: object
+  properties:
+    unit: {type: string}
+    action: {type: string}
+    active: {type: string}
+    sub: {type: string}
+    check_mode: {type: boolean}
+  required: [unit, action, active, sub, check_mode]
+implementation: {runtime: python3, entry: service.py, check_mode: true}
+limits: {timeout_s: 300, max_output_kb: 64}

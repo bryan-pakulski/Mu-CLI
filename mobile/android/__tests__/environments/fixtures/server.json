@@ -1,0 +1,248 @@
+{
+  "listing": {
+    "containers": [
+      {
+        "attached_sessions": [
+          "refactor-auth",
+          "notes",
+          "triage"
+        ],
+        "container_id": "c0ffee",
+        "container_volume": "/root/.mucli",
+        "created_at": 1760000000.0,
+        "devices": [],
+        "dockerfile_hash": "abc",
+        "egress_allow": [
+          "pypi.org"
+        ],
+        "egress_deny": [],
+        "egress_network_name": "",
+        "gpu_request": "",
+        "host_gateway": "",
+        "image": "mucli-env-research:latest",
+        "job_scan_blocks": [],
+        "jobs_using": 2,
+        "mounts": [
+          {
+            "container_path": "/workspace/project",
+            "host_path": "/home/me/dev/project",
+            "mode": "rw"
+          }
+        ],
+        "name": "mucli-research",
+        "network_name": "mucli-net-research",
+        "network_subnet": "",
+        "proxy_image": "",
+        "proxy_ip": "",
+        "proxy_name": "",
+        "proxy_port": 3128,
+        "root_volume": "",
+        "session_volume": "",
+        "standalone": false,
+        "status": "running",
+        "supervisor_url": "",
+        "template_name": "python-base",
+        "worker_port": 40123,
+        "worker_protocol": 10,
+        "workspace_volume": ""
+      },
+      {
+        "attached_sessions": [],
+        "container_id": "beef",
+        "container_volume": "/root/.mucli",
+        "created_at": 1760000000.0,
+        "devices": [],
+        "dockerfile_hash": "def",
+        "egress_allow": [],
+        "egress_deny": [],
+        "egress_network_name": "",
+        "gpu_request": "",
+        "host_gateway": "",
+        "image": "mucli-env-scratch:latest",
+        "job_scan_blocks": [],
+        "jobs_using": 0,
+        "mounts": [],
+        "name": "mucli-scratch",
+        "network_name": "",
+        "network_subnet": "",
+        "proxy_image": "",
+        "proxy_ip": "",
+        "proxy_name": "",
+        "proxy_port": 3128,
+        "root_volume": "",
+        "session_volume": "",
+        "standalone": false,
+        "status": "exited",
+        "supervisor_url": "",
+        "template_name": "",
+        "worker_port": 30312,
+        "worker_protocol": 10,
+        "workspace_volume": ""
+      },
+      {
+        "attached_sessions": [
+          "ci"
+        ],
+        "container_id": "f00d",
+        "container_volume": "/root/.mucli",
+        "created_at": 1760000000.0,
+        "devices": [],
+        "dockerfile_hash": "123",
+        "egress_allow": [],
+        "egress_deny": [],
+        "egress_network_name": "",
+        "gpu_request": "",
+        "host_gateway": "",
+        "image": "mucli-env-builder:latest",
+        "job_scan_blocks": [
+          {
+            "binding": "builder",
+            "job_id": "a1b2c3d4e5f6",
+            "paths": [
+              "/root/.ssh/id_ed25519"
+            ]
+          }
+        ],
+        "jobs_using": 1,
+        "mounts": [],
+        "name": "mucli-builder",
+        "network_name": "",
+        "network_subnet": "",
+        "proxy_image": "",
+        "proxy_ip": "",
+        "proxy_name": "",
+        "proxy_port": 3128,
+        "root_volume": "",
+        "session_volume": "",
+        "standalone": false,
+        "status": "running",
+        "supervisor_url": "",
+        "template_name": "",
+        "worker_port": 30312,
+        "worker_protocol": 10,
+        "workspace_volume": ""
+      }
+    ],
+    "templates": [
+      {
+        "created_at": 1760000000.0,
+        "description": "Python 3.12 with uv",
+        "dockerfile_hash": "",
+        "egress_allow": [
+          "pypi.org",
+          "files.pythonhosted.org"
+        ],
+        "egress_deny": [],
+        "image": "mucli-template-python-base:latest",
+        "job_setup": [
+          "uv sync"
+        ],
+        "jobs_using": 3,
+        "name": "python-base",
+        "source_container": "mucli-research"
+      }
+    ]
+  },
+  "stats": {
+    "containers": {
+      "mucli-builder": {
+        "attached_device_count": 0,
+        "block_read_bytes": 0,
+        "block_write_bytes": 0,
+        "cpu_percent": 91.0,
+        "error": null,
+        "gpu": {
+          "devices": [],
+          "memory_total_bytes": 0,
+          "memory_used_bytes": 0,
+          "power_watts": null,
+          "requested": false,
+          "scope": "assigned_device_total",
+          "temperature_c": null,
+          "utilization_percent": null
+        },
+        "memory_limit_bytes": 4294967296,
+        "memory_percent": 12.0,
+        "memory_used_bytes": 1610612736,
+        "name": "mucli-builder",
+        "network_rx_bytes": 0,
+        "network_rx_bytes_per_second": 2048.0,
+        "network_tx_bytes": 0,
+        "network_tx_bytes_per_second": 512.0,
+        "pids": 42,
+        "restart_count": 0,
+        "sampled_at": 1760000000.0,
+        "status": "running",
+        "storage_rootfs_bytes": 0,
+        "storage_writable_bytes": 52428800,
+        "uptime_seconds": 7380
+      },
+      "mucli-research": {
+        "attached_device_count": 0,
+        "block_read_bytes": 0,
+        "block_write_bytes": 0,
+        "cpu_percent": 37.5,
+        "error": null,
+        "gpu": {
+          "devices": [],
+          "memory_total_bytes": 0,
+          "memory_used_bytes": 0,
+          "power_watts": null,
+          "requested": false,
+          "scope": "assigned_device_total",
+          "temperature_c": null,
+          "utilization_percent": null
+        },
+        "memory_limit_bytes": 4294967296,
+        "memory_percent": 41.0,
+        "memory_used_bytes": 1610612736,
+        "name": "mucli-research",
+        "network_rx_bytes": 0,
+        "network_rx_bytes_per_second": 2048.0,
+        "network_tx_bytes": 0,
+        "network_tx_bytes_per_second": 512.0,
+        "pids": 42,
+        "restart_count": 0,
+        "sampled_at": 1760000000.0,
+        "status": "running",
+        "storage_rootfs_bytes": 0,
+        "storage_writable_bytes": 52428800,
+        "uptime_seconds": 7380
+      },
+      "mucli-scratch": {
+        "attached_device_count": 0,
+        "block_read_bytes": 0,
+        "block_write_bytes": 0,
+        "cpu_percent": 0.0,
+        "error": null,
+        "gpu": {
+          "devices": [],
+          "memory_total_bytes": 0,
+          "memory_used_bytes": 0,
+          "power_watts": null,
+          "requested": false,
+          "scope": "assigned_device_total",
+          "temperature_c": null,
+          "utilization_percent": null
+        },
+        "memory_limit_bytes": 0,
+        "memory_percent": 0.0,
+        "memory_used_bytes": 0,
+        "name": "mucli-scratch",
+        "network_rx_bytes": 0,
+        "network_rx_bytes_per_second": 0.0,
+        "network_tx_bytes": 0,
+        "network_tx_bytes_per_second": 0.0,
+        "pids": 0,
+        "restart_count": 0,
+        "sampled_at": 1760000000.0,
+        "status": "exited",
+        "storage_rootfs_bytes": 0,
+        "storage_writable_bytes": 209715200,
+        "uptime_seconds": null
+      }
+    },
+    "poll_after_ms": 2500,
+    "sampled_at": 1760000000.0
+  }
+}

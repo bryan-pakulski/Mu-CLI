@@ -13,7 +13,7 @@ from pathlib import Path
 
 from mu.container.docker_cli import CommandRunner, ContainerRuntimeError, run_with_output
 from mu.security.secret_paths import redact_secrets
-from ..core.artifacts import artifacts_for, backfill
+from ..core.artifacts import artifacts_for, ensure_ticket
 from ..models import AttentionReason, resolve_stage_model
 from ..runner import JobRunOutcome, implement_prompt
 from .model_relay import HarnessRelay, ModelRelay
@@ -569,8 +569,7 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
         model = {"provider": agent, "model": agent_cfg["model"], "stage": stage}
     else:
         model = resolve_stage_model(job.execution, stage)
-    art = artifacts_for(job).ensure()
-    backfill(job)
+    art = ensure_ticket(job)
     name = f"mucli-job-{job.id[:12]}-{stage}-{uuid.uuid4().hex[:8]}"
     def alive():
         return not job.worker_id or service.store.assert_lease(job.id, job.worker_id)

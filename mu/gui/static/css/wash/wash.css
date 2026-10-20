@@ -47,8 +47,10 @@
 @import url("components/avatar.css") layer(components);
 @import url("components/popout.css") layer(components);
 @import url("components/launcher.css") layer(components);
+@import url("components/mu.css") layer(components);
 @import url("hljs-wash.css");                    /* generated; declares @layer components itself */
 @import url("patterns/conversation.css") layer(patterns);
 @import url("patterns/overlays.css") layer(patterns);
 @import url("patterns/shell.css") layer(patterns);
+@import url("patterns/mu-leaf.css") layer(patterns);
 @import url("utilities.css") layer(utilities);

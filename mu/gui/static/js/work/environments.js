@@ -140,7 +140,8 @@
         const tone = s.status === 'failed' ? 'danger' : s.status === 'preparing' ? 'running' : count ? 'accent' : 'muted';
         const text = count ? `${count} environment${count === 1 ? '' : 's'}` : 'shared runtime';
         const title = count ? `${s.summary || ''}${s.source ? ` (from ${SOURCE_LABEL[s.source] || s.source})` : ''}` : 'Stages run in the shared mucli-job-runtime image';
-        return `<button type="button" class="w-chip work-env-pill"${toneAttr(tone)} data-env-pill aria-expanded="${!!open}" aria-controls="work-env-panel" title="${esc(title)}"><span aria-hidden="true" class="w-chip__glyph"${s.status === 'preparing' ? ' data-state="active"' : ''}>⬢</span><span>${esc(text)}${s.kept ? ' · kept' : ''}</span></button>`;
+        // A fact in the job's facts line (Mu §5.3): a quiet text button, coloured only when failed.
+        return `<button type="button" class="w-textbtn work-env-pill"${toneAttr(tone)} data-env-pill aria-expanded="${!!open}" aria-controls="work-env-panel" title="${esc(title)}"><span aria-hidden="true" class="work-env-pill__glyph"${s.status === 'preparing' ? ' data-state="active"' : ''}>⬢</span><span>${esc(text)}${s.kept ? ' · kept' : ''}</span></button>`;
     }
 
     /* Job page panel: one row per binding plus Refresh (E) / Keep (K) / Change. */

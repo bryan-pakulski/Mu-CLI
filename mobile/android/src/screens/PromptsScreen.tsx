@@ -1,19 +1,22 @@
-import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TextInput, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
-import { useTheme } from '../theme/ThemeContext';
-import { promptsApi, type PendingPrompt } from '../api/prompts';
-import { elevation, fonts, spacing, radii } from '../theme/tokens';
-import { Button, Card, EmptyState, ErrorState, ModalFrame, Pressable, Skeleton, Text } from '../ui';
+// Pending prompts: everything the agent is waiting on you for; answer in a sheet or cancel after
+// confirming. (The chat shows the same prompts inline.)
 
-function promptText(prompt: PendingPrompt | null | undefined): string {
+import React, { useCallback, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { promptsApi, type PendingPrompt } from '../api/prompts';
+import { PanelPage, PanelSection } from '../components/chat/PanelPage';
+import { spacing } from '../theme/tokens';
+import { Button, Row, Sheet, Text, TextField, useServerActions, useToast } from '../ui';
+
+export function promptText(prompt: PendingPrompt | null | undefined): string {
   if (!prompt) return '';
   return String(prompt.message || prompt.question || prompt.description || prompt.tool_name || prompt.shape || 'Input required');
 }
 
 export function PromptsScreen() {
-  const { colors, isDark } = useTheme();
+  const toast = useToast();
+  const actions = useServerActions();
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,24 +25,11 @@ export function PromptsScreen() {
   const [answerText, setAnswerText] = useState('');
 
   const load = useCallback(async () => {
-    try {
-      setError(null);
-      const res = await promptsApi.listPending();
-      setPending(res.pending || []);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    try { setError(null); setPending((await promptsApi.listPending()).pending || []); }
+    catch (e) { setError(String(e)); }
+    finally { setLoading(false); setRefreshing(false); }
   }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      setLoading(true);
-      void load();
-    }, [load]),
-  );
+  useFocusEffect(useCallback(() => { setLoading(true); void load(); }, [load]));
 
   const submitAnswer = async () => {
     if (!answering || !answerText.trim()) return;
@@ -49,84 +39,51 @@ export function PromptsScreen() {
       setAnswerText('');
       void load();
     } catch (e) {
-      Alert.alert('Failed to answer', String(e));
+      toast(`Couldn't answer: ${String(e)}`, 'danger');
     }
   };
 
-  const cancelPrompt = (id: string) => {
-    Alert.alert('Cancel prompt?', 'This will cancel the pending prompt.', [
-      { text: 'No', style: 'cancel' },
-      { text: 'Cancel prompt', style: 'destructive', onPress: async () => {
-        await promptsApi.cancel(id);
-        void load();
-      }},
-    ]);
+  const cancelPrompt = async (id: string) => {
+    if (!(await actions.ask({ id: 'cancel', label: 'Cancel prompt', danger: true, confirm: 'This will cancel the pending prompt.' }))) return;
+    await promptsApi.cancel(id);
+    void load();
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <View style={{ padding: spacing.base }}>
-          {[1, 2, 3].map(i => <Skeleton key={i} height={80} style={{ marginBottom: spacing.sm }} />)}
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <ErrorState message={error} onRetry={() => void load()} />
-      </SafeAreaView>
-    );
-  }
-
-  if (pending.length === 0) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <EmptyState title="No pending prompts" message="The agent has no prompts awaiting your response" />
-      </SafeAreaView>
-    );
-  }
-
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-      <FlatList
-        data={pending}
-        keyExtractor={item => item.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}
-        contentContainerStyle={{ padding: spacing.base }}
-        renderItem={({ item }) => (
-          <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
-            <Text variant="sm" style={{ color: colors.ink3, marginBottom: spacing.xs, fontFamily: fonts.mono }}>{item.id}</Text>
-            <Text variant="base" style={{ marginBottom: spacing.sm }}>{promptText(item)}</Text>
-            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-              <Button title="Answer" onPress={() => { setAnswering(item); setAnswerText(''); }} />
-              <Button title="Cancel" variant="ghost" onPress={() => cancelPrompt(item.id)} />
-            </View>
-          </Card>
-        )}
-      />
-      <ModalFrame statusBarTranslucent={false} visible={!!answering} transparent animationType="slide" onRequestClose={() => setAnswering(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: colors.scrim }} onPress={() => setAnswering(null)} activeOpacity={1}>
-          <View style={[elevation(2, colors, isDark), { margin: spacing.base, marginTop: spacing['3xl'], borderRadius: radii.lg, padding: spacing.base }]}>
-            <Text variant="lg" style={{ marginBottom: spacing.sm }}>Answer prompt</Text>
-            <Text variant="sm" style={{ color: colors.ink3, marginBottom: spacing.sm }}>{promptText(answering)}</Text>
-            <TextInput
-              value={answerText}
-              onChangeText={setAnswerText}
-              placeholder="Your answer…"
-              placeholderTextColor={colors.ink3}
-              multiline
-              style={{ color: colors.ink, borderWidth: 1, borderColor: colors.hairline, borderRadius: radii.sm, padding: spacing.md, minHeight: 100, marginBottom: spacing.base }}
-            />
-            <View style={{ flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' }}>
-              <Button title="Cancel" variant="ghost" onPress={() => setAnswering(null)} />
-              <Button title="Send" onPress={() => void submitAnswer()} disabled={!answerText.trim()} />
-            </View>
-          </View>
-        </Pressable>
-      </ModalFrame>
-    </SafeAreaView>
+    <PanelPage testID="prompts-screen" title="Pending prompts"
+      state={[pending.length ? { text: `${pending.length} need you`, tone: 'attention' } : { text: 'Nothing waiting', tone: 'quiet' }]}
+      loading={loading} error={error} onRetry={() => void load()}
+      empty={!loading && !error && !pending.length ? { title: 'No pending prompts', message: 'The agent has no prompts awaiting your response.' } : null}
+      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }}
+      overlay={actions.element}>
+      <PanelSection title="Waiting for you" count={pending.length}>
+        {pending.map(item => (
+          <Row key={item.id} testID={`pending-${item.id}`} status="waiting" title={promptText(item)} sub={item.id}
+            actions={(
+              <View style={styles.actions}>
+                <Button label="Answer" variant="primary" onPress={() => { setAnswering(item); setAnswerText(''); }} testID={`pending-${item.id}-answer`} />
+                <Button label="Cancel" variant="ghost" onPress={() => void cancelPrompt(item.id)} testID={`pending-${item.id}-cancel`} />
+              </View>
+            )} />
+        ))}
+      </PanelSection>
+      <Sheet visible={!!answering} onClose={() => setAnswering(null)} title="Answer prompt" testID="answer-sheet"
+        footer={<>
+          <Button label="Cancel" variant="secondary" onPress={() => setAnswering(null)} />
+          <Button label="Send" variant="primary" onPress={() => void submitAnswer()} disabled={!answerText.trim()} testID="answer-send" />
+        </>}>
+        <View style={styles.sheet}>
+          <Text variant="body" tone="ink2">{promptText(answering)}</Text>
+          <TextField value={answerText} onChangeText={setAnswerText} placeholder="Your answer…" multiline style={styles.answer}
+            accessibilityLabel="Your answer" testID="answer-text" />
+        </View>
+      </Sheet>
+    </PanelPage>
   );
 }
+
+const styles = StyleSheet.create({
+  actions: { flexDirection: 'row', gap: spacing.sm },
+  sheet: { gap: spacing.sm },
+  answer: { minHeight: 100 },
+});

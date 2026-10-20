@@ -1,0 +1,293 @@
+{
+  "active_config_path": "config/model_pricing.json",
+  "config_path": "~/.mucli/model_pricing.json",
+  "currency": "USD",
+  "default_config_path": "config/model_pricing.json",
+  "models": [
+    {
+      "aliases": [
+        "gpt-6-astra"
+      ],
+      "billing": "token",
+      "cached_input_per_million": 1.0,
+      "capabilities": [
+        "reasoning",
+        "tool_calling",
+        "structured_outputs",
+        "prompt_caching"
+      ],
+      "context_window": 1050000,
+      "estimated_total_per_million": null,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "input_per_million": 10.0,
+      "key": "gpt-6-astra",
+      "long_cached_input_per_million": 2.0,
+      "long_context_cutoff": 272000,
+      "long_input_per_million": 20.0,
+      "long_output_per_million": 75.0,
+      "notes": "Prompts above 272K use long-context pricing.",
+      "output_modalities": [
+        "text"
+      ],
+      "output_per_million": 50.0,
+      "provider": "openai",
+      "role": "flagship frontier reasoning",
+      "source": "https://developers.openai.com/api/docs/pricing (2026-10-14)"
+    },
+    {
+      "aliases": [
+        "gpt-6.1-sol",
+        "gpt-6.1"
+      ],
+      "billing": "token",
+      "cached_input_per_million": 0.1,
+      "capabilities": [
+        "reasoning",
+        "tool_calling",
+        "structured_outputs",
+        "prompt_caching"
+      ],
+      "context_window": 1050000,
+      "estimated_total_per_million": null,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "input_per_million": 2.0,
+      "key": "gpt-6.1-sol",
+      "long_cached_input_per_million": 0.2,
+      "long_context_cutoff": 272000,
+      "long_input_per_million": 4.0,
+      "long_output_per_million": 15.0,
+      "notes": "Prompts above 272K use long-context pricing.",
+      "output_modalities": [
+        "text"
+      ],
+      "output_per_million": 10.0,
+      "provider": "openai",
+      "role": "frontier reasoning / engineering",
+      "source": "https://developers.openai.com/api/docs/pricing (2026-10-14)"
+    },
+    {
+      "aliases": [
+        "claude-fable-5-1"
+      ],
+      "billing": "token",
+      "cached_input_per_million": 0.25,
+      "capabilities": [
+        "reasoning",
+        "tool_calling",
+        "structured_outputs",
+        "prompt_caching"
+      ],
+      "context_window": 1000000,
+      "estimated_total_per_million": null,
+      "input_modalities": [
+        "text",
+        "image",
+        "document"
+      ],
+      "input_per_million": 10.0,
+      "key": "claude-fable-5-1",
+      "long_cached_input_per_million": null,
+      "long_context_cutoff": null,
+      "long_input_per_million": null,
+      "long_output_per_million": null,
+      "notes": "Thinking is always on; output includes thinking tokens.",
+      "output_modalities": [
+        "text"
+      ],
+      "output_per_million": 50.0,
+      "provider": "anthropic",
+      "role": "most capable frontier reasoning / long-horizon agentic work",
+      "source": "configured list-rate estimate"
+    },
+    {
+      "aliases": [
+        "claude-fable-5"
+      ],
+      "billing": "token",
+      "cached_input_per_million": 1.0,
+      "capabilities": [
+        "reasoning",
+        "tool_calling",
+        "structured_outputs",
+        "prompt_caching"
+      ],
+      "context_window": 1000000,
+      "estimated_total_per_million": null,
+      "input_modalities": [
+        "text",
+        "image",
+        "document"
+      ],
+      "input_per_million": 10.0,
+      "key": "claude-fable-5",
+      "long_cached_input_per_million": null,
+      "long_context_cutoff": null,
+      "long_input_per_million": null,
+      "long_output_per_million": null,
+      "notes": "Thinking is always on; output includes thinking tokens.",
+      "output_modalities": [
+        "text"
+      ],
+      "output_per_million": 50.0,
+      "provider": "anthropic",
+      "role": "frontier reasoning (previous Fable generation)",
+      "source": "configured list-rate estimate"
+    },
+    {
+      "aliases": [
+        "gemini-3.6-flash"
+      ],
+      "billing": "token",
+      "cached_input_per_million": 0.15,
+      "capabilities": [
+        "reasoning",
+        "tool_calling",
+        "structured_outputs",
+        "context_caching"
+      ],
+      "context_window": null,
+      "estimated_total_per_million": null,
+      "input_modalities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "document"
+      ],
+      "input_per_million": 1.5,
+      "key": "gemini-3.6-flash",
+      "long_cached_input_per_million": null,
+      "long_context_cutoff": null,
+      "long_input_per_million": null,
+      "long_output_per_million": null,
+      "notes": "Output baseline includes thinking tokens.",
+      "output_modalities": [
+        "text"
+      ],
+      "output_per_million": 7.5,
+      "provider": "gemini",
+      "role": "fast agentic engineering",
+      "source": "configured list-rate estimate"
+    },
+    {
+      "aliases": [
+        "gemini-3.5-flash"
+      ],
+      "billing": "token",
+      "cached_input_per_million": 0.15,
+      "capabilities": [
+        "reasoning",
+        "tool_calling",
+        "structured_outputs",
+        "context_caching"
+      ],
+      "context_window": null,
+      "estimated_total_per_million": null,
+      "input_modalities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "document"
+      ],
+      "input_per_million": 1.5,
+      "key": "gemini-3.5-flash",
+      "long_cached_input_per_million": null,
+      "long_context_cutoff": null,
+      "long_input_per_million": null,
+      "long_output_per_million": null,
+      "notes": "Output baseline includes thinking tokens.",
+      "output_modalities": [
+        "text"
+      ],
+      "output_per_million": 9.0,
+      "provider": "gemini",
+      "role": "general fast agent work",
+      "source": "configured list-rate estimate"
+    },
+    {
+      "aliases": [
+        "glm-5.3-flash",
+        "glm-5.3-flash:cloud"
+      ],
+      "billing": "estimated_token",
+      "cached_input_per_million": 0.03,
+      "capabilities": [
+        "vision",
+        "reasoning",
+        "tool_calling"
+      ],
+      "context_window": 1000000,
+      "estimated_total_per_million": null,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "input_per_million": 0.15,
+      "key": "glm-5.3-flash:cloud",
+      "long_cached_input_per_million": null,
+      "long_context_cutoff": null,
+      "long_input_per_million": null,
+      "long_output_per_million": null,
+      "notes": "Ollama /api/chat currently exposes text and image input for this model; screenshots are sent through the native images field.",
+      "output_modalities": [
+        "text"
+      ],
+      "output_per_million": 0.5,
+      "provider": "ollama",
+      "role": "native-vision agentic coding at flash cost",
+      "source": "ollama.com/pricing (2026-09-24)"
+    }
+  ],
+  "ollama": [
+    {
+      "aliases": [
+        "glm-5.3-flash",
+        "glm-5.3-flash:cloud"
+      ],
+      "billing": "estimated_token",
+      "cached_input_per_million": 0.03,
+      "capabilities": [
+        "vision",
+        "reasoning",
+        "tool_calling"
+      ],
+      "context_window": 1000000,
+      "estimated_total_per_million": null,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "input_per_million": 0.15,
+      "key": "glm-5.3-flash:cloud",
+      "long_cached_input_per_million": null,
+      "long_context_cutoff": null,
+      "long_input_per_million": null,
+      "long_output_per_million": null,
+      "notes": "Ollama /api/chat currently exposes text and image input for this model; screenshots are sent through the native images field.",
+      "output_modalities": [
+        "text"
+      ],
+      "output_per_million": 0.5,
+      "provider": "ollama",
+      "role": "native-vision agentic coding at flash cost",
+      "source": "ollama.com/pricing (2026-09-24)"
+    }
+  ],
+  "provider_notes": {
+    "anthropic": "Configured token-rate estimate; output includes thinking tokens, cached input is billed at the cache-read rate.",
+    "gemini": "Configured token-rate estimate; output may include thinking tokens.",
+    "ollama_cloud": "Uses separate configured input/output estimates when present; legacy blended overrides remain supported.",
+    "ollama_local": "$0 attributable provider/API cost; host compute is separate.",
+    "openai": "Configured token-rate estimate."
+  },
+  "unit": "per_million_tokens",
+  "using_override": false,
+  "version": "2026-09-24-ollama-cloud-catalog"
+}

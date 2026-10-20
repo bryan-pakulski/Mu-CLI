@@ -1,16 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { ApiError } from '../api/client';
 import { isMissingEndpoint, jobCoreApi, type ActivityContainer, type ActivityJob, type ActivityLog, type ActivityVM } from '../api/jobCore';
-import { JobsNavBar, type JobsPage, switchJobsPage } from '../components/JobsChrome';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing } from '../theme/tokens';
 import { ACTIVE_STATES, bytes, duration, money, stateLabel, stateStatus } from '../theme/status';
-import { Banner, Button, Empty, Loading, Panel, Pill, Pre, Sheet, Sparkline, StatusIcon, StatusPill, Text, useToast, Icon, type IconName } from '../ui';
+import { Banner, Button, Empty, Loading, PageHeader, Panel, Pill, Pre, Sheet, Sparkline, StatusIcon, StatusPill, Text, useToast, Icon, type IconName } from '../ui';
 
 export type JobActivityScreenProps = NativeStackScreenProps<RootStackParamList, 'JobActivity'>;
 
@@ -109,7 +107,6 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
     } finally { setBusy(false); }
   };
 
-  const go = (page: JobsPage) => switchJobsPage(navigation, 'JobActivity', page);
   const now = Date.now() / 1000;
 
   const containerRow = (c: ActivityContainer, removable: boolean, reason = '') => {
@@ -126,46 +123,45 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
               : c.stage ? <Pill tone="muted">{c.stage}</Pill> : null}
         </View>
         {c.binding && c.role !== 'broker' || c.gpus ? (
-          <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={1}>
+          <Text variant="xs" tone="ink3" numberOfLines={1}>
             {[c.binding && c.role !== 'broker' ? `environment ${c.binding}` : '', c.gpus ? `GPUs ${c.gpus}` : ''].filter(Boolean).join(' · ')}
           </Text>
         ) : null}
-        <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={1}>{c.image}{c.started_at ? ` · up ${duration((now - c.started_at) * 1000)}` : ''}{c.status_text ? ` · ${c.status_text}` : ''}</Text>
+        <Text variant="xs" tone="ink3" numberOfLines={1}>{c.image}{c.started_at ? ` · up ${duration((now - c.started_at) * 1000)}` : ''}{c.status_text ? ` · ${c.status_text}` : ''}</Text>
         <View style={styles.metrics}>
           <View style={styles.metric}>
-            <Text variant="xs" style={{ color: colors.ink3 }}>CPU <Text variant="xs" style={styles.num}>{c.cpu_percent == null ? '—' : `${c.cpu_percent.toFixed(0)}%`}</Text></Text>
+            <Text variant="xs" tone="ink3">CPU <Text variant="xs" style={styles.num}>{c.cpu_percent == null ? '—' : `${c.cpu_percent.toFixed(0)}%`}</Text></Text>
             <Sparkline values={s.cpu} max={Math.max(100, ...s.cpu.map(v => v || 0))} tone="running" accessibilityLabel={`CPU ${c.cpu_percent == null ? 'no sample yet' : `${c.cpu_percent.toFixed(0)} percent`}`} testID={`cpu-spark-${c.name}`} />
           </View>
           <View style={styles.metric}>
-            <Text variant="xs" style={{ color: colors.ink3 }}>Mem <Text variant="xs" style={styles.num}>{c.mem_bytes == null ? '—' : `${bytes(c.mem_bytes)}${c.mem_limit ? ` / ${bytes(c.mem_limit)}` : ''}`}</Text></Text>
+            <Text variant="xs" tone="ink3">Mem <Text variant="xs" style={styles.num}>{c.mem_bytes == null ? '—' : `${bytes(c.mem_bytes)}${c.mem_limit ? ` / ${bytes(c.mem_limit)}` : ''}`}</Text></Text>
             <Sparkline values={s.mem} max={c.mem_limit || undefined} tone={memPct != null && memPct > 85 ? 'warn' : 'accent'} accessibilityLabel={`Memory ${c.mem_bytes == null ? 'no sample yet' : bytes(c.mem_bytes)}${memPct != null ? `, ${memPct} percent of limit` : ''}`} testID={`mem-spark-${c.name}`} />
           </View>
         </View>
         <View style={styles.row}>
           <Button small tone="danger" label="Remove" accessibilityLabel={`Remove container ${c.name}`} disabled={!removable} onPress={() => setRemoving(c)} testID={`remove-${c.name}`} />
-          {!removable && reason ? <Text variant="xs" style={{ color: colors.ink3 }}>{reason}</Text> : null}
+          {!removable && reason ? <Text variant="xs" tone="ink3">{reason}</Text> : null}
         </View>
       </View>
     );
   };
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
-      <JobsNavBar current="JobActivity" onNavigate={go} />
+    <View style={styles.root}>
+      <PageHeader title="Activity" back={{ label: 'Work', onPress: () => navigation.goBack() }} testID="activity-header"
+        state={vm ? [
+          vm.counts.needs_you ? { text: `${vm.counts.needs_you} need${vm.counts.needs_you === 1 ? 's' : ''} you`, tone: 'attention' } : null,
+          vm.counts.agents ? { text: `${vm.counts.agents} agent${vm.counts.agents === 1 ? '' : 's'}` } : null,
+          vm.counts.checks ? { text: `${vm.counts.checks} check${vm.counts.checks === 1 ? '' : 's'}` } : null,
+          { text: `${vm.counts.containers} container${vm.counts.containers === 1 ? '' : 's'}`, tone: 'quiet' },
+        ] : undefined} />
       <ScrollView contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.ink3} />}>
-        <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Activity</Text>
         {unsupported ? <Banner tone="muted" glyph="ℹ" title="Activity needs a newer mucli server (GET /api/jobs/vm/activity)." /> : null}
         {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : null}
         {!vm && !unsupported && !error ? <Loading label="Loading activity…" /> : null}
         {vm ? (
           <>
-            <View style={styles.wrap} accessibilityLabel="Activity summary">
-              <Pill tone={vm.counts.agents ? 'running' : 'muted'} glyph="●">{`${vm.counts.agents} agents`}</Pill>
-              <Pill tone={vm.counts.checks ? 'running' : 'muted'} glyph="●">{`${vm.counts.checks} checks`}</Pill>
-              <Pill tone="muted" glyph="⬢">{`${vm.counts.containers} containers`}</Pill>
-              <Pill tone={vm.counts.needs_you ? 'warn' : 'muted'} glyph="◆">{`${vm.counts.needs_you} needs you`}</Pill>
-            </View>
             {vm.engine !== 'up' ? (
               <Banner tone="warn" glyph="◆" title={vm.engine === 'off' ? 'Docker is not installed — container stats are unavailable.' : 'Docker is not responding — container stats are unavailable.'} />
             ) : null}
@@ -184,7 +180,7 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
                   right={<Text variant="xs" style={styles.num}>{money(job.cost_usd)}</Text>}
                 >
                   <Text variant="sm" numberOfLines={1} onPress={() => navigation.navigate('JobDetail', { jobId: job.id })} accessibilityRole="link">{job.title}</Text>
-                  <Text variant="xs" style={{ color: colors.ink3 }}>
+                  <Text variant="xs" tone="ink3">
                     {job.kind}{job.stage ? ` · ${job.stage}` : ''}{job.since ? ` · ${duration((now - job.since) * 1000)}` : ''}{job.worker_id ? ` · worker ${job.worker_id.slice(0, 8)}` : ''}{job.heartbeat_at ? ` · heartbeat ${duration((now - job.heartbeat_at) * 1000)} ago` : ''}
                   </Text>
                   {job.last ? <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]} numberOfLines={2}>› {job.last}</Text> : null}
@@ -198,7 +194,7 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
             }) : <Panel><Empty status="done">No agents, checks or containers are running.</Empty></Panel>}
             {vm.orphans?.length ? (
               <Panel title="Orphaned containers" badge={vm.orphans.length} badgeTone="warn" testID="activity-orphans">
-                <Text variant="xs" style={{ color: colors.ink3 }}>mucli-job containers whose job is no longer active.</Text>
+                <Text variant="xs" tone="ink3">mucli-job containers whose job is no longer active.</Text>
                 {vm.orphans.map(c => containerRow(c, true))}
               </Panel>
             ) : null}
@@ -225,7 +221,7 @@ export function JobActivityScreen({ navigation }: JobActivityScreenProps) {
           <Button primary tone="danger" loading={busy} label="Remove" onPress={() => void remove()} testID="remove-confirm" />
         </View>
       </Sheet>
-    </SafeAreaView>
+    </View>
   );
 }
 

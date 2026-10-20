@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppState, ScrollView, StyleSheet, View } from 'react-native';
 import { ArtifactDescriptor, artifactsApi } from '../api/artifacts';
-import { openExternalUrl } from '../api/urlSafety';
+import { shareServerFile } from '../api/artifactDownload';
+import { navigateTo } from '../navigation/nav';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, radii, spacing } from '../theme/tokens';
-import { Pressable, Text, Icon } from '../ui';
+import { Pressable, Text, Icon, useToast } from '../ui';
 
 export function ArtifactStrip({
   sessionName,
@@ -14,7 +15,15 @@ export function ArtifactStrip({
   refreshKey?: number;
 }) {
   const { colors } = useTheme();
+  const toast = useToast();
   const [artifacts, setArtifacts] = useState<ArtifactDescriptor[]>([]);
+  // Server files need this phone's device token, which a browser doesn't have: visualizations
+  // open in the in-app viewer, files download with the token and go to the share sheet.
+  const share = (artifact: ArtifactDescriptor) => {
+    if (!sessionName) return;
+    shareServerFile(artifactsApi.downloadUrl(sessionName, artifact.artifact_id), artifact.name, artifact.mime_type)
+      .catch(error => toast(`Couldn\u2019t download ${artifact.name}: ${error instanceof Error ? error.message : String(error)}`, 'danger'));
+  };
 
   const load = useCallback(async () => {
     if (!sessionName) {
@@ -67,7 +76,7 @@ export function ArtifactStrip({
               return (
                 <Pressable
                   key={artifact.artifact_id}
-                  onPress={() => openExternalUrl(artifactsApi.viewUrl(sessionName, artifact.artifact_id))}
+                  onPress={() => navigateTo('Artifacts', { view: artifact.artifact_id })}
                   style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}
                 >
                   <Icon name="bar-chart-3" size="sm" color={colors.ink2} />
@@ -77,7 +86,7 @@ export function ArtifactStrip({
                     </Text>
                     <Text variant="xs" dim>{formatBytes(artifact.size)}</Text>
                   </View>
-                  <Icon name="external-link" size="sm" color={colors.ink3} />
+                  <Icon name="maximize-2" size="sm" color={colors.ink3} />
                 </Pressable>
               );
             })}
@@ -95,7 +104,7 @@ export function ArtifactStrip({
             {files.map(artifact => (
               <Pressable
                 key={artifact.artifact_id}
-                onPress={() => openExternalUrl(artifactsApi.downloadUrl(sessionName, artifact.artifact_id))}
+                onPress={() => share(artifact)}
                 style={[styles.chip, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}
               >
                 <Icon name="paperclip" size="sm" color={colors.ink2} />

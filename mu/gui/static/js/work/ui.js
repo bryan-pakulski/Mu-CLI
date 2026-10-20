@@ -141,6 +141,9 @@
     /* ------------------------------------------------------------ keyboard */
     const isTyping = el => !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
     let pendingG = 0;
+    // Capture phase on window: Work's own keys (g s → Work settings, n → New job) run before the
+    // shared frame's (wash_shell.js, on document) and mark the event handled; keys Work doesn't
+    // know (g c, g o, g e…) fall through to the frame.
     function installKeys() {
         window.addEventListener('keydown', e => {
             if (e.defaultPrevented) return;
@@ -164,7 +167,7 @@
                 return;
             }
             if (e.key === 'g') pendingG = now;
-        });
+        }, true);
     }
 
     window.MuJobUI = { esc, dialog, confirm, prompt, toast, register, commands, palette, help, installKeys, isTyping };

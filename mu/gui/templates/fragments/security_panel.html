@@ -119,7 +119,7 @@
                             <div class="finding-paths"
                                  x-show="(f.affected_paths || []).length">
                                 <h5>Affected</h5>
-                                <template x-for="p in f.affected_paths" :key="p">
+                                <template x-for="(p, pi) in (f.affected_paths || [])" :key="pi">
                                     <div class="finding-path mono" x-text="p"></div>
                                 </template>
                             </div>

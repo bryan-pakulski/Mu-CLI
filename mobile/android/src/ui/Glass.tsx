@@ -1,33 +1,27 @@
-// Glass surfaces and the ambient wash (G§3.3, G§6.2, spec §13).
+// Glass surfaces and the ambient wash (G§3.3, G§6.2; Mu revision 2, mobile_parity.md §4).
 //
-// Every screen sits on a fixed, full-bleed ambient watercolour. Surfaces are
-// translucent glass over it; elevation comes from opacity, not from heavy
-// shadows. One helper, `glassStyle(level)`, gives every kit surface its fill
-// and edges:
+// Mu revision 2: surfaces are flat and the watercolour is the destination's accent. Each
+// destination has an ambient scene (tokens.json destination) that cross-fades when the tab
+// changes. With the Wash theme a glass *strength* (0–100, default 60, Settings → Appearance) lets
+// a little of it through, using the web's no-blur formula: a fill of the theme's own surface at
+// `1 − 0.12 × strength` (never below `glassEffect.min_alpha`). Palettes, "Reduce decoration" and
+// strength 0 are solid, and palettes and reduced decoration show no watercolour (as on the web).
 //
-// | level    | fill                 | edges                                   | use                              |
-// |----------|----------------------|-----------------------------------------|----------------------------------|
-// | 1        | `glass.surface` 62%  | 1px `glass.edge`, `glass.border` top    | cards, panels, stage, composer   |
-// | 'subtle' | `glass.subtle`       | none (an inset on glass)                | inputs, tool rows, chips on glass|
-// | 2        | `glass.strong` 82%+  | as level 1 + elevation-2 shadow         | menus, toasts, active nav pill   |
-// | 3        | `glass.strong`       | as level 1 + elevation-3 shadow         | sheets, dialogs, approval sheet  |
+// | level    | fill (strength s)          | use                                   |
+// |----------|----------------------------|---------------------------------------|
+// | 1        | surface at 1 − 0.12·s      | stage, panels, composer               |
+// | 'subtle' | sunken at 1 − 0.12·s       | inputs, tool rows, chips on a surface |
+// | 2        | raised at 1 − 0.06·s       | menus, toasts, active nav pill        |
+// | 3        | raised at 1 − 0.06·s       | sheets, dialogs                       |
 //
-// Rules this module enforces:
-// - Text-bearing glass (1, 2, 3) is never below `glassEffect.min_alpha`.
-//   `subtle` is only an inset on another glass surface, so its effective
-//   opacity is compounded with its parent (always above the floor).
-// - Edges are light, never pigment (G§3.4).
-// - Fallback: with "Reduce decoration" on (or no blur), glass becomes the
-//   solid `surface` / `raised` colour and the ambient wash becomes `canvas`.
-// - Only chrome (header, tab bar, sheets, dialogs, toast) uses a native
-//   BlurView (`GlassChrome`). Lists and cards use translucent fills only, so
-//   scrolling never re-blurs per row.
+// Edges are light hairlines, never pigment (G§3.4). Only chrome (header, tab bar, sheets) uses a
+// native BlurView, and only on iOS (Android has no live blur; see BLUR_AVAILABLE).
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Image, Platform, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AccessibilityInfo, Animated, Image, Platform, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useTheme, type ThemeName } from '../theme/ThemeContext';
-import { elevation, toneOf, type Tone, type WashColors } from '../theme/tokens';
+import { destinationAmbient, easings, elevation, toneOf, type DestinationName, type Tone, type WashColors } from '../theme/tokens';
 import { glass as glassTokens, glassEffect } from '../theme/wash.generated';
 
 /* ------------------------------------------------------------ colour maths */
@@ -108,44 +102,53 @@ export const GLASS_MIN_ALPHA = glassEffect.min_alpha;
 /* ------------------------------------------------------------ glassStyle */
 
 export type GlassOptions = {
-  /** Solid fallback ("Reduce decoration", no blur). */
+  /** Solid fallback (a palette, "Reduce decoration", strength 0). */
   solid?: boolean;
   /** No edges (a full-bleed stage or a strip inside a card). */
   flat?: boolean;
+  /** Glass strength 0–1 (the Settings slider / 100). */
+  strength?: number;
 };
 
+export const GLASS_CLEAR = 0.12;
+
+/** Fill alpha of a level at a strength (0–1), floor-clamped for text-bearing levels. */
+export function glassFillAlpha(level: GlassLevel, strength: number): number {
+  const s = Math.max(0, Math.min(1, strength));
+  const clear = level === 2 || level === 3 ? GLASS_CLEAR / 2 : GLASS_CLEAR;
+  const alpha = 1 - clear * s;
+  return level === 'subtle' ? alpha : Math.max(GLASS_MIN_ALPHA, alpha);
+}
+
+function withAlpha(color: string, alpha: number): string {
+  return toCss({ ...parseColor(color), a: alpha });
+}
+
 /**
- * Fill, edges and depth for one glass level. Never sets a coloured edge. On
- * Android the elevation shadow is omitted for translucent fills (Android
- * draws the shadow through a translucent surface as a dark smudge); depth
- * comes from opacity and the light edge instead.
+ * Fill, edges and depth for one level. Never sets a coloured edge. On Android the elevation
+ * shadow is omitted for translucent fills (Android draws a shadow through a translucent surface
+ * as a dark smudge); depth comes from the hairline instead.
  */
 export function glassStyle(level: GlassLevel, colors: WashColors, options: GlassOptions = {}): ViewStyle {
-  const { solid, flat } = options;
-  if (solid) {
+  const { solid, flat, strength = 0.6 } = options;
+  if (solid || strength <= 0) {
     if (level === 'subtle') return { backgroundColor: colors.sunken };
     if (flat) return { backgroundColor: level === 1 ? colors.surface : colors.raised };
     return level === 1 ? elevation(1, colors) : elevation(level, colors);
   }
-  const g = glassTokensFor(colors);
-  if (level === 'subtle') return { backgroundColor: g.subtle };
-  const fill = level === 1 ? g.surface : g.strong;
+  const alpha = glassFillAlpha(level, strength);
+  if (level === 'subtle') return { backgroundColor: withAlpha(colors.sunken, alpha) };
+  const fill = withAlpha(level === 1 ? colors.surface : colors.raised, alpha);
   if (flat) return { backgroundColor: fill };
-  const edges: ViewStyle = { backgroundColor: fill, borderWidth: 1, borderColor: g.edge, borderTopColor: g.border };
-  if (Platform.OS === 'android') return edges;
-  const depth = level === 1 ? 1 : level === 2 ? 1.5 : 2.5;
-  return {
-    ...edges,
-    shadowColor: g.shadow.color,
-    shadowOpacity: Math.min(0.4, g.shadow.opacity * depth),
-    shadowRadius: g.shadow.radius * (level === 3 ? 1.6 : 1),
-    shadowOffset: { width: 0, height: g.shadow.offsetY * (level === 3 ? 1.6 : 1) },
-  };
+  const edges: ViewStyle = { backgroundColor: fill, borderWidth: 1, borderColor: colors.hairline };
+  if (Platform.OS === 'android' || level === 1) return edges;
+  return { ...edges, ...{ shadowColor: colors.shadow, shadowOpacity: level === 2 ? 0.08 : 0.16,
+    shadowRadius: level === 2 ? 12 : 32, shadowOffset: { width: 0, height: level === 2 ? 8 : 24 } } };
 }
 
-/** Neutral glass edge colour (for dividers drawn on glass). */
-export function glassEdge(colors: WashColors, solid?: boolean): string {
-  return solid ? colors.hairline : glassTokensFor(colors).edge;
+/** Neutral edge colour (for dividers drawn on a surface). */
+export function glassEdge(colors: WashColors, _solid?: boolean): string {
+  return colors.hairline;
 }
 
 /**
@@ -156,15 +159,12 @@ export function glassEdge(colors: WashColors, solid?: boolean): string {
 export function stateTint(colors: WashColors, tone: Tone, solid?: boolean): string {
   const wash = toneOf(colors, tone).wash;
   if (solid) return wash;
-  const g = glassTokensFor(colors);
-  return mixColor(wash, g.strong, 0.7, Math.max(parseColor(g.surface).a, GLASS_MIN_ALPHA));
+  return mixColor(wash, colors.raised, 0.7, 1);
 }
 
 /** Active rows (G§9.4, G§9.20): a glass-strong pill with a light edge, never a side bar. */
-export function activePillStyle(colors: WashColors, solid?: boolean): ViewStyle {
-  if (solid) return { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.hairline };
-  const g = glassTokensFor(colors);
-  return { backgroundColor: g.strong, borderWidth: 1, borderColor: g.edge, borderTopColor: g.border };
+export function activePillStyle(colors: WashColors, _solid?: boolean): ViewStyle {
+  return { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.hairline };
 }
 
 /* ------------------------------------------------------------ hook */
@@ -180,8 +180,10 @@ export function activePillStyle(colors: WashColors, solid?: boolean): ViewStyle 
 export const BLUR_AVAILABLE = Platform.OS === 'ios';
 
 export type GlassApi = {
-  /** Solid fallback is active (Reduce decoration). */
+  /** Surfaces are solid (a palette, Reduce decoration or strength 0). */
   solid: boolean;
+  /** Glass strength 0–1. */
+  strength: number;
   style: (level: GlassLevel, options?: Omit<GlassOptions, 'solid'>) => ViewStyle;
   tint: (tone: Tone) => string;
   edge: string;
@@ -189,14 +191,18 @@ export type GlassApi = {
 };
 
 export function useGlass(): GlassApi {
-  const { colors, reduceDecoration } = useTheme();
-  return useMemo(() => ({
-    solid: reduceDecoration,
-    style: (level, options) => glassStyle(level, colors, { ...options, solid: reduceDecoration }),
-    tint: tone => stateTint(colors, tone, reduceDecoration),
-    edge: glassEdge(colors, reduceDecoration),
-    activePill: activePillStyle(colors, reduceDecoration),
-  }), [colors, reduceDecoration]);
+  const { colors, flat, glass } = useTheme();
+  return useMemo(() => {
+    const strength = flat ? 0 : glass / 100;
+    return {
+      solid: flat,
+      strength,
+      style: (level, options) => glassStyle(level, colors, { ...options, solid: flat, strength }),
+      tint: tone => stateTint(colors, tone, flat),
+      edge: glassEdge(colors, flat),
+      activePill: activePillStyle(colors, flat),
+    };
+  }, [colors, flat, glass]);
 }
 
 /* ------------------------------------------------------------ chrome */
@@ -219,10 +225,10 @@ export type GlassChromeProps = {
  * Renders the solid surface when decoration is reduced or blur is missing.
  */
 export function GlassBackdrop({ level = 1, testID }: { level?: 1 | 2 | 3; testID?: string }) {
-  const { colors, isDark, reduceDecoration } = useTheme();
-  // Reduce decoration → solid surface. No live blur (Android) → the translucent glass fill alone.
-  const solid = reduceDecoration;
-  const fill = glassStyle(level, colors, { solid, flat: true }).backgroundColor;
+  const { colors, isDark, flat, glass } = useTheme();
+  // Flat → solid surface. No live blur (Android) → the translucent fill alone.
+  const solid = flat;
+  const fill = glassStyle(level, colors, { solid, flat: true, strength: glass / 100 }).backgroundColor;
   if (solid || !BLUR_AVAILABLE) return <View testID={testID} pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: fill }]} />;
   const blur = level === 1 ? glassEffect.blur : glassEffect.blur_strong;
   return (
@@ -242,8 +248,8 @@ export function GlassBackdrop({ level = 1, testID }: { level?: 1 | 2 | 3; testID
  * blurred backdrop. Lists and cards never use this; they use `glassStyle`.
  */
 export function GlassChrome({ level = 1, style, children, testID, edges = true, pointerEvents, accessibilityViewIsModal }: GlassChromeProps) {
-  const { colors, reduceDecoration } = useTheme();
-  const surface = glassStyle(level, colors, { solid: reduceDecoration, flat: !edges });
+  const { colors, flat, glass } = useTheme();
+  const surface = glassStyle(level, colors, { solid: flat, flat: !edges, strength: glass / 100 });
   return (
     <View testID={testID} pointerEvents={pointerEvents} accessibilityViewIsModal={accessibilityViewIsModal}
       style={[surface, { backgroundColor: 'transparent', overflow: 'hidden' }, style]}>
@@ -273,12 +279,9 @@ export function ambientArt(art: AmbientArt, theme: ThemeName): ImageSourcePropTy
   return AMBIENT[art][theme];
 }
 
-/** G§6.2: Dawn for chat, Lagoon for Work and Trace, Meadow for environments; Dawn elsewhere. */
-export function routeAmbient(routeName: string | null | undefined): AmbientArt {
-  if (!routeName) return 'dawn';
-  if (routeName === 'Work' || routeName === 'Traces' || routeName.startsWith('Job')) return 'lagoon';
-  if (routeName === 'Containers' || routeName === 'Environments') return 'meadow';
-  return 'dawn';
+/** The ambient scene of a destination (tokens.json destination). */
+export function destinationArt(destination: DestinationName): AmbientArt {
+  return destinationAmbient(destination);
 }
 
 type AmbientContextValue = { art: AmbientArt; setRouteArt: (art: AmbientArt) => void; pushOverride: (art: AmbientArt) => () => void };
@@ -301,40 +304,61 @@ export function useAmbientOverride(art: AmbientArt | null) {
 }
 
 /** One fixed, full-bleed image (or flat canvas). Never per row. */
-export function AmbientLayer({ art, testID = 'ambient-wash' }: { art: AmbientArt; testID?: string }) {
-  const { colors, name, reduceDecoration } = useTheme();
-  if (reduceDecoration) {
+export function AmbientLayer({ art, testID = 'ambient-wash', opacity }: { art: AmbientArt; testID?: string; opacity?: Animated.Value }) {
+  const { colors, name, reduceDecoration, palette } = useTheme();
+  if (reduceDecoration || palette) {
     return <View testID={`${testID}-flat`} pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.canvas }]} />;
   }
   return (
-    <View pointerEvents="none" importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { backgroundColor: colors.canvas }]}>
+    <Animated.View pointerEvents="none" importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { backgroundColor: colors.canvas }, opacity ? { opacity } : null]}>
       <Image testID={testID} source={ambientArt(art, name)} resizeMode="cover" fadeDuration={0} accessibilityIgnoresInvertColors style={[StyleSheet.absoluteFill, styles.fill]} />
-    </View>
+    </Animated.View>
   );
 }
 
 let overrideSeq = 0;
 
+/** The destination fade (Mu §11b): 1.4 s; instant when the system asks for reduced motion. */
+export const AMBIENT_FADE_MS = 1400;
+
 /**
- * The app-wide ambient backdrop (G§6.2): a single fixed image behind the
- * navigator. Children (the navigator) must be transparent to show it.
+ * The app-wide ambient backdrop (G§6.2): a single fixed image behind the navigator, chosen by the
+ * destination on screen (useTheme().destination) and cross-faded when it changes. Overrides (a
+ * full-screen flow) win while mounted. Children (the navigator) must be transparent to show it.
  */
-export function AmbientBackground({ children, initialArt = 'dawn' }: { children: React.ReactNode; initialArt?: AmbientArt }) {
-  const [routeArt, setRouteArtState] = useState<AmbientArt>(initialArt);
+export function AmbientBackground({ children }: { children: React.ReactNode; initialArt?: AmbientArt }) {
+  const { destination } = useTheme();
   const [overrides, setOverrides] = useState<Array<{ id: number; art: AmbientArt }>>([]);
-  const setRouteArt = useCallback((art: AmbientArt) => setRouteArtState(prev => (prev === art ? prev : art)), []);
   const pushOverride = useCallback((art: AmbientArt) => {
     overrideSeq += 1;
     const id = overrideSeq;
     setOverrides(list => [...list, { id, art }]);
     return () => setOverrides(list => list.filter(o => o.id !== id));
   }, []);
-  const art = overrides.length ? overrides[overrides.length - 1].art : routeArt;
+  const art = overrides.length ? overrides[overrides.length - 1].art : destinationArt(destination);
+  const [shown, setShown] = useState<{ current: AmbientArt; previous: AmbientArt | null }>({ current: art, previous: null });
+  const fade = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (art === shown.current) return;
+    let cancelled = false;
+    void AccessibilityInfo.isReduceMotionEnabled().catch(() => false).then(reduce => {
+      if (cancelled) return;
+      if (reduce) { setShown({ current: art, previous: null }); return; }
+      setShown(prev => ({ current: art, previous: prev.current }));
+      fade.setValue(0);
+      Animated.timing(fade, { toValue: 1, duration: AMBIENT_FADE_MS, easing: easings.bleed, useNativeDriver: true }).start(({ finished }) => {
+        if (finished && !cancelled) setShown(prev => ({ current: prev.current, previous: null }));
+      });
+    });
+    return () => { cancelled = true; };
+  }, [art, fade, shown.current]);
+  const setRouteArt = useCallback(() => undefined, []);
   const value = useMemo(() => ({ art, setRouteArt, pushOverride }), [art, setRouteArt, pushOverride]);
   return (
     <AmbientContext.Provider value={value}>
       <View style={styles.root}>
-        <AmbientLayer art={art} />
+        {shown.previous ? <AmbientLayer art={shown.previous} testID="ambient-wash-previous" /> : null}
+        <AmbientLayer art={shown.current} opacity={shown.previous ? fade : undefined} />
         {children}
       </View>
     </AmbientContext.Provider>

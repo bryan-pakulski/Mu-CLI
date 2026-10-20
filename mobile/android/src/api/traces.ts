@@ -1,4 +1,5 @@
 import { api, baseUrl } from './client';
+import { authHeaders } from './auth';
 
 export interface TraceRun {
   run_id: string;
@@ -56,7 +57,7 @@ export const tracesApi = {
   getRun: (runId: string, cols?: number) =>
     api.get(`/api/traces/${encodeURIComponent(runId)}`, { query: { cols } }),
   getRaw: async (runId: string): Promise<string> => {
-    const res = await fetch(`${baseUrl()}/api/traces/${encodeURIComponent(runId)}/raw`);
+    const res = await fetch(`${baseUrl()}/api/traces/${encodeURIComponent(runId)}/raw`, { headers: authHeaders(baseUrl()) });
     if (!res.ok) throw new Error(`Failed: ${res.status}`);
     return res.text();
   },

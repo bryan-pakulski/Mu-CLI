@@ -7,6 +7,10 @@ model costs), Android client, terminal REPL, jobs TUI, and container TUI.
 describes how each surface moves to this guide.
 **Visual reference:** [`reference/wash_reference.html`](reference/wash_reference.html)
 (open it in a browser; screenshots are in `reference/`).
+**Composition:** [Mu](mu_style_guide.md) (2026-10-19) governs how much is on
+screen, where each fact lives and how pages flow. It replaces this guide's top
+bar, hero bands, eyebrows, cards and status chips on working screens (Mu §12).
+Wash's tokens, colour, type, motion and accessibility rules are unchanged.
 
 ---
 
@@ -221,6 +225,13 @@ Rules:
 - Chat messages are 16px `body-lg` with a reading width of at most 72ch.
 - Mobile uses the same scale. The OS font-size setting may scale it up but
   never down (minimum `caption` is 12).
+- **Web density.** The web GUI is denser than this scale: `tokens.json`
+  `density.web` (0.85) multiplies type, line heights, spacing, radii and
+  control sizes when `build_tokens.py` writes `tokens.css` and
+  `wash_tokens.js`. Text is rounded to half pixels and never goes below
+  `density.min_text` (11px); touch targets and reading/content widths stay
+  unscaled. Android keeps the design scale. Write CSS against the tokens, never
+  the numbers in these tables.
 
 ---
 
@@ -355,6 +366,13 @@ Signature motions:
   colour is the active mode's pigment.
 - **Press.** Buttons scale to 0.98 and darken one step. Mobile adds light
   haptic feedback on primary and approval actions.
+- **Open and close.** Modals, drawers and the chat page's workspace panel
+  animate both ways: they rise or slide in on `motion-medium` and settle back
+  out on `motion-small`, with `display: none` deferred to the end
+  (`transition-behavior: allow-discrete`). Opening keyframes use fill mode
+  `backwards`, never `both`, so the closing transition starts from the real
+  value. Menus, pickers and disclosures fade up on `motion-small`. Collapsing
+  the sidebar animates its column width.
 
 - **Page transitions.** Navigating between web pages never flashes. Cross-document
   View Transitions cross-fade the pages; the top bar and sidebar hold still, and
@@ -453,8 +471,13 @@ reproducible, themable, and small (about 25 KB WebP).
   navigation** in the sidebar, not icons in the top bar.
 - **Sidebar:** on `surface` with a hairline on the right. It has sections for
   Navigate (Chat, Work, Environments, Trace), Sessions and Threads. It
-  collapses to a 64px icon rail below 1200px and becomes an off-canvas drawer
-  below 840px.
+  becomes an icon rail (`size-rail`) below 1200px, or at any width ≥ 840px when
+  collapsed with the button at its foot (every page; `html[data-sidebar=
+  "collapsed"]`, saved in `mucli-layout` and restored before first paint), and
+  an off-canvas drawer below 840px. The sidebar is a size container: one set of
+  rail rules (`patterns/shell.css`) applies whenever it is rail-width, so every
+  row (nav items, chat sessions, Work and Orchestration sub-navigation, the
+  primary action) becomes the same centred icon button.
 - **Stage:** the right panel for mode panels and tools. It uses one header
   pattern: title, mode-tint wash band, and a close button. Panels are chosen
   from a **segmented list or menu**, not two `<select>`s.

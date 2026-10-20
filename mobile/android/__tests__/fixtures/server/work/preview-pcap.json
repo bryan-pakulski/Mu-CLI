@@ -1,0 +1,49 @@
+{
+  "bytes": 181,
+  "conversations": [
+    {
+      "a": "10.0.0.1:53",
+      "b": "10.0.0.2:53000",
+      "bytes": 71,
+      "packets": 1,
+      "proto": "DNS"
+    },
+    {
+      "a": "10.0.0.2:40000",
+      "b": "10.0.0.3:443",
+      "bytes": 54,
+      "packets": 1,
+      "proto": "TCP"
+    }
+  ],
+  "format": "pcap",
+  "kind": "pcap",
+  "name": "capture.pcap",
+  "packets": [
+    {
+      "dst": "10.0.0.1:53",
+      "info": "query example.com",
+      "length": 71,
+      "no": 1,
+      "proto": "DNS",
+      "src": "10.0.0.2:53000",
+      "time": 0.0
+    },
+    {
+      "dst": "10.0.0.3:443",
+      "info": "40000 \u2192 443 [SYN]",
+      "length": 54,
+      "no": 2,
+      "proto": "TCP",
+      "src": "10.0.0.2:40000",
+      "time": 1.0
+    }
+  ],
+  "path": "artifacts/suite-1/capture.pcap",
+  "protocols": {
+    "DNS": 1,
+    "TCP": 1
+  },
+  "total": 2,
+  "truncated": false
+}

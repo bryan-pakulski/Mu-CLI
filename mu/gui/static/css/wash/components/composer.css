@@ -38,19 +38,16 @@
     align-items: stretch;
     gap: var(--wash-space-1);
     padding: var(--wash-space-3) var(--wash-space-3) var(--wash-space-2);
-    border: 1px solid var(--w-glass-line);
+    border: 1px solid var(--wash-hairline-strong);
     border-radius: var(--wash-radius-lg);
     background: var(--w-glass-fill);
-    box-shadow:
-        inset 0 3px 0 -1px color-mix(in srgb, var(--w-mode-pigment, var(--wash-accent-pigment)) 70%, transparent),
-        var(--w-glass-lift);
+    box-shadow: none;
     transition: box-shadow var(--wash-motion-small) var(--wash-ease-small), border-color var(--wash-motion-small) var(--wash-ease-small);
 }
+/* Flat (Mu revision 2): a hairline, and the mode's accent ink when you type. */
 .w-composer__form:focus-within {
-    border-color: var(--wash-accent-ink);
-    box-shadow:
-        inset 0 3px 0 -1px color-mix(in srgb, var(--w-mode-pigment, var(--wash-accent-pigment)) 70%, transparent),
-        0 0 0 3px var(--wash-accent-wash);
+    border-color: var(--mu-accent-ink, var(--wash-accent-ink));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--mu-accent, var(--wash-accent-pigment)) 18%, transparent);
 }
 .w-composer[data-plan] .w-composer__form {
     outline: 1.5px dashed var(--wash-plan-ink);

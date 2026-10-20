@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { ProviderInfo, providersApi } from '../api/providers';
 import { containersApi, ManagedContainer, ContainerTemplateSummary } from '../api/containers';
 import {
@@ -14,7 +14,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { ContainerBuildProgress, ContainerProgressLog } from './ContainerBuildProgress';
 import { WorkspacePathField } from './WorkspacePathField';
 import { fontSizes, fontWeights, fonts, radii, spacing, touchTarget, tracking, typography } from '../theme/tokens';
-import { ModalFrame, Pressable, Text, Icon, type IconName } from '../ui';
+import { Button, ModalFrame, Pressable, Text, Icon, type IconName, InkDrop, TextField } from '../ui';
 
 export type NewSessionSheetProps = {
   visible: boolean;
@@ -208,7 +208,7 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
           {step === 1 ? <>
             <Text variant="sm" dim style={styles.intro}>Name the session and choose its execution boundary.</Text>
             <FieldLabel label="Session name" />
-            <TextInput value={name} onChangeText={setName} autoCapitalize="none" autoCorrect={false} placeholder="project-research" placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} />
+            <TextField value={name} onChangeText={setName} autoCapitalize="none" autoCorrect={false} placeholder="project-research" style={[styles.input]} />
             {name.trim() && !validName ? <Text variant="xs" style={{ color: colors.danger.ink, marginTop: spacing.sm }}>Use letters, numbers, dots, dashes, or underscores.</Text> : null}
             <View style={styles.typeGrid}>{SESSION_TYPES.map(item => { const selected = item.type === sessionType; return <Pressable key={item.type} onPress={() => setSessionType(item.type)} style={[styles.typeCard, { backgroundColor: selected ? colors.accent.wash : colors.raised, borderColor: selected ? colors.accent.ink : colors.hairline }]}><View style={[styles.typeIcon, { backgroundColor: colors.sunken }]}><Icon name={item.icon} size="md" color={selected ? colors.accent.ink : colors.ink3} /></View><View style={styles.cardCopy}><Text variant="sm" style={styles.typeTitle}>{item.label}</Text><Text variant="xs" dim style={styles.typeDetail}>{item.detail}</Text></View>{selected ? <Icon name="circle-check" size="md" color={colors.accent.ink} /> : null}</Pressable>; })}</View>
           </> : null}
@@ -218,10 +218,10 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
             <FieldLabel label="Provider" />
             <View style={styles.choiceList}>{providers.map(item => <Pressable key={item.name} onPress={() => setProvider(item.name)} style={[styles.choiceRow, { backgroundColor: provider === item.name ? colors.accent.wash : colors.raised, borderColor: provider === item.name ? colors.accent.ink : colors.hairline }]}><Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{item.name}</Text><Text variant="xs" dim>{item.configured ? 'configured' : 'unconfigured'}</Text></Pressable>)}</View>
             {provider === 'ollama' ? <View style={styles.segment}><Segment label="Local" selected={ollamaMode === 'local'} onPress={() => setOllamaMode('local')} /><Segment label="Cloud" selected={ollamaMode === 'cloud'} onPress={() => setOllamaMode('cloud')} /></View> : null}
-            {provider === 'ollama' && ollamaMode === 'cloud' ? <><FieldLabel label="Ollama cloud API key" optional={ollamaKeySet} /><TextInput value={ollamaApiKey} onChangeText={setOllamaApiKey} onBlur={loadModels} secureTextEntry placeholder={ollamaKeySet ? 'Key available · enter to replace' : 'API key'} placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /></> : null}
+            {provider === 'ollama' && ollamaMode === 'cloud' ? <><FieldLabel label="Ollama cloud API key" optional={ollamaKeySet} /><TextField value={ollamaApiKey} onChangeText={setOllamaApiKey} onBlur={loadModels} secureTextEntry placeholder={ollamaKeySet ? 'Key available · enter to replace' : 'API key'} style={[styles.input]} /></> : null}
             <FieldLabel label="Model" />
-            {loadingModels ? <ActivityIndicator color={colors.accent.ink} style={{ marginVertical: spacing.base }} /> : <View style={styles.choiceList}>{models.slice(0, 30).map(item => <Pressable key={item} onPress={() => setModel(item)} style={[styles.choiceRow, { backgroundColor: model === item ? colors.accent.wash : colors.raised, borderColor: model === item ? colors.accent.ink : colors.hairline }]}><Text variant="sm" numberOfLines={1}>{item}</Text>{model === item ? <Icon name="check" size="md" color={colors.accent.ink} /> : null}</Pressable>)}</View>}
-            {!models.length && !loadingModels ? <TextInput value={model} onChangeText={setModel} autoCapitalize="none" autoCorrect={false} placeholder="Enter model name" placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /> : null}
+            {loadingModels ? <View style={{ marginVertical: spacing.base }}><InkDrop /></View> : <View style={styles.choiceList}>{models.slice(0, 30).map(item => <Pressable key={item} onPress={() => setModel(item)} style={[styles.choiceRow, { backgroundColor: model === item ? colors.accent.wash : colors.raised, borderColor: model === item ? colors.accent.ink : colors.hairline }]}><Text variant="sm" numberOfLines={1}>{item}</Text>{model === item ? <Icon name="check" size="md" color={colors.accent.ink} /> : null}</Pressable>)}</View>}
+            {!models.length && !loadingModels ? <TextField value={model} onChangeText={setModel} autoCapitalize="none" autoCorrect={false} placeholder="Enter model name" style={[styles.input]} /> : null}
           </> : null}
 
           {step === 3 ? <>
@@ -231,13 +231,13 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
               <Text variant="sm" dim style={styles.intro}>Create a new environment or attach to one already managed by MuCLI.</Text>
               <View style={styles.segment}><Segment label="Create new" selected={containerSource === 'new'} onPress={() => setContainerSource('new')} /><Segment label="Attach existing" selected={containerSource === 'existing'} onPress={() => setContainerSource('existing')} /></View>
               {containerSource === 'existing' ? <View style={styles.choiceList}>{containers.length ? containers.map(item => <Pressable key={item.name} onPress={() => setExistingContainer(item.name)} style={[styles.choiceRow, { backgroundColor: existingContainer === item.name ? colors.accent.wash : colors.raised, borderColor: existingContainer === item.name ? colors.accent.ink : colors.hairline }]}><View style={styles.cardCopy}><Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{item.name}</Text><Text variant="xs" dim>{item.status} · {item.template_name || 'custom'}</Text></View>{existingContainer === item.name ? <Icon name="circle-check" size="md" color={colors.accent.ink} /> : null}</Pressable>) : <Notice icon="info" text="No managed containers. Create one here or from Container management." />}</View> : <>
-                <FieldLabel label="Container name" /><TextInput value={containerName} onChangeText={setContainerName} autoCapitalize="none" autoCorrect={false} placeholder="mucli-project" placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} />
+                <FieldLabel label="Container name" /><TextField value={containerName} onChangeText={setContainerName} autoCapitalize="none" autoCorrect={false} placeholder="mucli-project" style={[styles.input]} />
                 <FieldLabel label="Base" /><View style={styles.choiceList}><Pressable onPress={() => setTemplateName('')} style={[styles.choiceRow, { backgroundColor: !templateName ? colors.accent.wash : colors.raised, borderColor: !templateName ? colors.accent.ink : colors.hairline }]}><Text variant="sm">Editable Dockerfile</Text>{!templateName ? <Icon name="check" size="md" color={colors.accent.ink} /> : null}</Pressable>{templates.map(item => <Pressable key={item.name} onPress={() => setTemplateName(item.name)} style={[styles.choiceRow, { backgroundColor: templateName === item.name ? colors.accent.wash : colors.raised, borderColor: templateName === item.name ? colors.accent.ink : colors.hairline }]}><Text variant="sm">Template · {item.name}</Text>{templateName === item.name ? <Icon name="check" size="md" color={colors.accent.ink} /> : null}</Pressable>)}</View>
                 {!templateName ? <View style={styles.editorGrid}><EditorCard icon="file-text" title="Worker image template" detail={`${countLines(dockerfile)} lines`} onPress={() => setContainerEditor('dockerfile')} /><EditorCard icon="globe" title="Allowlist and blocklist" detail={`${countLines(egressAllow)} allowed · ${countLines(egressDeny)} blocked`} onPress={() => setContainerEditor('network')} /></View> : null}
                 <FieldLabel label="Folder mounts" optional />
                 {mounts.map((mount, index) => <View key={`${mount.host_path}-${index}`} style={[styles.mountRow, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}><View style={styles.cardCopy}><Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>{mount.container_path}</Text><Text variant="xs" dim numberOfLines={1}>{mount.host_path} · {mount.mode}</Text></View><Pressable accessibilityLabel="Remove mount" onPress={() => setMounts(current => current.filter((_, i) => i !== index))}><Icon name="x" size="md" color={colors.danger.ink} /></Pressable></View>)}
                 <WorkspacePathField value={mountHost} onChangeText={value => { setMountHost(value); const base=value.split('/').filter(Boolean).pop(); if(base)setMountTarget(`/workspace/${base}`); }} placeholder="Browse a host folder" />
-                <TextInput value={mountTarget} onChangeText={setMountTarget} autoCapitalize="none" autoCorrect={false} placeholder="/workspace/project" placeholderTextColor={colors.ink3} style={[styles.input, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline, marginTop: spacing.sm }]} />
+                <TextField value={mountTarget} onChangeText={setMountTarget} autoCapitalize="none" autoCorrect={false} placeholder="/workspace/project" style={[styles.input, { marginTop: spacing.sm }]} />
                 <View style={styles.mountActions}><View style={styles.segmentCompact}><Segment label="RW" selected={mountMode === 'rw'} onPress={() => setMountMode('rw')} compact /><Segment label="RO" selected={mountMode === 'ro'} onPress={() => setMountMode('ro')} compact /></View><Pressable onPress={addMount} disabled={!mountHost.trim() || !mountTarget.trim()} style={[styles.addMount, { backgroundColor: mountHost.trim() && mountTarget.trim() ? colors.accent.wash : colors.sunken }]}><Icon name="plus" size="md" color={mountHost.trim() && mountTarget.trim() ? colors.accent.ink : colors.ink3} /><Text variant="xs" style={{ color: mountHost.trim() && mountTarget.trim() ? colors.accent.ink : colors.ink3, fontWeight: fontWeights.semibold }}>Add folder</Text></Pressable></View>
                 <ContainerHardwareSection capabilities={hardware} gpuRequest={gpuRequest} onGpuRequestChange={setGpuRequest} devices={devices} onDevicesChange={setDevices} />
               </>}
@@ -258,7 +258,7 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
               />
             ) : creating ? (
               <View style={[styles.progressBox, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-                <ActivityIndicator color={colors.accent.ink} />
+                <InkDrop />
                 <View style={styles.cardCopy}>
                   <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>Preparing session</Text>
                   <Text variant="xs" dim>{progress}</Text>
@@ -270,15 +270,16 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
         </ScrollView>
 
         <View style={[styles.footer, { paddingBottom: spacing.base, borderTopColor: colors.hairline, backgroundColor: colors.canvas }]}>
-          {step > 1 ? <Pressable onPress={() => setStep(current => current - 1)} disabled={creating} style={styles.backButton}><Text variant="sm">Back</Text></Pressable> : <View />}
-          <Pressable onPress={() => step < 4 ? canContinue && setStep(current => current + 1) : create()} disabled={!canContinue || creating} style={[styles.primaryButton, { backgroundColor: canContinue && !creating ? colors.accent.ink : colors.sunken }]}>{creating ? <ActivityIndicator color={colors.onInk} /> : <Text style={{ color: canContinue ? colors.onInk : colors.ink3, fontWeight: fontWeights.semibold }}>{step < 4 ? 'Continue' : 'Create and load'}</Text>}</Pressable>
+          {step > 1 ? <Button variant="ghost" label="Back" onPress={() => setStep(current => current - 1)} disabled={creating} /> : <View />}
+          <Button variant="primary" label={step < 4 ? 'Continue' : 'Create and load'} loading={creating} disabled={!canContinue || creating}
+            onPress={() => (step < 4 ? canContinue && setStep(current => current + 1) : create())} />
         </View>
       </KeyboardAvoidingView>
 
       <ModalFrame statusBarTranslucent={false} transparent={false} visible={containerEditor !== null} animationType="slide" onRequestClose={() => setContainerEditor(null)}>
         <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={[styles.header, { paddingTop: spacing.base, borderBottomColor: colors.hairline }]}><View style={styles.headerCopy}><Text style={[styles.title, { color: colors.ink }]}>{containerEditor === 'dockerfile' ? 'Worker image template' : 'Network policy'}</Text><Text variant="xs" dim>{containerEditor === 'dockerfile' ? 'Edit the worker image.' : 'Blocklist entries override the allowlist.'}</Text></View><Pressable accessibilityLabel="Close editor" onPress={() => setContainerEditor(null)} style={[styles.iconButton, { backgroundColor: colors.sunken }]}><Icon name="x" size="md" color={colors.ink} /></Pressable></View>
-          {containerEditor === 'dockerfile' ? <TextInput value={dockerfile} onChangeText={setDockerfile} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} spellCheck={false} style={[styles.fullEditor, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /> : <ScrollView contentContainerStyle={styles.content}><FieldLabel label="Allowlist" /><TextInput value={egressAllow} onChangeText={setEgressAllow} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /><FieldLabel label="Blocklist" optional /><TextInput value={egressDeny} onChangeText={setEgressDeny} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor, { color: colors.ink, backgroundColor: colors.canvas, borderColor: colors.hairline }]} /></ScrollView>}
+          {containerEditor === 'dockerfile' ? <TextField value={dockerfile} onChangeText={setDockerfile} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} spellCheck={false} style={[styles.fullEditor]} /> : <ScrollView contentContainerStyle={styles.content}><FieldLabel label="Allowlist" /><TextField value={egressAllow} onChangeText={setEgressAllow} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor]} /><FieldLabel label="Blocklist" optional /><TextField value={egressDeny} onChangeText={setEgressDeny} multiline textAlignVertical="top" autoCapitalize="none" autoCorrect={false} style={[styles.policyEditor]} /></ScrollView>}
         </KeyboardAvoidingView>
       </ModalFrame>
     </ModalFrame>

@@ -1,4 +1,5 @@
 import { useConnectionStore } from '../store/connection';
+import { authHeaders, isPairingRequired } from './auth';
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 12_000;
 
@@ -65,7 +66,7 @@ async function request<T>(
     }
   }
 
-  const headers: Record<string, string> = { ...(opts?.headers || {}) };
+  const headers: Record<string, string> = { ...authHeaders(base), ...(opts?.headers || {}) };
   let bodyStr: string | undefined;
   if (opts?.body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -119,6 +120,8 @@ async function request<T>(
       } catch {
         // Body unreadable (stream consumed or aborted) — status-only error.
       }
+      // A 401 "pair this device first": the phone isn't (or no longer is) paired.
+      if (isPairingRequired(response.status, errorBody)) useConnectionStore.getState().setPairingRequired(true);
       throw new ApiError(response.status, errorMsg, errorBody);
     }
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from .artifacts import artifacts_for, backfill
+from .artifacts import artifacts_for
 from .plan_doc import CheckSpec, Criterion, PlanDoc, PlanStore, PlanValidationError, diff_versions
 
 
@@ -27,10 +27,7 @@ def _allowed(job: Any) -> frozenset:
 
 
 def plan_store(job: Any) -> PlanStore:
-    art = artifacts_for(job)
-    if not art.exists() or not PlanStore(art).versions():
-        backfill(job)
-    return PlanStore(art)
+    return PlanStore(artifacts_for(job).ensure())
 
 
 def record_planner_plan(job: Any, plan: Dict[str, Any]) -> Optional[PlanDoc]:

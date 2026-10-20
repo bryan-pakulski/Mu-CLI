@@ -84,7 +84,7 @@
                 <span class="w-banner__glyph" aria-hidden="true">✗</span>
                 <div class="w-banner__msg">
                     <strong>Missing anchors</strong>
-                    <template x-for="anchor in $store.systemPrompts.validation" :key="anchor">
+                    <template x-for="(anchor, ai) in $store.systemPrompts.validation" :key="ai">
                         <div class="prompt-validation-anchor mono" x-text="anchor"></div>
                     </template>
                 </div>

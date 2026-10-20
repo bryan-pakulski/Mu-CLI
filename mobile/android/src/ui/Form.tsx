@@ -8,7 +8,7 @@ import { StyleSheet, Switch as RNSwitch, TextInput, View, type StyleProp, type T
 import { useTheme } from '../theme/ThemeContext';
 import { controlSize, fonts, radii, spacing, touchTarget, typeStyle, withStaticWeight } from '../theme/tokens';
 import { Pressable } from './Pressable';
-import { Text } from './Text';
+import { Text, scaleText } from './Text';
 import { Icon } from './Icon';
 import { Sheet } from './Sheet';
 import { useGlass } from './Glass';
@@ -33,7 +33,7 @@ export function Field({ label, hint, error, optional, children, testID }: { labe
 export type TextFieldProps = TextInputProps & { mono?: boolean; invalid?: boolean };
 
 export function TextField({ style, multiline, mono, invalid, ...rest }: TextFieldProps) {
-  const { colors } = useTheme();
+  const { colors, textScale } = useTheme();
   const glass = useGlass();
   const [focused, setFocused] = useState(false);
   return (
@@ -45,7 +45,7 @@ export function TextField({ style, multiline, mono, invalid, ...rest }: TextFiel
       onFocus={e => { setFocused(true); rest.onFocus?.(e); }}
       onBlur={e => { setFocused(false); rest.onBlur?.(e); }}
       style={withStaticWeight(StyleSheet.flatten([
-        typeStyle(mono ? 'mono' : 'body'),
+        scaleText(typeStyle(mono ? 'mono' : 'body'), textScale),
         {
           minHeight: touchTarget,
           borderRadius: radii.sm,

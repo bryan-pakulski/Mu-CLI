@@ -1,40 +1,31 @@
-import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, TextInput, Alert, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+// System prompts (web system_prompts_panel.html): every prompt with its size and source; edit an
+// override in a full-screen sheet, or reset it to the default after confirming.
+
+import React, { useCallback, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { useTheme } from '../theme/ThemeContext';
-import { systemPromptsApi, SystemPromptInfo } from '../api/systemPrompts';
-import { elevation, spacing, fontWeights, fonts, radii } from '../theme/tokens';
-import { Button, Card, Chip, EmptyState, ErrorState, ModalFrame, Pressable, Skeleton, Text } from '../ui';
+import { systemPromptsApi, type SystemPromptInfo } from '../api/systemPrompts';
+import { PanelPage, PanelSection } from '../components/chat/PanelPage';
+import { spacing } from '../theme/tokens';
+import { Button, Chip, Row, Sheet, TextField, useServerActions, useToast } from '../ui';
 
 export function SystemPromptsScreen() {
-  const { colors, isDark } = useTheme();
+  const toast = useToast();
+  const actions = useServerActions();
   const [prompts, setPrompts] = useState<SystemPromptInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [editing, setEditing] = useState<{ name: string; text: string; version: number | null } | null>(null);
   const [editText, setEditText] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    try {
-      setError(null);
-      const res = await systemPromptsApi.list();
-      setPrompts(res.items);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    try { setError(null); setPrompts((await systemPromptsApi.list()).items); }
+    catch (e) { setError(String(e)); }
+    finally { setLoading(false); setRefreshing(false); }
   }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      setLoading(true);
-      load();
-    }, [load]),
-  );
+  useFocusEffect(useCallback(() => { setLoading(true); void load(); }, [load]));
 
   const openEdit = async (name: string) => {
     try {
@@ -42,104 +33,65 @@ export function SystemPromptsScreen() {
       setEditing({ name, text: detail.text, version: detail.version });
       setEditText(detail.text);
     } catch (e) {
-      Alert.alert('Failed to load', String(e));
+      toast(`Couldn't load ${name}: ${String(e)}`, 'danger');
     }
   };
 
   const saveEdit = async () => {
     if (!editing) return;
+    setSaving(true);
     try {
       await systemPromptsApi.put(editing.name, editText, editing.version || undefined);
       setEditing(null);
-      load();
+      toast(`Saved ${editing.name}`, 'ok');
+      void load();
     } catch (e) {
-      Alert.alert('Save failed', String(e));
+      toast(`Couldn't save: ${String(e)}`, 'danger');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const resetPrompt = (name: string) => {
-    Alert.alert('Reset prompt?', `Reset "${name}" to default? This removes your override.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Reset', style: 'destructive', onPress: async () => {
-        await systemPromptsApi.reset(name);
-        load();
-      }},
-    ]);
+  const resetPrompt = async (name: string) => {
+    if (!(await actions.ask({ id: 'reset', label: 'Reset', danger: true, confirm: `Reset "${name}" to default? This removes your override.` }))) return;
+    await systemPromptsApi.reset(name);
+    void load();
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <View style={{ padding: spacing.base }}>
-          {[1, 2, 3, 4].map(i => <Skeleton key={i} height={60} style={{ marginBottom: spacing.sm }} />)}
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <ErrorState message={error} onRetry={load} />
-      </SafeAreaView>
-    );
-  }
-
-  if (prompts.length === 0) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <EmptyState title="No system prompts" message="No system prompts configured" />
-      </SafeAreaView>
-    );
-  }
-
+  const overrides = prompts.filter(p => p.has_override).length;
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-      <FlatList
-        data={prompts}
-        keyExtractor={item => item.name}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
-        contentContainerStyle={{ padding: spacing.base }}
-        renderItem={({ item }) => (
-          <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <View style={{ flex: 1 }}>
-                <Text variant="base" style={{ fontWeight: fontWeights.medium }}>{item.name}</Text>
-                <Text variant="xs" style={{ color: colors.ink3, marginTop: 2, fontVariant: ['tabular-nums'] }}>
-                  {item.chars} chars · {item.source}
-                </Text>
+    <PanelPage testID="system-prompts-screen" title="System prompts"
+      state={[{ text: `${prompts.length} prompts` }, overrides ? { text: `${overrides} overridden`, tone: 'attention' } : null]}
+      loading={loading} error={error} onRetry={() => void load()}
+      empty={!loading && !error && !prompts.length ? { title: 'No system prompts', message: 'No system prompts configured.' } : null}
+      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }}
+      overlay={actions.element}>
+      <PanelSection title="Prompts" count={prompts.length}>
+        {prompts.map(item => (
+          <Row key={item.name} testID={`prompt-${item.name}`} title={item.name} sub={`${item.chars} chars · ${item.source}`}
+            onPress={() => void openEdit(item.name)}
+            actions={(
+              <View style={styles.actions}>
+                {item.has_override ? <Chip variant="meta" label="Override" /> : null}
+                <Button label="Edit" variant="secondary" onPress={() => void openEdit(item.name)} />
+                {item.has_override ? <Button label="Reset" variant="ghost" onPress={() => void resetPrompt(item.name)} testID={`prompt-${item.name}-reset`} /> : null}
               </View>
-              {item.has_override && <Chip label="Override" tone="accent" />}
-            </View>
-            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
-              <Button title="Edit" onPress={() => openEdit(item.name)} />
-              {item.has_override && <Button title="Reset" variant="ghost" onPress={() => resetPrompt(item.name)} />}
-            </View>
-          </Card>
-        )}
-      />
-      <ModalFrame statusBarTranslucent={false} visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
-        <View style={{ flex: 1, backgroundColor: colors.scrim, justifyContent: 'center' }}>
-          <View style={[elevation(2, colors, isDark), { margin: spacing.base, borderRadius: radii.lg, padding: spacing.base, maxHeight: '85%' }]}>
-            <Text variant="lg" style={{ marginBottom: spacing.sm }}>{editing?.name}</Text>
-            <ScrollView style={{ maxHeight: 400 }}>
-              <TextInput
-                value={editText}
-                onChangeText={setEditText}
-                placeholder="Prompt text…"
-                placeholderTextColor={colors.ink3}
-                multiline
-                textAlignVertical="top"
-                style={{ color: colors.ink, borderWidth: 1, borderColor: colors.hairline, borderRadius: radii.sm, padding: spacing.md, minHeight: 200, fontFamily: fonts.mono }}
-              />
-            </ScrollView>
-            <View style={{ flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end', marginTop: spacing.sm }}>
-              <Button title="Cancel" variant="ghost" onPress={() => setEditing(null)} />
-              <Button title="Save" onPress={saveEdit} disabled={!editText.trim()} />
-            </View>
-          </View>
-        </View>
-      </ModalFrame>
-    </SafeAreaView>
+            )} />
+        ))}
+      </PanelSection>
+      <Sheet visible={!!editing} onClose={() => setEditing(null)} title={editing?.name} full testID="prompt-editor"
+        footer={<>
+          <Button label="Cancel" variant="secondary" onPress={() => setEditing(null)} />
+          <Button label={saving ? 'Saving…' : 'Save'} variant="primary" onPress={() => void saveEdit()} disabled={!editText.trim() || saving} loading={saving} testID="prompt-save" />
+        </>}>
+        <TextField value={editText} onChangeText={setEditText} placeholder="Prompt text…" multiline textAlignVertical="top" mono
+          style={styles.editor} accessibilityLabel={`${editing?.name || ''} prompt text`} testID="prompt-text" />
+      </Sheet>
+    </PanelPage>
   );
 }
+
+const styles = StyleSheet.create({
+  actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  editor: { minHeight: 320 },
+});

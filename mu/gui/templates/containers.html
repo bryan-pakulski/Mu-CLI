@@ -6,58 +6,58 @@
 {% endblock %}
 {% block ambient %}meadow{% endblock %}
 {% block body_class %}containers-body{% endblock %}
-{% block crumbs %}<li class="w-breadcrumb__item"><span aria-current="page">Environments</span></li>{% endblock %}
-{% block topbar_chips %}
-        <li><span class="w-chip" data-tone="neutral" id="container-count-chip" title="Managed environments"><span class="w-chip__glyph" aria-hidden="true" data-chip-glyph>○</span> <span data-chip-text>0 environments</span></span></li>
-        <li class="w-optional"><span class="w-chip" data-variant="meta" id="template-count-chip" title="Templates"><span data-chip-text>0 templates</span></span></li>
+{#- Environments (Mu §10.4, §11b): the bar names the page once and carries the
+    state sentence (#environment-state, written by containers.js: "2 running ·
+    1 template", zeros left out) and the one primary action. The page is a
+    list | main | aside workspace (below). Modals are the create / edit,
+    editor, progress, template, terminal (narrow screens) and confirm flows. -#}
+{% block page_title %}Environments{% endblock %}
+{% block state_attrs %} id="environment-state" aria-live="polite"{% endblock %}
+{% block page_actions %}
+    {{ w.btn("Refresh environments", variant="icon", icon="refresh-cw", attrs={"id": "refresh-containers"}) }}
+    <button type="button" class="w-btn" data-variant="primary" id="create-environment-button" title="New environment (n)">{{ w.icon("plus", size="sm") }}<span>New environment</span></button>
 {% endblock %}
 {% block content %}
-<div class="containers-shell w-env" id="container-manager">
-    {#- Meadow hero band (G§6.1): art dissolves into the canvas above the page. -#}
-    <header class="w-hero w-env-hero" data-art="env">
-        <span class="w-eyebrow" data-tone="ok"><i class="w-eyebrow__swatch"></i>Environments</span>
-        <h1 class="w-hero__title">Container environments</h1>
-        <p class="w-hero__lede">Isolated workspaces for MuCLI. Watch live resource use, attach sessions, open a terminal, and save a configured environment as a reusable template.</p>
-        <div class="w-env-hero__actions">
-            <button type="button" class="w-btn" data-variant="primary" data-size="lg" id="create-environment-button" title="Create environment">{{ w.icon("plus") }}<span>New environment</span></button>
+<div class="containers-shell w-env w-leafbody" id="container-manager">
+  {#- Mu revision 2: a workspace. LIST = environments then templates (compact rows,
+      a live CPU meter); MAIN = the chosen environment itself (live charts over a
+      rolling sample buffer, processes, and the terminal inline); ASIDE = sessions,
+      actions, configuration and Details. A template: MAIN = its details and the
+      "Used for jobs" editor; ASIDE = source and usage. ?open=<name> /
+      ?open=template:<name> (and the job page's #template-<name>) select on load;
+      the first environment is selected on arrival. Below 1200 the aside opens on
+      demand; below 840 one pane at a time (list ↔ main). -#}
+  <div class="w-panes w-env-panes" id="env-panes" data-layout="list-main-aside">
+    <section class="w-pane w-env-listpane" data-pane="list" aria-labelledby="environments-title">
+        <span class="w-pane-resize" data-pane-resize aria-hidden="true"></span>
+        <header class="w-pane__head"><h2 class="w-pane__title" id="environments-title">Environments</h2></header>
+        <p id="container-list-empty" class="w-group__empty w-env-empty" hidden>None yet.</p>
+        <ul id="container-list" class="w-rows w-env-list" aria-label="Environments"></ul>
+        <h2 class="w-pane__title w-env-listpane__sub" id="templates-title">Templates</h2>
+        <p id="template-empty" class="w-group__empty w-env-empty">No templates yet. Open an environment's ⋯ menu and choose Create template to save its image for reuse.</p>
+        <ul id="template-list" class="w-rows w-env-list w-env-list--templates" aria-label="Templates"></ul>
+    </section>
+    <section class="w-pane w-env-main" data-pane="main" id="env-main" aria-label="Selected environment">
+        <div id="container-empty" class="w-env-empty">
+            {{ w.empty_state("No environments yet", body="Create one from a Dockerfile or a template, then attach sessions when you need them.", icon="box", tone="ok", action="New environment", attrs={"data-empty-create": true}) }}
         </div>
-    </header>
-
-    <div class="w-page w-env-page">
-        <section class="w-section" aria-labelledby="environments-title">
-            <div class="w-env-section-head">
-                <div>
-                    <h2 class="w-env-section-title" id="environments-title">Environments</h2>
-                    <p class="w-env-section-lede">Available on their own until you attach a session</p>
-                </div>
-                {{ w.btn("Refresh environments", variant="icon", icon="refresh-cw", attrs={"id": "refresh-containers"}) }}
-            </div>
-            <div id="container-empty" class="w-env-empty">
-                {{ w.empty_state("No environments yet", body="Create one from a Dockerfile or a template, then attach sessions when you need it.", icon="box", tone="ok", action="New environment", attrs={"data-empty-create": true}) }}
-            </div>
-            <div id="container-list" class="w-card-grid w-env-grid"></div>
+        <div id="env-main-body" class="w-env-main__body" hidden></div>
+        {#- The terminal lives in the main pane on wide screens: openShell() moves the
+            shell body here from #shell-modal (and back for narrow screens). -#}
+        <section class="w-env-terminal-host" id="env-terminal-host" aria-labelledby="env-terminal-title" hidden>
+            <header class="w-env-section-head"><h3 class="w-env-section-title" id="env-terminal-title">Terminal</h3>
+                <span class="w-env-terminal-hint">Tab completes · ↑/↓ history</span>
+                <button type="button" class="w-textbtn" data-tone="quiet" id="env-terminal-close">Disconnect</button></header>
         </section>
-
-        <section class="w-section" aria-labelledby="templates-title">
-            <div class="w-env-section-head">
-                <div>
-                    <h2 class="w-env-section-title" id="templates-title">Templates</h2>
-                    <p class="w-env-section-lede">Reusable snapshots for new environments</p>
-                </div>
-            </div>
-            <div id="template-empty" class="w-env-empty">
-                {{ w.empty_state("No templates yet", body="Open an environment's menu and choose Create template to save its image for reuse.", icon="layers", tone="plan", size="sm") }}
-            </div>
-            <div id="template-list" class="w-card-grid w-env-grid w-env-grid--templates"></div>
-        </section>
-    </div>
+    </section>
+    <aside class="w-pane w-env-aside" data-pane="aside" id="env-aside" aria-label="Environment details"></aside>
+  </div>
 
     {#- Create / edit environment: a stepped modal (G§9.17, §9.13). -#}
     <div class="w-modal manager-modal" id="create-modal" hidden>
         <section class="w-modal__dialog w-env-create" data-size="md" role="dialog" aria-modal="true" aria-labelledby="environment-modal-title">
             <header class="w-modal__head">
                 <div class="w-env-modal-heading">
-                    <span class="w-eyebrow" data-tone="ok" id="environment-kicker"><i class="w-eyebrow__swatch"></i>New environment</span>
                     <h2 class="w-modal__title" id="environment-modal-title">Create environment</h2>
                     <p class="w-env-modal-lede" id="environment-modal-description">Build a standalone environment and attach sessions when you need it.</p>
                 </div>
@@ -104,8 +104,7 @@
                     </section>
                     <section class="w-env-group manager-hardware" aria-labelledby="hardware-title">
                         <div class="w-env-group__head">
-                            <div><h3 class="w-env-group__title" id="hardware-title">Hardware</h3><p class="w-field__hint" id="hardware-summary">No GPU or host devices attached.</p></div>
-                            {{ w.icon("cpu") }}
+                            <div><h3 class="w-env-group__title" id="hardware-title">Hardware</h3><p class="w-field__hint" id="hardware-summary">No GPU</p></div>
                         </div>
                         <div class="w-env-two">
                             <div class="w-field">
@@ -134,7 +133,7 @@
                     <legend class="w-visually-hidden">Network and review</legend>
                     <button type="button" id="edit-network" class="w-env-expand">
                         {{ w.icon("network") }}
-                        <span class="w-env-expand__text"><strong>Network policy</strong><small id="network-summary">Default allowlist · empty blocklist</small></span>
+                        <span class="w-env-expand__text"><strong>Network policy</strong><small id="network-summary">Default allowlist</small></span>
                         <span class="w-env-expand__go">Edit<span aria-hidden="true"> ›</span></span>
                     </button>
                     <dl class="w-env-review" id="environment-review" aria-label="Summary"></dl>

@@ -106,3 +106,12 @@
         mix-blend-mode: normal;
     }
 }
+
+/* Alternative palettes (html[data-palette]) are flat: the spot is a soft disc in the
+ * tone's wash instead of the watercolour bitmap. */
+[data-palette] .w-empty__art::before {
+    inset: 6px 14px;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, var(--w-tone-wash, var(--wash-accent-wash)) 0%, var(--w-tone-wash, var(--wash-accent-wash)) 60%, transparent 100%);
+    mix-blend-mode: normal;
+}

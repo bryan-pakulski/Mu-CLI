@@ -1,6 +1,9 @@
+// Feature plans (web feature_panel.html): preview, load and inspect every feature plan without
+// changing the active one — the list, the plan's overview and actions, phases and tasks with
+// their exit criteria, execution, reviews, diff proposals and the event history.
+
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   featureApi,
@@ -13,10 +16,10 @@ import {
   FeatureSummary,
   FeatureTask,
 } from '../api/feature';
-import { useTheme } from '../theme/ThemeContext';
-import { ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
-import { spacing, fontWeights, fonts, radii, tracking, touchTarget, typography } from '../theme/tokens';
-import { Card, EmptyState, ErrorState, Pressable, Skeleton, Text, Icon, type IconName } from '../ui';
+import { ModeWorkspaceIntro, useModeWorkspaceView, workspaceState, workspaceTabs } from '../components';
+import { Fact, PanelPage, PanelSection } from '../components/chat/PanelPage';
+import { spacing } from '../theme/tokens';
+import { Banner, Button, Chip, EmptyState, InkDrop, Pre, Row, Rows, Text, useServerActions, type ServerAction } from '../ui';
 
 type FeatureFilter = 'features' | 'completed' | 'archived' | 'all';
 
@@ -28,7 +31,6 @@ const FILTERS: Array<{ key: FeatureFilter; label: string }> = [
 ];
 
 export function FeatureExplorerScreen() {
-  const { colors } = useTheme();
   const [state, setState] = useState<FeatureState | null>(null);
   const [workspace, setWorkspace] = useState<FeatureState['workspace'] | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<FeatureSummary | null>(null);
@@ -44,6 +46,7 @@ export function FeatureExplorerScreen() {
   const selectedIdRef = useRef<string | null>(null);
   const requestEpochRef = useRef(0);
   const workspaceView = useModeWorkspaceView(workspace);
+  const actions = useServerActions();
 
   const previewFeature = useCallback(async (featureId: string, quiet = false) => {
     const requestId = ++requestEpochRef.current;
@@ -150,26 +153,20 @@ export function FeatureExplorerScreen() {
   const selectedItem = state?.features.find(item => item.feature_id === selectedId) || null;
 
   const runAction = async (action: () => Promise<unknown>, confirmation?: { title: string; message: string }) => {
-    const execute = async () => {
-      try {
-        setPreviewLoading(true);
-        await action();
-        await load(true);
-      } catch (cause) {
-        Alert.alert('Feature action failed', String(cause));
-      } finally {
-        setPreviewLoading(false);
-      }
-    };
-
-    if (!confirmation) {
-      await execute();
-      return;
+    if (confirmation) {
+      const confirm: ServerAction = { id: 'confirm', label: confirmation.title.replace(/\?$/, ''), confirm: confirmation.message };
+      if (!(await actions.ask(confirm))) return;
     }
-    Alert.alert(confirmation.title, confirmation.message, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Continue', onPress: execute },
-    ]);
+    try {
+      setPreviewLoading(true);
+      setError(null);
+      await action();
+      await load(true);
+    } catch (cause) {
+      setError(`Feature action failed: ${String(cause)}`);
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const toggleSet = (
@@ -184,194 +181,122 @@ export function FeatureExplorerScreen() {
     });
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
-        <View style={styles.loadingWrap}>
-          <Skeleton height={52} style={styles.loadingBlock} />
-          <Skeleton height={112} style={styles.loadingBlock} />
-          <Skeleton height={220} />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error && !state) {
-    return (
-      <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
-        <ErrorState message={error} onRetry={() => load(false)} />
-      </SafeAreaView>
-    );
-  }
-
+  const features = state?.features || [];
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: 'transparent' }]}>
-      <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {workspace ? <ModeWorkspaceHeader workspace={workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} /> : null}
-        <View style={styles.pageHeader}>
-          <View style={styles.pageHeaderCopy}>
-            <Text variant="xl" style={styles.pageTitle}>Features</Text>
-            <Text variant="sm" dim>Preview, load, and inspect every feature plan without changing the active feature.</Text>
-          </View>
-          {previewLoading ? <ActivityIndicator color={colors.accent.ink} /> : null}
-        </View>
+    <PanelPage testID="feature-screen" title={workspace?.title || 'Feature plans'}
+      state={[...workspaceState(workspace), previewLoading ? { text: 'loading…', tone: 'quiet' } : null]}
+      tabs={workspaceTabs(workspace)} tab={workspaceView.selectedView} onTab={workspaceView.selectView}
+      right={previewLoading ? <InkDrop /> : undefined}
+      loading={loading} error={error && !state ? error : null} onRetry={() => void load(false)}
+      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(true); }}
+      overlay={actions.element}>
+      {workspace ? <ModeWorkspaceIntro workspace={workspace} /> : null}
+      {error && state ? <Banner tone="danger" title="Something went wrong" testID="feature-error">{error}</Banner> : null}
 
-        {workspaceView.shows('overview') ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          {FILTERS.map(item => {
-            const active = filter === item.key;
-            const count = countForFilter(state?.features || [], item.key);
-            return (
-              <Pressable
-                key={item.key}
-                onPress={() => setFilter(item.key)}
-                hitSlop={{ top: spacing.xs, bottom: spacing.xs }}
-                style={[
-                  styles.filterChip,
-                  { backgroundColor: active ? colors.accent.wash : colors.surface, borderWidth: 1, borderColor: active ? colors.accent.ink : colors.hairline },
-                ]}
-              >
-                <Text variant="xs" style={{ color: active ? colors.accent.ink : colors.ink2, fontWeight: active ? fontWeights.semibold : fontWeights.regular, fontVariant: ['tabular-nums'] }}>
-                  {item.label} · {count}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView> : null}
-
-        {workspaceView.shows('overview') && ((state?.features.length || 0) === 0 ? (
-          <EmptyState title="No feature plans" message="Feature plans created in this session will appear here." />
-        ) : visibleFeatures.length === 0 ? (
-          <Card style={styles.emptyFilterCard}>
-            <Text variant="sm" dim>No feature plans in this category.</Text>
-          </Card>
-        ) : (
-          <View style={styles.featureList}>
-            {visibleFeatures.map(item => (
-              <FeatureListRow
-                key={item.feature_id}
-                item={item}
-                selected={selectedId === item.feature_id}
-                onPress={() => previewFeature(item.feature_id)}
-              />
+      {workspaceView.shows('overview') ? (
+        <PanelSection title="Features" count={features.length}>
+          <Text variant="caption" tone="ink3">Preview, load and inspect every feature plan without changing the active feature.</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
+            {FILTERS.map(item => (
+              <Chip key={item.key} variant="filter" selected={filter === item.key} onPress={() => setFilter(item.key)}
+                label={`${item.label} · ${countForFilter(features, item.key)}`} testID={`feature-filter-${item.key}`} />
             ))}
-          </View>
-        ))}
-
-        {error ? (
-          <View style={[styles.errorBox, { backgroundColor: colors.danger.wash }]}>
-            <Text variant="sm" importantForAccessibility="no" style={{ color: colors.danger.ink }}>✗</Text>
-            <Text variant="xs" style={{ color: colors.danger.ink, flex: 1 }}>{error}</Text>
-          </View>
-        ) : null}
-
-        {selectedPlan ? (
-          <View style={styles.detailSection}>
-            {workspaceView.shows('overview') ? <FeatureOverview
-              plan={selectedPlan}
-              item={selectedItem}
-              onApprove={() => runAction(() => featureApi.approve(selectedPlan.feature_id))}
-              onLoad={() => runAction(() => featureApi.load(selectedPlan.feature_id))}
-              onUnload={() => runAction(
-                () => featureApi.unload(selectedPlan.feature_id),
-                { title: 'Unload feature?', message: 'The feature remains saved and can be loaded again later.' },
-              )}
-              onArchive={() => runAction(
-                () => featureApi.archive(selectedPlan.feature_id),
-                { title: 'Archive feature?', message: 'Archived features remain available for preview and can be restored.' },
-              )}
-              onUnarchive={() => runAction(() => featureApi.unarchive(selectedPlan.feature_id))}
-            /> : null}
-
-            {workspaceView.shows('board', 'verification') ? <>
-            <SectionHeader title={workspaceView.selectedView === 'verification' ? 'Acceptance criteria' : 'Progress'} detail={`${selectedPlan.task_count || 0} tasks across ${selectedPlan.phase_columns?.length || 0} phases`} />
-            {(selectedPlan.phase_columns || []).length === 0 ? (
-              <Card><Text variant="sm" dim>No phases or tasks recorded.</Text></Card>
-            ) : (
-              (selectedPlan.phase_columns || []).map(phase => (
-                <PhaseDetail
-                  key={`${selectedPlan.feature_id}:${phase.id}`}
-                  phase={phase}
-                  activeFeature={Boolean(selectedItem?.is_active)}
-                  expanded={expandedPhases.has(String(phase.id))}
-                  expandedTasks={expandedTasks}
-                  onToggle={() => toggleSet(setExpandedPhases, String(phase.id))}
-                  onToggleTask={taskId => toggleSet(setExpandedTasks, `${phase.id}:${taskId}`)}
-                  onAdvance={taskId => runAction(() => featureApi.transitionTask(taskId, 'completed'))}
-                />
-              ))
-            )}
-
-            <ExecutionSection execution={selectedPlan.execution || {}} nextPhase={selectedPlan.next_phase} nextTask={selectedPlan.next_task} />
-            </> : null}
-
-            {workspaceView.shows('reviews') ? <>
-            <SectionHeader title="Reviews" detail={`${selectedPlan.review_count || selectedPlan.review_records?.length || 0} review records`} />
-            <ReviewSection
-              records={selectedPlan.review_records || []}
-              expanded={expandedRecords}
-              onToggle={id => toggleSet(setExpandedRecords, `review:${id}`)}
-            />
-
-            <SectionHeader title="Diff proposals" detail={`${selectedPlan.diff_proposal_count || selectedPlan.diff_proposals?.length || 0} proposals`} />
-            <DiffSection
-              proposals={selectedPlan.diff_proposals || []}
-              expanded={expandedRecords}
-              onToggle={id => toggleSet(setExpandedRecords, `diff:${id}`)}
-            />
-
-            <SectionHeader title="Event history" detail={`${selectedPlan.event_count || selectedPlan.event_log?.length || 0} events`} />
-            <EventSection
-              events={selectedPlan.event_log || []}
-              expanded={expandedRecords}
-              onToggle={id => toggleSet(setExpandedRecords, `event:${id}`)}
-            />
-            </> : null}
-          </View>
-        ) : null}
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
-function FeatureListRow({ item, selected, onPress }: { item: FeatureListItem; selected: boolean; onPress: () => void }) {
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      activeOpacity={0.72}
-      style={[
-        styles.featureRow,
-        { backgroundColor: selected ? colors.accent.wash : 'transparent' },
-      ]}
-    >
-      <View style={[styles.featureStatusDot, { backgroundColor: statusColor(item.status, item.archived, colors) }]} />
-      <View style={styles.featureCopy}>
-        <Text variant="sm" style={styles.featureName} numberOfLines={1}>{item.feature_name}</Text>
-        <Text variant="xs" dim>{item.archived ? 'Archived' : formatStatus(item.status)}</Text>
-      </View>
-      {item.is_active ? (
-        <View style={[styles.activeBadge, { backgroundColor: colors.accent.wash }]}>
-          <Text variant="xs" style={{ color: colors.accent.ink, fontWeight: fontWeights.medium }}>Loaded</Text>
-        </View>
+          </ScrollView>
+          {features.length === 0 ? (
+            <EmptyState title="No feature plans" message="Feature plans created in this session will appear here." />
+          ) : (
+            <Rows empty="No feature plans in this category.">
+              {visibleFeatures.map(item => (
+                <Row key={item.feature_id} testID={`feature-${item.feature_id}`} status={featureSign(item.status, item.archived)} title={item.feature_name}
+                  sub={item.archived ? 'Archived' : formatStatus(item.status)} selected={selectedId === item.feature_id}
+                  actions={item.is_active ? <Chip variant="meta" label="Loaded" /> : undefined}
+                  onPress={() => void previewFeature(item.feature_id)} />
+              ))}
+            </Rows>
+          )}
+        </PanelSection>
       ) : null}
-      <Icon name="chevron-right" size="md" color={colors.ink3} />
-    </Pressable>
+
+      {selectedPlan ? (
+        <>
+          {workspaceView.shows('overview') ? (
+            <FeatureOverview plan={selectedPlan} item={selectedItem}
+              onApprove={() => void runAction(() => featureApi.approve(selectedPlan.feature_id))}
+              onLoad={() => void runAction(() => featureApi.load(selectedPlan.feature_id))}
+              onUnload={() => void runAction(() => featureApi.unload(selectedPlan.feature_id),
+                { title: 'Unload feature?', message: 'The feature remains saved and can be loaded again later.' })}
+              onArchive={() => void runAction(() => featureApi.archive(selectedPlan.feature_id),
+                { title: 'Archive feature?', message: 'Archived features remain available for preview and can be restored.' })}
+              onUnarchive={() => void runAction(() => featureApi.unarchive(selectedPlan.feature_id))} />
+          ) : null}
+
+          {workspaceView.shows('board', 'verification') ? (
+            <>
+              <PanelSection title={workspaceView.selectedView === 'verification' ? 'Acceptance criteria' : 'Progress'}
+                count={selectedPlan.phase_columns?.length || 0} empty="No phases or tasks recorded.">
+                {(selectedPlan.phase_columns || []).length ? (
+                  <Text variant="caption" tone="ink3">{`${selectedPlan.task_count || 0} tasks across ${selectedPlan.phase_columns?.length || 0} phases`}</Text>
+                ) : null}
+                {(selectedPlan.phase_columns || []).map(phase => (
+                  <PhaseRow key={`${selectedPlan.feature_id}:${phase.id}`} phase={phase} activeFeature={Boolean(selectedItem?.is_active)}
+                    expanded={expandedPhases.has(String(phase.id))} expandedTasks={expandedTasks}
+                    onToggle={() => toggleSet(setExpandedPhases, String(phase.id))}
+                    onToggleTask={taskId => toggleSet(setExpandedTasks, `${phase.id}:${taskId}`)}
+                    onAdvance={taskId => void runAction(() => featureApi.transitionTask(taskId, 'completed'))} />
+                ))}
+              </PanelSection>
+              <ExecutionSection execution={selectedPlan.execution || {}} nextPhase={selectedPlan.next_phase} nextTask={selectedPlan.next_task} />
+            </>
+          ) : null}
+
+          {workspaceView.shows('reviews') ? (
+            <>
+              <PanelSection title="Reviews" count={selectedPlan.review_count || selectedPlan.review_records?.length || 0} empty="No review records.">
+                {(selectedPlan.review_records || []).map(record => (
+                  <RecordRow key={record.id} title={`Task ${record.task_id} review`} sub={`${record.issues?.length || 0} issues · ${formatDate(record.created_at)}`}
+                    expanded={expandedRecords.has(`review:${record.id}`)} onToggle={() => toggleSet(setExpandedRecords, `review:${record.id}`)}>
+                    <Text variant="body">{record.summary || 'No summary.'}</Text>
+                    <StringList title="Limitations" values={record.limitations || []} />
+                    {(record.issues || []).map((issue, index) => <JsonBlock key={index} title={`Issue ${index + 1}`} value={issue} />)}
+                  </RecordRow>
+                ))}
+              </PanelSection>
+              <PanelSection title="Diff proposals" count={selectedPlan.diff_proposal_count || selectedPlan.diff_proposals?.length || 0} empty="No diff proposals.">
+                {(selectedPlan.diff_proposals || []).map((proposal: FeatureDiffProposal) => (
+                  <RecordRow key={proposal.id} title={`Task ${proposal.task_id} · ${proposal.status}`} sub={proposal.issue_id || proposal.id}
+                    expanded={expandedRecords.has(`diff:${proposal.id}`)} onToggle={() => toggleSet(setExpandedRecords, `diff:${proposal.id}`)}>
+                    {proposal.decision_reason ? <TextBlock title="Decision" value={proposal.decision_reason} /> : null}
+                    <JsonBlock title="Diff" value={proposal.diff || '(empty diff)'} raw />
+                  </RecordRow>
+                ))}
+              </PanelSection>
+              <PanelSection title="Event history" count={selectedPlan.event_count || selectedPlan.event_log?.length || 0} empty="No feature events.">
+                {[...(selectedPlan.event_log || [])].reverse().map((event: FeatureEvent) => (
+                  <RecordRow key={event.id} title={formatStatus(event.kind)} sub={`${event.entity} ${event.entity_id} · ${event.actor} · ${formatDate(event.created_at)}`}
+                    expanded={expandedRecords.has(`event:${event.id}`)} onToggle={() => toggleSet(setExpandedRecords, `event:${event.id}`)}>
+                    <JsonBlock title="Payload" value={event.payload || {}} />
+                  </RecordRow>
+                ))}
+              </PanelSection>
+            </>
+          ) : null}
+        </>
+      ) : null}
+    </PanelPage>
   );
 }
 
-function FeatureOverview({
-  plan,
-  item,
-  onApprove,
-  onLoad,
-  onUnload,
-  onArchive,
-  onUnarchive,
-}: {
+/** Feature / phase / task status → the shared status vocabulary. */
+export function featureSign(status: string | null | undefined, archived = false): string {
+  if (archived) return 'skipped';
+  const normalized = normalizeStatus(status);
+  if (normalized === 'completed') return 'done';
+  if (normalized === 'blocked') return 'failed';
+  if (normalized === 'in_progress') return 'active';
+  return 'pending';
+}
+
+function FeatureOverview({ plan, item, onApprove, onLoad, onUnload, onArchive, onUnarchive }: {
   plan: FeatureSummary;
   item: FeatureListItem | null;
   onApprove: () => void;
@@ -380,57 +305,32 @@ function FeatureOverview({
   onArchive: () => void;
   onUnarchive: () => void;
 }) {
-  const { colors } = useTheme();
   return (
-    <Card style={styles.overviewCard}>
-      <View style={styles.overviewTitleRow}>
-        <View style={styles.overviewCopy}>
-          <Text variant="lg" style={styles.overviewTitle}>{plan.feature_name}</Text>
-          <Text variant="xs" dim style={styles.featureId}>{plan.feature_id}</Text>
-        </View>
-        <StatusPill label={item?.archived ? 'archived' : plan.overall_status} />
-      </View>
-
-      {plan.feature_request ? <Text variant="sm" style={styles.requestText}>{plan.feature_request}</Text> : null}
-
-      <View style={styles.metadataGrid}>
-        <Metadata label="Approval" value={plan.approved ? 'Approved' : 'Pending'} />
-        <Metadata label="Review" value={formatStatus(plan.review_status)} />
-        <Metadata label="Tasks" value={`${plan.task_count || 0}`} />
-        <Metadata label="Events" value={`${plan.event_count || 0}`} />
-      </View>
-
-      {plan.directory ? (
-        <View style={styles.pathBox}>
-          <Icon name="folder" size="sm" color={colors.ink3} />
-          <Text variant="xs" style={styles.pathText} numberOfLines={2}>{plan.directory}</Text>
-        </View>
-      ) : null}
-
-      <View style={styles.actionRow}>
-        {!plan.approved && !item?.archived ? <ActionButton label="Approve" icon="circle-check" onPress={onApprove} primary /> : null}
+    <PanelSection title={plan.feature_name} testID="feature-overview"
+      right={<Chip variant="meta" label={item?.archived ? 'archived' : formatStatus(plan.overall_status)} />}>
+      <Text variant="monoSm" tone="ink3">{plan.feature_id}</Text>
+      {plan.feature_request ? <Text variant="body" style={styles.request}>{plan.feature_request}</Text> : null}
+      <Fact label="Approval" value={plan.approved ? 'Approved' : 'Pending'} />
+      <Fact label="Review" value={formatStatus(plan.review_status)} />
+      <Fact label="Tasks" value={`${plan.task_count || 0}`} />
+      <Fact label="Events" value={`${plan.event_count || 0}`} />
+      {plan.directory ? <Fact label="Folder" value={plan.directory} mono /> : null}
+      <View style={styles.actions}>
+        {!plan.approved && !item?.archived ? <Button label="Approve" icon="circle-check" variant="primary" onPress={onApprove} testID="feature-approve" /> : null}
         {item?.is_active ? (
-          <ActionButton label="Unload" icon="pause" onPress={onUnload} />
+          <Button label="Unload" icon="pause" variant="secondary" onPress={onUnload} testID="feature-unload" />
         ) : item?.archived ? (
-          <ActionButton label="Restore" icon="archive" onPress={onUnarchive} primary />
+          <Button label="Restore" icon="archive" variant="primary" onPress={onUnarchive} testID="feature-restore" />
         ) : (
-          <ActionButton label="Load" icon="play" onPress={onLoad} primary={plan.approved} />
+          <Button label="Load" icon="play" variant={plan.approved ? 'primary' : 'secondary'} onPress={onLoad} testID="feature-load" />
         )}
-        {!item?.is_active && !item?.archived ? <ActionButton label="Archive" icon="archive" onPress={onArchive} /> : null}
+        {!item?.is_active && !item?.archived ? <Button label="Archive" icon="archive" variant="secondary" onPress={onArchive} testID="feature-archive" /> : null}
       </View>
-    </Card>
+    </PanelSection>
   );
 }
 
-function PhaseDetail({
-  phase,
-  activeFeature,
-  expanded,
-  expandedTasks,
-  onToggle,
-  onToggleTask,
-  onAdvance,
-}: {
+function PhaseRow({ phase, activeFeature, expanded, expandedTasks, onToggle, onToggleTask, onAdvance }: {
   phase: FeaturePhase;
   activeFeature: boolean;
   expanded: boolean;
@@ -439,74 +339,48 @@ function PhaseDetail({
   onToggleTask: (taskId: number) => void;
   onAdvance: (taskId: number) => void;
 }) {
-  const { colors } = useTheme();
   const completed = phase.tasks.filter(task => ['completed', 'archived'].includes(normalizeStatus(task.status))).length;
   return (
-    <Card style={styles.phaseCard}>
-      <Pressable onPress={onToggle} style={styles.phaseHeader} activeOpacity={0.72}>
-        <View style={styles.phaseCopy}>
-          <Text variant="base" style={styles.phaseTitle}>{phase.title}</Text>
-          <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{completed}/{phase.tasks.length} tasks{phase.goal ? ` · ${phase.goal}` : ''}</Text>
+    <Row status={featureSign(phase.status)} title={phase.title} when={`${completed}/${phase.tasks.length}`} onPress={onToggle}
+      sub={[formatStatus(phase.status || 'pending'), phase.goal].filter(Boolean).join(' · ')} testID={`phase-${phase.id}`}
+      accessibilityLabel={`${phase.title}, ${completed} of ${phase.tasks.length} tasks${expanded ? ', expanded' : ''}`}
+      actions={expanded ? (
+        <View style={styles.nested}>
+          <Rows>
+            {phase.tasks.map(task => (
+              <TaskRow key={task.id} task={task} expanded={expandedTasks.has(`${phase.id}:${task.id}`)} activeFeature={activeFeature}
+                onToggle={() => onToggleTask(task.id)} onAdvance={() => onAdvance(task.id)} />
+            ))}
+          </Rows>
         </View>
-        <StatusPill label={phase.status || 'pending'} />
-        <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size="md" color={colors.ink3} />
-      </Pressable>
-
-      {expanded ? (
-        <View style={styles.taskList}>
-          {phase.tasks.map(task => {
-            const taskKey = `${phase.id}:${task.id}`;
-            return (
-              <TaskDetail
-                key={task.id}
-                task={task}
-                expanded={expandedTasks.has(taskKey)}
-                activeFeature={activeFeature}
-                onToggle={() => onToggleTask(task.id)}
-                onAdvance={() => onAdvance(task.id)}
-              />
-            );
-          })}
-        </View>
-      ) : null}
-    </Card>
+      ) : undefined} />
   );
 }
 
-function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
+function TaskRow({ task, expanded, activeFeature, onToggle, onAdvance }: {
   task: FeatureTask;
   expanded: boolean;
   activeFeature: boolean;
   onToggle: () => void;
   onAdvance: () => void;
 }) {
-  const { colors } = useTheme();
   return (
-    <View style={styles.task}>
-      <Pressable onPress={onToggle} style={styles.taskHeader} activeOpacity={0.72}>
-        <View style={styles.taskIndex}><Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{task.id}</Text></View>
-        <View style={styles.taskCopy}>
-          <Text variant="sm" style={styles.taskTitle}>{task.title}</Text>
-          <Text variant="xs" dim style={{ fontVariant: ['tabular-nums'] }}>{task.verified_exit_criteria?.length || 0}/{task.exit_criteria?.length || 0} criteria verified</Text>
-        </View>
-        <StatusPill label={task.status} />
-        <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size="sm" color={colors.ink3} />
-      </Pressable>
-
-      {expanded ? (
-        <View style={styles.taskBody}>
+    <Row status={featureSign(task.status)} title={`${task.id}. ${task.title}`} onPress={onToggle} testID={`task-${task.id}`}
+      sub={`${formatStatus(task.status)} · ${task.verified_exit_criteria?.length || 0}/${task.exit_criteria?.length || 0} criteria verified`}
+      actions={expanded ? (
+        <View style={styles.nested}>
           <StringList title="Objectives" values={task.objectives || []} />
           <StringList title="Action points" values={task.action_points || []} />
-          {(task.exit_criteria || []).length > 0 ? (
-            <View style={styles.detailBlock}>
-              <Text variant="xs" dim style={styles.detailLabel}>Exit criteria</Text>
+          {(task.exit_criteria || []).length ? (
+            <View style={styles.block}>
+              <Text variant="label" tone="ink2">Exit criteria</Text>
               {task.exit_criteria.map((criterion, index) => {
                 const verified = task.verified_exit_criteria?.includes(criterion);
                 return (
-                  <View key={`${criterion}-${index}`} style={styles.criteriaRow}>
-                    <Icon name={verified ? 'circle-check' : 'circle'} size="sm" color={verified ? colors.ok.ink : colors.ink3} />
-                    <Text variant="xs" style={{ flex: 1, color: verified ? colors.ink2 : colors.ink }}>{criterion}</Text>
-                  </View>
+                  <Text key={`${criterion}-${index}`} variant="caption" tone={verified ? 'ink2' : 'ink'}
+                    accessibilityLabel={`${criterion}, ${verified ? 'verified' : 'not verified'}`}>
+                    <Text variant="caption" tone={verified ? 'ok' : 'ink3'}>{verified ? '✓ ' : '○ '}</Text>{criterion}
+                  </Text>
                 );
               })}
             </View>
@@ -514,14 +388,10 @@ function TaskDetail({ task, expanded, activeFeature, onToggle, onAdvance }: {
           {task.notes ? <TextBlock title="Notes" value={task.notes} /> : null}
           {task.blocked_reason ? <TextBlock title="Blocked reason" value={task.blocked_reason} error /> : null}
           {activeFeature && normalizeStatus(task.status) === 'in_progress' ? (
-            <Pressable onPress={onAdvance} style={[styles.completeButton, { backgroundColor: colors.accent.ink }]}>
-              <Icon name="check" size="sm" color={colors.onInk} />
-              <Text variant="xs" style={{ color: colors.onInk, fontWeight: fontWeights.medium }}>Mark completed</Text>
-            </Pressable>
+            <View style={styles.actions}><Button label="Mark completed" icon="check" variant="primary" onPress={onAdvance} testID={`task-${task.id}-complete`} /></View>
           ) : null}
         </View>
-      ) : null}
-    </View>
+      ) : undefined} />
   );
 }
 
@@ -532,216 +402,49 @@ function ExecutionSection({ execution, nextPhase, nextTask }: {
 }) {
   const blocked = Array.isArray(execution.blocked_tasks) ? execution.blocked_tasks : [];
   return (
-    <>
-      <SectionHeader title="Execution" detail="Current next actions and blockers" />
-      <Card>
-        <Metadata label="Next phase" value={stringValue(nextPhase?.title) || 'None'} wide />
-        <Metadata label="Next task" value={nextTask?.title || stringValue((execution.next_task as Record<string, unknown> | undefined)?.title) || 'None'} wide />
-        <Metadata label="Blocked tasks" value={`${blocked.length}`} wide />
-        {blocked.map((item, index) => {
-          const record = item as Record<string, unknown>;
-          return <Text key={index} variant="xs" dim style={styles.executionLine}>• {stringValue(record.title) || `Task ${index + 1}`}</Text>;
-        })}
-      </Card>
-    </>
+    <PanelSection title="Execution">
+      <Text variant="caption" tone="ink3">Current next actions and blockers</Text>
+      <Fact label="Next phase" value={stringValue(nextPhase?.title) || 'None'} />
+      <Fact label="Next task" value={nextTask?.title || stringValue((execution.next_task as Record<string, unknown> | undefined)?.title) || 'None'} />
+      <Fact label="Blocked tasks" value={`${blocked.length}`} />
+      {blocked.map((item, index) => {
+        const record = item as Record<string, unknown>;
+        return <Text key={index} variant="caption" tone="ink3">• {stringValue(record.title) || `Task ${index + 1}`}</Text>;
+      })}
+    </PanelSection>
   );
 }
 
-function ReviewSection({ records, expanded, onToggle }: {
-  records: FeatureReviewRecord[];
-  expanded: Set<string>;
-  onToggle: (id: string) => void;
-}) {
-  if (!records.length) return <EmptyDataCard text="No review records." />;
-  return (
-    <View style={styles.recordList}>
-      {records.map(record => (
-        <ExpandableRecord
-          key={record.id}
-          title={`Task ${record.task_id} review`}
-          subtitle={`${record.issues?.length || 0} issues · ${formatDate(record.created_at)}`}
-          expanded={expanded.has(`review:${record.id}`)}
-          onToggle={() => onToggle(record.id)}
-        >
-          <Text variant="sm">{record.summary || 'No summary.'}</Text>
-          <StringList title="Limitations" values={record.limitations || []} />
-          {(record.issues || []).map((issue, index) => (
-            <JsonBlock key={index} title={`Issue ${index + 1}`} value={issue} />
-          ))}
-        </ExpandableRecord>
-      ))}
-    </View>
-  );
-}
-
-function DiffSection({ proposals, expanded, onToggle }: {
-  proposals: FeatureDiffProposal[];
-  expanded: Set<string>;
-  onToggle: (id: string) => void;
-}) {
-  if (!proposals.length) return <EmptyDataCard text="No diff proposals." />;
-  return (
-    <View style={styles.recordList}>
-      {proposals.map(proposal => (
-        <ExpandableRecord
-          key={proposal.id}
-          title={`Task ${proposal.task_id} · ${proposal.status}`}
-          subtitle={proposal.issue_id || proposal.id}
-          expanded={expanded.has(`diff:${proposal.id}`)}
-          onToggle={() => onToggle(proposal.id)}
-        >
-          {proposal.decision_reason ? <TextBlock title="Decision" value={proposal.decision_reason} /> : null}
-          <JsonBlock title="Diff" value={proposal.diff || '(empty diff)'} raw />
-        </ExpandableRecord>
-      ))}
-    </View>
-  );
-}
-
-function EventSection({ events, expanded, onToggle }: {
-  events: FeatureEvent[];
-  expanded: Set<string>;
-  onToggle: (id: string) => void;
-}) {
-  if (!events.length) return <EmptyDataCard text="No feature events." />;
-  return (
-    <View style={styles.recordList}>
-      {[...events].reverse().map(event => (
-        <ExpandableRecord
-          key={event.id}
-          title={formatStatus(event.kind)}
-          subtitle={`${event.entity} ${event.entity_id} · ${event.actor} · ${formatDate(event.created_at)}`}
-          expanded={expanded.has(`event:${event.id}`)}
-          onToggle={() => onToggle(event.id)}
-        >
-          <JsonBlock title="Payload" value={event.payload || {}} />
-        </ExpandableRecord>
-      ))}
-    </View>
-  );
-}
-
-function ExpandableRecord({ title, subtitle, expanded, onToggle, children }: {
-  title: string;
-  subtitle: string;
-  expanded: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  const { colors } = useTheme();
-  return (
-    <Card style={styles.recordCard}>
-      <Pressable onPress={onToggle} activeOpacity={0.72} style={styles.recordHeader}>
-        <View style={styles.recordCopy}>
-          <Text variant="sm" style={styles.recordTitle}>{title}</Text>
-          <Text variant="xs" dim numberOfLines={2} style={{ fontVariant: ['tabular-nums'] }}>{subtitle}</Text>
-        </View>
-        <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size="md" color={colors.ink3} />
-      </Pressable>
-      {expanded ? <View style={styles.recordBody}>{children}</View> : null}
-    </Card>
-  );
-}
-
-function SectionHeader({ title, detail }: { title: string; detail: string }) {
-  return (
-    <View style={styles.sectionHeader}>
-      <Text variant="base" style={styles.sectionTitle}>{title}</Text>
-      <Text variant="xs" dim>{detail}</Text>
-    </View>
-  );
-}
-
-function StatusPill({ label }: { label: string }) {
-  const { colors } = useTheme();
-  const normalized = normalizeStatus(label);
-  const foreground = normalized === 'completed'
-    ? colors.ok.ink
-    : normalized === 'blocked'
-      ? colors.danger.ink
-      : normalized === 'in_progress'
-        ? colors.info.ink
-        : colors.ink2;
-  const background = normalized === 'completed'
-    ? colors.ok.wash
-    : normalized === 'blocked'
-      ? colors.danger.wash
-      : normalized === 'in_progress'
-        ? colors.info.wash
-        : colors.sunken;
-  return (
-    <View style={[styles.statusPill, { backgroundColor: background }]}>
-      <View style={[styles.statusMiniDot, { backgroundColor: foreground }]} />
-      <Text variant="xs" style={{ color: foreground }}>{formatStatus(label)}</Text>
-    </View>
-  );
-}
-
-function ActionButton({ label, icon, onPress, primary = false }: {
-  label: string;
-  icon: IconName;
-  onPress: () => void;
-  primary?: boolean;
-}) {
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      activeOpacity={0.72}
-      style={[styles.actionButton, primary
-        ? { backgroundColor: colors.accent.ink, borderColor: colors.accent.ink }
-        : { backgroundColor: 'transparent', borderColor: colors.hairline }]}
-    >
-      <Icon name={icon} size="sm" color={primary ? colors.onInk : colors.ink} />
-      <Text variant="xs" style={{ color: primary ? colors.onInk : colors.ink, fontWeight: fontWeights.medium }}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function Metadata({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
-  return (
-    <View style={[styles.metadataItem, wide && styles.metadataWide]}>
-      <Text variant="xs" dim>{label}</Text>
-      <Text variant="sm" style={styles.metadataValue} numberOfLines={2}>{value}</Text>
-    </View>
-  );
+function RecordRow({ title, sub, expanded, onToggle, children }: { title: string; sub: string; expanded: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return <Row title={title} sub={sub} onPress={onToggle} actions={expanded ? <View style={styles.nested}>{children}</View> : undefined} />;
 }
 
 function StringList({ title, values }: { title: string; values: string[] }) {
   if (!values.length) return null;
   return (
-    <View style={styles.detailBlock}>
-      <Text variant="xs" dim style={styles.detailLabel}>{title}</Text>
-      {values.map((value, index) => <Text key={`${value}-${index}`} variant="xs" style={styles.bulletLine}>• {value}</Text>)}
+    <View style={styles.block}>
+      <Text variant="label" tone="ink2">{title}</Text>
+      {values.map((value, index) => <Text key={`${value}-${index}`} variant="caption">• {value}</Text>)}
     </View>
   );
 }
 
 function TextBlock({ title, value, error = false }: { title: string; value: string; error?: boolean }) {
-  const { colors } = useTheme();
   return (
-    <View style={styles.detailBlock}>
-      <Text variant="xs" dim style={styles.detailLabel}>{title}</Text>
-      <Text variant="xs" style={{ color: error ? colors.danger.ink : colors.ink }}>{value}</Text>
+    <View style={styles.block}>
+      <Text variant="label" tone="ink2">{title}</Text>
+      <Text variant="caption" tone={error ? 'danger' : 'ink'}>{value}</Text>
     </View>
   );
 }
 
 function JsonBlock({ title, value, raw = false }: { title: string; value: unknown; raw?: boolean }) {
-  const { colors } = useTheme();
-  const text = raw ? String(value) : safeJson(value);
   return (
-    <View style={styles.detailBlock}>
-      <Text variant="xs" dim style={styles.detailLabel}>{title}</Text>
-      <View style={[styles.jsonBox, { backgroundColor: colors.canvas }]}>
-        <Text variant="xs" style={styles.jsonText} selectable>{text}</Text>
-      </View>
+    <View style={styles.block}>
+      <Text variant="label" tone="ink2">{title}</Text>
+      <Pre>{raw ? String(value) : safeJson(value)}</Pre>
     </View>
   );
-}
-
-function EmptyDataCard({ text }: { text: string }) {
-  return <Card style={styles.emptyDataCard}><Text variant="sm" dim>{text}</Text></Card>;
 }
 
 function normalizeStatus(value: string | null | undefined): string {
@@ -758,15 +461,6 @@ function countForFilter(features: FeatureListItem[], filter: FeatureFilter): num
   if (filter === 'archived') return features.filter(item => item.archived).length;
   if (filter === 'completed') return features.filter(item => normalizeStatus(item.status) === 'completed').length;
   return features.filter(item => !item.archived && normalizeStatus(item.status) !== 'completed').length;
-}
-
-function statusColor(status: string, archived: boolean, colors: any): string {
-  if (archived) return colors.ink3;
-  const normalized = normalizeStatus(status);
-  if (normalized === 'completed') return colors.ok.ink;
-  if (normalized === 'blocked') return colors.danger.ink;
-  if (normalized === 'in_progress') return colors.info.ink;
-  return colors.ink3;
 }
 
 function formatDate(timestamp?: number | null): string {
@@ -791,66 +485,9 @@ function stringValue(value: unknown): string {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1 },
-  content: { padding: spacing.base, paddingBottom: spacing['3xl'] },
-  loadingWrap: { padding: spacing.base },
-  loadingBlock: { marginBottom: spacing.sm },
-  pageHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: spacing.base },
-  pageHeaderCopy: { flex: 1, paddingRight: spacing.md },
-  pageTitle: { fontWeight: fontWeights.semibold, letterSpacing: tracking.tight },
-  filterRow: { gap: spacing.sm, paddingBottom: spacing.base },
-  filterChip: { minHeight: touchTarget - spacing.sm, justifyContent: 'center', borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
-  featureList: { gap: spacing.xs },
-  featureRow: { minHeight: 56, borderRadius: radii.sm, flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md },
-  featureStatusDot: { width: 8, height: 8, borderRadius: radii.pill, marginRight: spacing.md },
-  featureCopy: { flex: 1 },
-  featureName: { fontWeight: fontWeights.semibold },
-  activeBadge: { borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: 2, marginRight: spacing.sm },
-  emptyFilterCard: { alignItems: 'center', paddingVertical: spacing.xl },
-  errorBox: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.md },
-  detailSection: { marginTop: spacing.base },
-  overviewCard: { paddingVertical: spacing.base },
-  overviewTitleRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  overviewCopy: { flex: 1, paddingRight: spacing.md },
-  overviewTitle: { fontWeight: fontWeights.semibold, letterSpacing: tracking.tight },
-  featureId: { fontFamily: fonts.mono, marginTop: 2 },
-  requestText: { marginTop: spacing.md, lineHeight: typography.sm.lineHeight },
-  metadataGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.base, rowGap: spacing.md },
-  metadataItem: { width: '50%', paddingRight: spacing.md },
-  metadataWide: { width: '100%', marginBottom: spacing.sm },
-  metadataValue: { fontWeight: fontWeights.medium, marginTop: 1, fontVariant: ['tabular-nums'] },
-  pathBox: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginTop: spacing.md },
-  pathText: { flex: 1, fontFamily: fonts.mono },
-  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.base },
-  actionButton: { minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md },
-  sectionHeader: { marginTop: spacing.lg, marginBottom: spacing.sm },
-  sectionTitle: { fontWeight: fontWeights.semibold },
-  phaseCard: { marginBottom: spacing.sm, paddingVertical: spacing.sm },
-  phaseHeader: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  phaseCopy: { flex: 1 },
-  phaseTitle: { fontWeight: fontWeights.semibold },
-  taskList: { paddingTop: spacing.xs },
-  task: { paddingBottom: spacing.xs },
-  taskHeader: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
-  taskIndex: { width: 26, height: 26, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
-  taskCopy: { flex: 1 },
-  taskTitle: { fontWeight: fontWeights.semibold },
-  taskBody: { paddingLeft: spacing.xl, paddingBottom: spacing.base },
-  detailBlock: { marginTop: spacing.md },
-  detailLabel: { fontWeight: fontWeights.semibold, marginBottom: spacing.xs },
-  bulletLine: { marginBottom: spacing.xs, lineHeight: typography.xs.lineHeight },
-  criteriaRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginBottom: spacing.xs },
-  completeButton: { alignSelf: 'flex-start', minHeight: touchTarget, borderRadius: radii.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md, marginTop: spacing.md },
-  statusPill: { minHeight: 24, borderRadius: radii.pill, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm },
-  statusMiniDot: { width: 6, height: 6, borderRadius: radii.pill },
-  executionLine: { marginTop: spacing.xs },
-  recordList: { gap: spacing.sm },
-  recordCard: { paddingVertical: spacing.sm },
-  recordHeader: { minHeight: 54, flexDirection: 'row', alignItems: 'center' },
-  recordCopy: { flex: 1, paddingRight: spacing.md },
-  recordTitle: { fontWeight: fontWeights.semibold },
-  recordBody: { paddingTop: spacing.xs, paddingBottom: spacing.sm },
-  jsonBox: { borderRadius: radii.sm, padding: spacing.md },
-  jsonText: { fontFamily: fonts.mono, lineHeight: typography.xs.lineHeight },
-  emptyDataCard: { alignItems: 'center', paddingVertical: spacing.lg },
+  filters: { gap: spacing.sm, paddingVertical: spacing.sm },
+  request: { marginVertical: spacing.sm },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
+  nested: { flex: 1, gap: spacing.xs },
+  block: { gap: spacing.xs, marginTop: spacing.sm },
 });

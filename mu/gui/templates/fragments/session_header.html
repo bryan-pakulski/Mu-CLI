@@ -1,0 +1,66 @@
+{#- Session header (Mu §10.1): the session name is the only header. Hover
+    shows the session type; the thread shows only when the session has
+    several. The ⋯ menu holds what the old top bar carried: new thread, the
+    threads, the workspace panel, settings (the inspector drawer), context,
+    trace, auto-approve and a new session. Below 840px inside the shell a
+    Sessions button opens the sessions list pane as an overlay. -#}
+{% import "macros/wash.html" as w %}
+<header class="w-chathead" x-data="{ menuOpen: false }" @keydown.escape="menuOpen = false"
+        @click.outside="menuOpen = false">
+    {#- Narrow views inside the shell: the sessions list pane opens as an overlay. -#}
+    <button type="button" class="w-btn w-chathead__sessions" data-variant="icon" data-size="sm"
+            @click.stop="$store.layout.toggleSessions()"
+            :aria-expanded="$store.layout.sessionsOpen ? 'true' : 'false'"
+            aria-controls="w-sidebar" aria-label="Sessions" title="Sessions">{{ w.icon("panel-left", size="sm") }}</button>
+    <h1 class="w-chathead__title"
+        :title="($store.sessions.current || '{{ session_name }}') + ' · ' + ($store.mode.sessionType || 'workspace') + ' session'">
+        <span class="session-title" x-text="$store.sessions.current || '{{ session_name }}'">{{ session_name }}</span>
+        <span class="w-chathead__thread product-crumb-thread" x-show="$store.threads.groupRoster.length > 1" x-cloak
+              x-text="(($store.threads.groupRoster.find(t => t.session_name === $store.chat.currentName) || {}).title) || 'Thread'"></span>
+    </h1>
+    <div class="w-chathead__menu">
+        <button type="button" class="w-btn w-chathead__more" data-variant="icon" data-size="sm"
+                @click="menuOpen = !menuOpen" :aria-expanded="menuOpen ? 'true' : 'false'"
+                aria-haspopup="menu" aria-label="Session menu" title="Session menu">{{ w.icon("more-horizontal", size="sm") }}</button>
+        <div class="w-menu w-chathead__popover" role="menu" aria-label="Session" x-show="menuOpen" x-cloak
+             x-transition.opacity.duration.120ms @click="menuOpen = false">
+            <button type="button" class="w-menu__item" role="menuitem" @click="$store.threads.create()">
+                {{ w.icon("git-branch", size="sm") }}<span class="w-menu__label">New thread</span></button>
+            <template x-for="t in ($store.threads.groupRoster.length > 1 ? $store.threads.groupRoster : [])" :key="t.thread_id">
+                <button type="button" class="w-menu__item w-chathead__threaditem" role="menuitem"
+                        :aria-current="t.session_name === $store.chat.currentName ? 'true' : null"
+                        @click="t.session_name !== $store.chat.currentName && $store.threads.switchTo(t)">
+                    <span class="w-menu__label" x-text="t.title || t.session_name"></span></button>
+            </template>
+            <hr class="w-menu__separator">
+            <button type="button" class="w-menu__item" role="menuitem"
+                    @click="if (!$store.mode.panelModes.includes($store.mode.active)) { $store.mode.setView('memory'); $store.layout.setPanel(true) } else { $store.layout.togglePanel() }"
+                    :aria-pressed="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen ? 'true' : 'false'"
+                    aria-label="Toggle workspace panel">
+                {{ w.icon("panel-right", size="sm") }}<span class="w-menu__label"
+                    x-text="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen ? 'Hide workspace panel' : 'Workspace panel'">Workspace panel</span></button>
+            <button type="button" class="w-menu__item settings-cog-button" role="menuitem"
+                    @click="$store.inspector.openDrawer()"
+                    aria-label="Open settings">{{ w.icon("settings", size="sm") }}<span class="w-menu__label">Workspace and settings</span></button>
+            <button type="button" class="w-menu__item" role="menuitem"
+                    @click="$store.mode.setView('memory'); $store.layout.setPanel(true); $store.memory.tab = 'context'; $store.memory.loadContext && $store.memory.loadContext()">
+                {{ w.icon("gauge", size="sm") }}<span class="w-menu__label">Context</span></button>
+            <a class="w-menu__item" role="menuitem" :href="'/trace?session=' + encodeURIComponent($store.chat.currentName || '')">
+                {{ w.icon("activity", size="sm") }}<span class="w-menu__label">Trace this session</span></a>
+            <hr class="w-menu__separator">
+            <button type="button" class="w-menu__item yolo-toggle product-yolo" role="menuitem"
+                    :aria-label="$store.yolo.active ? 'Auto-approve on. Require approvals' : 'Approvals required. Auto-approve tool calls'"
+                    :data-tone="$store.yolo.active ? 'caution' : null"
+                    @click="$store.yolo.toggle()"
+                    :title="$store.yolo.active ? 'Auto-approve is on. Click to require approvals.' : 'Tool approvals are required. Click to auto-approve.'">
+                {{ w.icon("zap", size="sm") }}<span class="w-menu__label yolo-label"
+                    x-text="$store.yolo.active ? 'Require approvals' : 'Auto-approve tool calls'">Auto-approve tool calls</span></button>
+            <button type="button" class="w-menu__item" role="menuitem" x-show="!$store.planMode.active"
+                    :disabled="$store.planMode.busy"
+                    @click="$store.planMode.set(true)">{{ w.icon("lock", size="sm") }}<span class="w-menu__label">Plan mode (read-only)</span></button>
+            <hr class="w-menu__separator">
+            <button type="button" class="w-menu__item" role="menuitem" @click="$store.sessions.deactivate()">
+                {{ w.icon("plus", size="sm") }}<span class="w-menu__label">New session</span></button>
+        </div>
+    </div>
+</header>

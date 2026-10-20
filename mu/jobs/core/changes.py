@@ -15,8 +15,10 @@ from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from .notes import AUDIT_EXCLUDED, NOTE_EVENTS
 
-SCOPES = ("home", "job", "board")
-PARTS = ("state", "pipeline", "plan", "diff", "review", "checks", "session", "costs", "notes")
+SCOPES = ("home", "job", "board", "node", "tool", "run")
+PARTS = ("state", "pipeline", "plan", "diff", "review", "checks", "session", "costs", "notes",
+         # Orchestration (documentation/plans/orchestration.md §3.4): scopes node, tool, run.
+         "executions", "facts", "catalog", "policy", "schedules", "secrets")
 
 
 @dataclass

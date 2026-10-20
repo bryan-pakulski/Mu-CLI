@@ -421,7 +421,13 @@ class WebUI(BaseUI):
 
     # --- prompt plumbing --------------------------------------------------
 
-    def _ask_prompt(self, payload: Dict[str, Any], timeout: float = 600.0) -> Any:
+    def _ask_prompt(self, payload: Dict[str, Any]) -> Any:
+        """Ask the person and wait — with no time limit — until they answer or cancel.
+
+        The model has handed the turn to the user, so the turn pauses here. Stop
+        cancels the session's prompts (routers/chat.py ``interrupt``); an interrupt
+        delivered to this thread while it waits also cancels the prompt.
+        """
         # Tag the prompt payload itself so it's discoverable later
         # via /api/prompts (for reconnection / debugging).
         tagged_payload = dict(payload)
@@ -429,11 +435,16 @@ class WebUI(BaseUI):
             tagged_payload.setdefault("session_name", self.session_name)
         prompt_id, event = self._prompts.open(tagged_payload)
         self._publish({"kind": "prompt", "id": prompt_id, "prompt": tagged_payload})
-        if not event.wait(timeout=timeout):
+        try:
+            self._prompts.wait(event)
+        except BaseException:
             self._prompts.cancel(prompt_id)
+            self._prompts.take(prompt_id)
             self._publish({"kind": "prompt_cancelled", "id": prompt_id})
+            raise
         result = self._prompts.take(prompt_id)
-        self._publish({"kind": "prompt_resolved", "id": prompt_id})
+        cancelled = isinstance(result, dict) and result.get("cancelled")
+        self._publish({"kind": "prompt_cancelled" if cancelled else "prompt_resolved", "id": prompt_id})
         return result
 
 

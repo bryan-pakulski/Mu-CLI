@@ -266,7 +266,7 @@ def check(step: str) -> StepStatus:
             return StepStatus("optional", PODMAN_DIND_NOTE)
         from .sandbox.environments import sysbox_available
         return StepStatus("ok", "Sysbox runtime available") if sysbox_available() else \
-            StepStatus("optional", "Sysbox is not installed (only needed for jobs whose builds use Docker)")
+            StepStatus("optional", "Sysbox is not installed and running (only needed for jobs whose builds use Docker)")
     if step == "gpu":
         from mu.container.hardware import detect_hardware
         from mu.container.docker_cli import CommandRunner

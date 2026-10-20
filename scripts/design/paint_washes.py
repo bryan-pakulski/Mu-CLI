@@ -1,94 +1,82 @@
 #!/usr/bin/env python3
-"""Paint the Wash watercolour art from mu/design/art/*.json (spec §3.5).
+"""Export redesigned Wash paintings for web and Android.
 
-    python3 scripts/design/paint_washes.py            # all washes, both themes
-
-Deterministic: each wash has a fixed seed. Dev-only dependencies: numpy +
-Pillow (requirements-dev.txt). Outputs are committed:
-
-* mu/gui/static/wash/art/<wash>-<theme>-{1600,800}.webp  (landscapes)
-* mu/gui/static/wash/art/<spot>-<theme>-320.webp          (spot washes)
-* mu/gui/static/wash/art/ambient-<wash>-<theme>-{1920,960}.webp (glass backdrops)
-* mobile/android/assets/wash/<wash>-<theme>.webp          (800w / 320w)
+Native originals live in mu/design/art/source. This exporter only crops,
+resamples and encodes them; Paper and Dusk scenes have independent originals.
+Ambient copies flatten a 24% painting over the theme canvas for text contrast.
+Transparent spot pigments are shared between themes, like pigment tokens.
+Legacy names remain available, with 3840px and Android @2x companions.
+The 3840px exports are Lanczos upscales of 1672x941 originals, not native 4K.
 """
-
 from __future__ import annotations
 
+import io
 import json
-import sys
 from pathlib import Path
 
-import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageOps
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
-
-from mu.design import THEMES, hex_to_rgb, load_tokens  # noqa: E402
-
-ART_DIR = ROOT / "mu/design/art"
+SOURCE = ROOT / "mu/design/art/source"
 WEB_OUT = ROOT / "mu/gui/static/wash/art"
 MOBILE_OUT = ROOT / "mobile/android/assets/wash"
+THEMES = ("paper", "dusk")
+SCENES = ("dawn", "lagoon", "meadow")
+PIGMENTS = ("apricot", "lagoon", "lilac", "meadow", "rose", "sky")
 
 
-def paint(spec: dict, theme: str, width: int) -> Image.Image:
-    tokens = load_tokens()
-    rng = np.random.default_rng(int(spec["seed"]))
-    aspect = float(spec.get("aspect", 9 / 16))
-    W, H = width, int(round(width * aspect))
-    k = W / 1600
-    ky = H / (1600 * aspect) if aspect != 9 / 16 else k
-    yy, xx = np.mgrid[0:H, 0:W]
-
-    def noise(scale: float, octaves: int = 5) -> np.ndarray:
-        out, amp, tot = np.zeros((H, W)), 1.0, 0.0
-        for octave in range(octaves):
-            s = max(2, int(scale * 2 ** octave))
-            grid = rng.random((s, max(2, int(s * W / H) + 1)))
-            im = Image.fromarray((grid * 255).astype(np.uint8)).resize((W, H), Image.BICUBIC)
-            out += amp * np.asarray(im) / 255
-            tot += amp
-            amp *= 0.5
-        return out / tot
-
-    base = np.array(hex_to_rgb(tokens["themes"][theme]["color"]["canvas"]), float) / 255
-    pigments = tokens["themes"][theme]["pigment"]
-    img = np.ones((H, W, 3)) * base
-    for (cx, cy, rx, ry), name, strength in spec["blobs"]:
-        d = np.sqrt(((xx - cx * k) / (rx * k)) ** 2 + ((yy - cy * ky) / (ry * ky)) ** 2)
-        d = d + (noise(3) - 0.5) * 0.9                 # ragged bleed edge
-        m = np.clip(1 - d, 0, 1) ** 0.6
-        edge = np.exp(-((d - 0.97) / 0.05) ** 2) * 0.35  # pigment pooling ring
-        m = np.clip(m * (0.75 + 0.5 * noise(12, 3)) + edge * (d < 1.05), 0, 1) * strength
-        colour = np.array(hex_to_rgb(pigments[name]["pigment"]), float) / 255
-        if theme == "paper":
-            img = img * (1 - m[..., None] * (1 - colour))   # multiply glaze
-        else:
-            img = img + m[..., None] * 0.55 * (colour - img)  # luminous glaze
-    img = np.clip(img + ((noise(120, 2) - 0.5) * 0.05)[..., None], 0, 1)  # paper grain
-    if spec.get("fade", True):
-        fade = np.clip((yy / H - 0.55) / 0.45, 0, 1)[..., None]
-        img = img * (1 - fade) + base * fade
-    out = Image.fromarray((img * 255).astype(np.uint8))
-    return out.filter(ImageFilter.GaussianBlur(1.2 * k))
+def export(source: Path, target: Path, size: tuple[int, int], budget: int = 0,
+           canvas: str | None = None) -> None:
+    """Preserve aspect and alpha; honour legacy download budgets."""
+    with Image.open(source) as original:
+        image = ImageOps.fit(original, size, method=Image.Resampling.LANCZOS)
+        if canvas is not None:
+            image = Image.blend(Image.new("RGB", size, canvas), image.convert("RGB"), 0.24)
+        for quality in (88, 82, 76, 68, 58, 45, 30, 15):
+            encoded = io.BytesIO()
+            image.save(encoded, "WEBP", quality=quality, method=6, exact=True)
+            data = encoded.getvalue()
+            if not budget or len(data) < budget:
+                target.write_bytes(data)
+                return
+    raise ValueError(f"Cannot meet {budget}-byte budget: {target.name}")
 
 
 def main() -> int:
     WEB_OUT.mkdir(parents=True, exist_ok=True)
     MOBILE_OUT.mkdir(parents=True, exist_ok=True)
-    for path in sorted(ART_DIR.glob("*.json")):
-        spec = json.loads(path.read_text(encoding="utf-8"))
-        name = path.stem
-        spot = name.startswith("spot-")
-        ambient = name.startswith("ambient-")
+    tokens = json.loads((ROOT / "mu/design/tokens.json").read_text(encoding="utf-8"))
+    for scene in SCENES:
         for theme in THEMES:
-            widths = (320,) if spot else (1920, 960) if ambient else (1600, 800)
-            for width in widths:
-                target = WEB_OUT / f"{name}-{theme}-{width}.webp"
-                paint(spec, theme, width).save(target, quality=82, method=6)
-                print(f"{target.relative_to(ROOT)}  {target.stat().st_size // 1024} KB")
-            mobile = MOBILE_OUT / f"{name}-{theme}.webp"
-            paint(spec, theme, 320 if spot else 960 if ambient else 800).save(mobile, quality=80, method=6)
+            source = SOURCE / f"{scene}-{theme}.webp"
+            for ambient in (False, True):
+                name = f"{'ambient-' if ambient else ''}{scene}-{theme}"
+                ratio = 10 / 16 if ambient else 9 / 16
+                canvas = tokens["themes"][theme]["color"]["canvas"] if ambient else None
+                widths = (960, 1920, 3840) if ambient else (800, 1600, 3840)
+                for width in widths:
+                    budget = (80_000 if ambient else 60_000) if width < 3840 else 0
+                    export(source, WEB_OUT / f"{name}-{width}.webp",
+                           (width, round(width * ratio)), budget, canvas)
+                mobile_width = 960 if ambient else 800
+                for scale in (1, 2):
+                    suffix = "@2x" if scale == 2 else ""
+                    width = mobile_width * scale
+                    export(source, MOBILE_OUT / f"{name}{suffix}.webp",
+                           (width, round(width * ratio)), canvas=canvas)
+            reference = ROOT / f"documentation/design/reference/wash-{scene}-{theme}.webp"
+            reference.write_bytes((WEB_OUT / f"{scene}-{theme}-1600.webp").read_bytes())
+    for pigment in PIGMENTS:
+        source = SOURCE / f"spot-{pigment}.webp"
+        for theme in THEMES:
+            name = f"spot-{pigment}-{theme}"
+            for width in (320, 1024):
+                export(source, WEB_OUT / f"{name}-{width}.webp", (width, width))
+            for scale in (1, 2):
+                suffix = "@2x" if scale == 2 else ""
+                width = 320 * scale
+                export(source, MOBILE_OUT / f"{name}{suffix}.webp", (width, width))
+    print("Wash: exported 60 web assets, 48 Android assets and 6 reference paintings.")
     return 0
 
 

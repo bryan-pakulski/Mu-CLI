@@ -1,173 +1,115 @@
-import React, { useState, useCallback } from 'react';
-import { FlatList, View, RefreshControl, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+// Security mode (web security_panel.html): the scan brief and findings, each with its proof and
+// remediation state; approve or refute after confirming; details in a sheet.
+
+import React, { useCallback, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { useTheme } from '../theme/ThemeContext';
-import { ModeWorkspaceHeader, useModeWorkspaceView } from '../components';
-import { securityApi, SecurityFinding, SecurityState } from '../api/security';
-import { elevation, radii, spacing, fontWeights, fonts } from '../theme/tokens';
-import { Button, Card, Chip, EmptyState, ErrorState, Pressable, Skeleton, Text } from '../ui';
+import { ModeWorkspaceIntro, useModeWorkspaceView, workspaceState, workspaceTabs } from '../components';
+import { Fact, PanelPage, PanelSection } from '../components/chat/PanelPage';
+import { securityApi, type SecurityFinding, type SecurityState } from '../api/security';
+import { spacing } from '../theme/tokens';
+import { Button, Chip, Row, Sheet, Text, useServerActions, type ServerAction } from '../ui';
+
+/** Severity → status sign: critical/high fail, medium needs attention, the rest are quiet. */
+export function severitySign(severity: string): string {
+  if (severity === 'critical' || severity === 'high') return 'failed';
+  if (severity === 'medium') return 'waiting';
+  return 'pending';
+}
+
+function proofText(f: SecurityFinding): string {
+  return `PoC ${f.proof_verified ? 'verified' : f.has_proof ? 'pending' : 'none'} · fix ${f.remediation_verified ? 'verified' : f.has_remediation ? 'pending' : 'none'}`;
+}
 
 export function SecurityScreen() {
-  const { colors, isDark } = useTheme();
   const [state, setState] = useState<SecurityState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<SecurityFinding | null>(null);
   const workspaceView = useModeWorkspaceView(state?.workspace);
+  const actions = useServerActions();
 
   const load = useCallback(async () => {
-    try {
-      setError(null);
-      const res = await securityApi.getState();
-      setState(res);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    try { setError(null); setState(await securityApi.getState()); }
+    catch (e) { setError(String(e)); }
+    finally { setLoading(false); setRefreshing(false); }
   }, []);
+  useFocusEffect(useCallback(() => { setLoading(true); void load(); }, [load]));
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
-
-  const approve = (id: string) => {
-    Alert.alert('Approve finding?', 'Finalize this security finding?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Approve', onPress: async () => {
-        await securityApi.approveFinding(id);
-        load();
-      }},
-    ]);
+  const decide = async (finding: SecurityFinding, action: ServerAction) => {
+    if (!(await actions.ask(action))) return;
+    if (action.id === 'approve') await securityApi.approveFinding(finding.finding_id);
+    else await securityApi.refuteFinding(finding.finding_id, 'Refuted via mobile UI');
+    void load();
   };
 
-  const refute = (id: string) => {
-    Alert.alert('Refute finding?', 'Abandon this finding as invalid?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Refute', style: 'destructive', onPress: async () => {
-        await securityApi.refuteFinding(id, 'Refuted via mobile UI');
-        load();
-      }},
-    ]);
-  };
-
-  const sevVariant = (sev: string) => {
-    switch (sev) {
-      case 'critical': return 'danger' as const;
-      case 'high': return 'danger' as const;
-      case 'medium': return 'attention' as const;
-      case 'low': return 'neutral' as const;
-      default: return 'neutral' as const;
-    }
-  };
-
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <View style={{ padding: spacing.base }}>
-          {[1, 2, 3].map(i => <Skeleton key={i} height={80} style={{ marginBottom: spacing.sm }} />)}
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <ErrorState message={error} onRetry={load} />
-      </SafeAreaView>
-    );
-  }
-
-  if (!state || (!state.report && state.findings.length === 0)) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <EmptyState title="No security findings" message="No security scan or findings available" />
-      </SafeAreaView>
-    );
-  }
-
-  const findings = state.findings.filter(item => {
+  const workspace = state?.workspace;
+  const findings = (state?.findings || []).filter(item => {
     if (workspaceView.selectedView === 'evidence') return item.has_proof;
     if (workspaceView.selectedView === 'remediation') return item.has_remediation;
     return true;
   });
+  const empty = !state || (!state.report && state.findings.length === 0);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-      <FlatList
-        data={findings}
-        keyExtractor={item => item.finding_id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
-        contentContainerStyle={{ padding: spacing.base, paddingBottom: spacing['2xl'] }}
-        ListHeaderComponent={
-          <>
-            <ModeWorkspaceHeader workspace={state.workspace} selectedView={workspaceView.selectedView} onSelectView={workspaceView.selectView} />
-            {state.report && (
-              <Card style={{ marginBottom: spacing.sm }}>
-                <Text variant="xs" style={{ color: colors.ink3 }}>Scan brief</Text>
-                <Text variant="sm" style={{ color: colors.ink2, marginTop: spacing.xs }}>{state.report.summary || 'No report summary recorded.'}</Text>
-              </Card>
-            )}
-          </>
-        }
-        ListEmptyComponent={<Text variant="xs" style={{ color: colors.ink3, padding: spacing.md }}>No records match this evidence lens.</Text>}
-        renderItem={({ item }) => (
-          <Card style={{ marginBottom: spacing.sm, minHeight: 44 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs }}>
-              <Chip label={item.severity} tone={sevVariant(item.severity)} />
-              <Chip label={item.status} tone={item.status === 'approved' ? 'ok' : 'neutral'} />
-            </View>
-            <Text variant="sm" style={{ fontWeight: fontWeights.medium }}>{item.title}</Text>
-            <Text variant="xs" style={{ color: colors.ink3, marginTop: 2 }} numberOfLines={3}>{item.summary}</Text>
-            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs }}>
-              <Text variant="xs" style={{ color: item.has_proof ? colors.ok.ink : colors.ink3 }}>
-                PoC: {item.proof_verified ? 'Verified' : item.has_proof ? 'Pending' : 'None'}
-              </Text>
-              <Text variant="xs" style={{ color: item.has_remediation ? colors.ok.ink : colors.ink3 }}>
-                Fix: {item.remediation_verified ? 'Verified' : item.has_remediation ? 'Pending' : 'None'}
-              </Text>
-            </View>
-            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs }}>
-              <Button title="Details" variant="ghost" onPress={() => setSelected(item)} />
-              {item.status !== 'approved' && <Button title="Approve" onPress={() => approve(item.finding_id)} />}
-              {item.status !== 'refuted' && <Button title="Refute" variant="ghost" onPress={() => refute(item.finding_id)} />}
-            </View>
-          </Card>
-        )}
-      />
-      {selected && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.scrim }}>
-          <View style={{ flex: 1, justifyContent: 'center', padding: spacing.base }}>
-            <View style={[elevation(2, colors, isDark), { maxHeight: '80%', borderRadius: radii.lg, padding: spacing.base }]}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
-                <Text variant="base" style={{ fontWeight: fontWeights.semibold }}>{selected.title}</Text>
-                <Pressable onPress={() => setSelected(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                  <Text variant="sm" style={{ color: colors.accent.ink }}>Close</Text>
-                </Pressable>
-              </View>
-              <FlatList
-                data={[
-                  { k: 'Severity', v: selected.severity },
-                  { k: 'Class', v: selected.vulnerability_class },
-                  { k: 'Status', v: selected.status },
-                  { k: 'Exploit path', v: selected.exploit_path },
-                  { k: 'PoC command', v: selected.proof_command },
-                  { k: 'Affected paths', v: selected.affected_paths.join(', ') },
-                ]}
-                keyExtractor={item => item.k}
-                renderItem={({ item }) => (
-                  <View style={{ paddingVertical: spacing.xs, minHeight: 28 }}>
-                    <Text variant="xs" style={{ color: colors.ink3 }}>{item.k}</Text>
-                    <Text variant="sm" style={{ color: colors.ink, fontFamily: fonts.mono }}>{item.v}</Text>
+    <PanelPage testID="security-screen" title={workspace?.title || 'Security'} state={workspaceState(workspace)}
+      tabs={workspaceTabs(workspace)} tab={workspaceView.selectedView} onTab={workspaceView.selectView}
+      loading={loading} error={error} onRetry={() => void load()}
+      empty={!loading && !error && empty ? { title: 'No security findings', message: 'No security scan or findings available.' } : null}
+      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }}
+      overlay={actions.element}>
+      {state && workspace ? (
+        <>
+          <ModeWorkspaceIntro workspace={workspace} />
+          {state.report ? (
+            <PanelSection title="Scan brief">
+              <Text variant="body" tone="ink2">{state.report.summary || 'No report summary recorded.'}</Text>
+            </PanelSection>
+          ) : null}
+          <PanelSection title="Findings" count={findings.length} empty="No records match this evidence lens.">
+            {findings.map(item => (
+              <Row key={item.finding_id} testID={`finding-${item.finding_id}`} status={severitySign(item.severity)} title={item.title} when={item.severity}
+                onPress={() => setSelected(item)}
+                sub={(
+                  <View style={styles.sub}>
+                    <Text variant="caption" tone="ink3" numberOfLines={3}>{item.summary}</Text>
+                    <View style={styles.chips}>
+                      <Chip variant="meta" label={item.status} />
+                      <Text variant="caption" tone="ink3">{proofText(item)}</Text>
+                    </View>
                   </View>
                 )}
-              />
-            </View>
+                actions={(
+                  <View style={styles.chips}>
+                    {item.status !== 'approved' ? <Button label="Approve" variant="secondary" testID={`approve-${item.finding_id}`}
+                      onPress={() => void decide(item, { id: 'approve', label: 'Approve', confirm: 'Finalize this security finding?' })} /> : null}
+                    {item.status !== 'refuted' ? <Button label="Refute" variant="ghost" testID={`refute-${item.finding_id}`}
+                      onPress={() => void decide(item, { id: 'refute', label: 'Refute', danger: true, confirm: 'Abandon this finding as invalid?' })} /> : null}
+                  </View>
+                )} />
+            ))}
+          </PanelSection>
+        </>
+      ) : null}
+      <Sheet visible={!!selected} onClose={() => setSelected(null)} title={selected?.title} testID="finding-sheet">
+        {selected ? (
+          <View>
+            <Fact label="Severity" value={selected.severity} />
+            <Fact label="Class" value={selected.vulnerability_class} />
+            <Fact label="Status" value={selected.status} />
+            <Fact label="Exploit path" value={selected.exploit_path} mono />
+            <Fact label="PoC command" value={selected.proof_command} mono />
+            <Fact label="Affected paths" value={selected.affected_paths.join(', ')} mono />
+            <Fact label="Evidence" value={proofText(selected)} />
           </View>
-        </View>
-      )}
-    </SafeAreaView>
+        ) : null}
+      </Sheet>
+    </PanelPage>
   );
 }
+
+const styles = StyleSheet.create({
+  sub: { gap: spacing.xs },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+});

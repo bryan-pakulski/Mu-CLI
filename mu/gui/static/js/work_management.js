@@ -55,10 +55,10 @@
     function statusLabel(value) {
         return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
-    // Shared Wash vocabulary (window.WASH, job_status): glyph + label, never colour alone.
+    // Shared Wash vocabulary (window.WASH, job_status): the Mu sign + its word (§5.4), never colour alone.
     function statusPill(value) {
-        const st = window.WASH ? window.WASH.stateStyle(value) : { glyph: '○', semantic: 'neutral', label: statusLabel(value).toLowerCase() };
-        return `<span class="w-chip work-management-status" data-tone="${st.semantic}"><span class="w-chip__glyph" aria-hidden="true">${st.glyph}</span><span>${escapeHtml(st.label)}</span></span>`;
+        const st = window.WASH ? window.WASH.stateStyle(value) : { glyph: '○', status: 'pending', label: statusLabel(value).toLowerCase() };
+        return `<span class="w-signword work-management-status" data-status="${escapeHtml(st.status || 'pending')}"><span class="w-sign" data-status="${escapeHtml(st.status || 'pending')}" aria-hidden="true">${st.glyph}</span>${escapeHtml(st.label)}</span>`;
     }
 
     function fmtMoney(value) {
@@ -126,34 +126,35 @@
         const statusEntries = Object.entries(report?.status_counts || {}).slice(0, 6);
         const repositories = Array.isArray(report?.repositories) ? report.repositories.slice(0, 5) : [];
         const failure = Number(report?.failure_rate || 0);
-        // Stat strip (G§9.3): one row of big numbers, not a card per metric.
-        const metric = (value, label, tone = '') => `<div class="w-stat work-report-metric"${tone ? ` data-tone="${tone}"` : ''}><dt class="w-stat__label">${escapeHtml(label)}</dt><dd class="w-stat__value">${value}</dd></div>`;
+        // Mu §5.5: the report is one sentence (zeros left out), not a strip of big numbers.
+        const part = (text, tone = '') => `<span class="w-state__part work-report-metric"${tone ? ` data-tone="${tone}"` : ''}>${escapeHtml(text)}</span>`;
+        const total = Number(report?.total_jobs || 0);
+        const n = (v, word) => { const c = Number(v || 0); return c ? part(`${c} ${word}${c === 1 ? '' : 's'}`) : ''; };
+        const sentence = total ? [
+            n(total, 'job'), Number(report?.archived_jobs) ? part(`${Number(report.archived_jobs)} archived`) : '', n(report?.attempts, 'attempt'),
+            Number(report?.total_cost_usd) ? part(fmtMoney(report.total_cost_usd)) : '',
+            Number(report?.average_elapsed_seconds) ? part(`avg ${fmtDuration(report.average_elapsed_seconds)}`) : '',
+            failure > 0 ? part(`${(failure * 100).toFixed(1)}% failed`, 'danger') : '',
+        ].join('') : part('No jobs match this query.', 'quiet');
         reportEl.innerHTML = `
-            <dl class="w-stats work-report-metrics">
-                ${metric(Number(report?.total_jobs || 0), 'Jobs')}
-                ${metric(Number(report?.archived_jobs || 0), 'Archived')}
-                ${metric(Number(report?.attempts || 0), 'Attempts')}
-                ${metric(fmtMoney(report?.total_cost_usd), 'Cost')}
-                ${metric(fmtDuration(report?.average_elapsed_seconds), 'Avg runtime')}
-                ${metric(`${(failure * 100).toFixed(1)}%`, 'Failure rate', failure > 0 ? 'danger' : '')}
-            </dl>
-            <div class="work-grid-2 work-report-breakdown">
-                <section class="w-card" aria-labelledby="work-report-status-h"><header class="w-card__head"><span class="w-eyebrow">Report</span><h2 class="w-card__title" id="work-report-status-h">By status</h2></header>
-                    <div class="w-card__body">${statusEntries.length ? `<ul class="work-list work-report-breakdown-list">${statusEntries.map(([status, count]) => `<li class="work-toolbar">${statusPill(status)}<span class="work-spacer"></span><span class="work-num">${Number(count)}</span></li>`).join('')}</ul>` : '<p class="work-empty-line">No matching history.</p>'}</div></section>
-                <section class="w-card" aria-labelledby="work-report-repo-h"><header class="w-card__head"><span class="w-eyebrow">Report</span><h2 class="w-card__title" id="work-report-repo-h">By repository</h2></header>
-                    <div class="w-card__body">${repositories.length ? `<ul class="work-list work-report-breakdown-list">${repositories.map(item => `<li class="work-toolbar"><span class="work-mono work-ellipsis work-grow" title="${escapeHtml(item.repository)}">${escapeHtml(item.repository)}</span><span class="work-num work-meta">${Number(item.jobs)} jobs</span><span class="work-num">${fmtMoney(item.cost_usd)}</span></li>`).join('')}</ul>` : '<p class="work-empty-line">No matching history.</p>'}</div></section>
-            </div>
+            <p class="w-state work-report-metrics">${sentence}</p>
+            ${statusEntries.length || repositories.length ? `<div class="work-grid-2 work-report-breakdown">
+                <section class="w-group" aria-labelledby="work-report-status-h"><h2 class="w-group__title" id="work-report-status-h">By status</h2>
+                    ${statusEntries.length ? `<ul class="w-rows work-report-breakdown-list" data-spacing="loose">${statusEntries.map(([status, count]) => `<li class="work-report-line">${statusPill(status)}<span class="work-num">${Number(count)}</span></li>`).join('')}</ul>` : '<p class="w-group__empty">No matching history.</p>'}</section>
+                <section class="w-group" aria-labelledby="work-report-repo-h"><h2 class="w-group__title" id="work-report-repo-h">By repository</h2>
+                    ${repositories.length ? `<ul class="w-rows work-report-breakdown-list" data-spacing="loose">${repositories.map(item => `<li class="work-report-line"><span class="work-mono work-ellipsis" title="${escapeHtml(item.repository)}">${escapeHtml(item.repository)}</span><span class="work-num work-meta">${Number(item.jobs)} job${Number(item.jobs) === 1 ? '' : 's'} · ${fmtMoney(item.cost_usd)}</span></li>`).join('')}</ul>` : '<p class="w-group__empty">No matching history.</p>'}</section>
+            </div>` : ''}
         `;
     }
 
     function rowActions(job) {
         return `
             <div class="w-btn-row work-management-row-actions">
-                <a class="w-btn" data-variant="ghost" data-size="sm" href="/api/jobs/${encodeURIComponent(job.id)}/debug-export" title="Export job telemetry">Debug export</a>
+                <a class="w-textbtn" data-tone="quiet" href="/api/jobs/${encodeURIComponent(job.id)}/debug-export" title="Export job telemetry">Debug export</a>
                 ${job.archived
-                    ? `<button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-manage-action="restore" data-job-id="${escapeHtml(job.id)}">Restore</button>`
-                    : job.manageable ? `<button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-manage-action="archive" data-job-id="${escapeHtml(job.id)}">Archive</button>` : ''}
-                <button type="button" class="w-btn delete" data-variant="ghost" data-size="sm" data-tone="danger" data-manage-action="delete" data-job-id="${escapeHtml(job.id)}" aria-label="Delete ${escapeHtml(job.title)}" title="Cancel if running, then permanently delete (Git branch preserved)">Delete</button>
+                    ? `<button type="button" class="w-textbtn" data-manage-action="restore" data-job-id="${escapeHtml(job.id)}">Restore</button>`
+                    : job.manageable ? `<button type="button" class="w-textbtn" data-manage-action="archive" data-job-id="${escapeHtml(job.id)}">Archive</button>` : ''}
+                <button type="button" class="w-textbtn delete" data-tone="danger" data-manage-action="delete" data-job-id="${escapeHtml(job.id)}" aria-label="Delete ${escapeHtml(job.title)}" title="Cancel if running, then permanently delete (Git branch preserved)">Delete</button>
             </div>
         `;
     }
@@ -171,7 +172,7 @@
                             <span>${escapeHtml(job.id.slice(0, 12))}${job.archived ? ' · archived' : ''}</span>
                         </div>
                     </td>
-                    <td>${statusPill(job.status)}${job.archived ? '<span class="w-chip work-management-archive-mark" data-tone="neutral" title="archived"><span>archived</span></span>' : ''}</td>
+                    <td>${statusPill(job.status)}</td>
                     <td class="work-management-repo" title="${escapeHtml(job.repository || '')}">${escapeHtml(job.repository || '—')}</td>
                     <td data-num>${fmtMoney(job.cost_usd)}</td>
                     <td data-num>${Number(job.attempt_count || 0)}</td>
@@ -199,6 +200,7 @@
         // when the user explicitly hits Select all. Persistent cross-page
         // selection is otherwise useful for bulk archival.
         selectionEl.textContent = `${state.selected.size} selected`;
+        selectionEl.hidden = !state.selected.size;
         const disabled = state.selected.size === 0;
         archiveSelectedBtn.disabled = disabled;
         restoreSelectedBtn.disabled = disabled;

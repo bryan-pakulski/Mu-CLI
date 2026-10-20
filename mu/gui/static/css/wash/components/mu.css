@@ -1,0 +1,901 @@
+/* Mu components (documentation/design/mu_style_guide.md §4–§7). The whole kit
+ * for content inside the leaf: structure comes from space, type and hairlines;
+ * nothing here draws a box except the decision block and the floats.
+ *
+ *   Page header (§4)
+ *     <header class="w-pagehead">                      (templates/_layout.html)
+ *       <a class="w-pagehead__back">← Runs</a>
+ *       <div class="w-pagehead__row"><h1 class="w-pagehead__title">Work</h1>
+ *         <div class="w-pagehead__actions">…one .w-btn[data-variant=primary]…</div></div>
+ *       <p class="w-state">…parts…</p>
+ *       <nav class="w-pagetabs"><a class="w-pagetabs__tab" aria-current="page">Now</a>…</nav>
+ *
+ *   State sentence (§4.2)
+ *     <p class="w-state"><span class="w-state__part" data-tone="attention">1 needs you</span>
+ *       <span class="w-state__part">1 running</span></p>   (· separators are drawn)
+ *
+ *   Groups and rows (§5.1, §5.2)
+ *     <section class="w-group" data-group="now"><h2 class="w-group__title">Now</h2>
+ *       <ul class="w-rows">
+ *         <li class="w-row" data-pinned?>
+ *           <span class="w-sign" data-status="waiting">◆</span>
+ *           <a|button class="w-row__main" …>
+ *             <span class="w-row__title"><span class="w-row__key">SCRUM-215</span>Soft delete</span>
+ *             <span class="w-row__sub">Review done · ready to push</span></a>
+ *           <span class="w-row__when">23h</span>
+ *           <span class="w-row__actions"><button class="w-textbtn">Review</button>…</span>
+ *         </li></ul></section>
+ *     Actions show on hover / focus-within, or always with li[data-pinned] (rows in Now).
+ *
+ *   Status sign (§5.4): <span class="w-sign" data-status="done|active|waiting|failed|
+ *     unverified|skipped|pending">glyph</span> — the vocabulary.json `status` keys.
+ *     .w-signword: the sign's word in the matching ink (attention / danger only).
+ *
+ *   Facts (§5.3): <dl class="w-facts"><dt>Image</dt><dd>…</dd></dl>
+ *   Disclosure:   <details class="w-disclose"><summary>Details</summary>…</details>
+ *   Text button (§7.3): <button class="w-textbtn" data-tone="danger|quiet?">Roll back</button>
+ *   Decision block (§7.6): <div class="w-decision" data-tone="attention|danger">
+ *       <p class="w-decision__q">…</p><p class="w-decision__r">…</p><pre>…</pre>
+ *       <div class="w-decision__acts">…</div></div>
+ *   Sheet (§7.2): wash_shell.js WashSheet.open(); <div class="w-sheet"><aside class="w-sheet__panel">
+ *   Leaf alert (§3.1): <div class="w-leaf-alert"> — one line, only while broken.
+ */
+
+/* ------------------------------------------------------------ page header */
+.w-pagehead {
+    max-width: var(--w-pagehead-max, none);
+    padding: var(--w-leaf-top, 40px) var(--w-leaf-pad, 48px) 0;
+    animation: w-mu-arrive var(--wash-motion-small) var(--wash-ease-small) backwards;
+}
+.w-pagehead[hidden] { display: none; }
+.w-pagehead__back {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wash-space-1);
+    margin-bottom: var(--wash-space-2);
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-label-size);
+    text-decoration: none;
+}
+.w-pagehead__back:hover { color: var(--wash-ink); text-decoration: none; }
+.w-pagehead__back[hidden] { display: none; }
+.w-pagehead__row {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-4);
+    min-width: 0;
+}
+.w-pagehead__title {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-1-size);
+    line-height: var(--wash-type-title-1-line);
+    font-weight: var(--wash-type-title-1-weight);
+    letter-spacing: var(--wash-type-title-1-tracking);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.w-pagehead__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-4);
+    flex: none;
+}
+.w-pagehead__actions:empty { display: none; }
+/* Hash-routed pages move focus to the title on route changes; no ring for that. */
+.w-pagehead__title[tabindex="-1"]:focus { outline: none; }
+.w-pagehead__state { margin-top: var(--wash-space-1); }
+
+/* ------------------------------------------------------------ text tabs */
+.w-pagetabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--wash-space-5);
+    margin-top: var(--wash-space-5);
+}
+.w-pagetabs:empty, .w-pagetabs:not(:has(.w-pagetabs__tab)) { display: none; }
+.w-pagetabs__tab {
+    padding-bottom: var(--wash-space-2);
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-label-size);
+    line-height: var(--wash-type-label-line);
+    font-weight: var(--wash-type-label-weight);
+    text-decoration: none;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    box-shadow: inset 0 -2px 0 transparent;
+    transition: color var(--wash-motion-micro) var(--wash-ease-micro), box-shadow var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-pagetabs__tab:hover { color: var(--wash-ink); text-decoration: none; }
+.w-pagetabs__tab[aria-current="page"], .w-pagetabs__tab[aria-selected="true"] {
+    color: var(--wash-ink);
+    box-shadow: inset 0 -2px 0 var(--wash-ink);
+}
+
+/* ------------------------------------------------------------ state sentence */
+.w-state {
+    margin: 0;
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+    font-variant-numeric: tabular-nums;
+}
+.w-state:empty { display: none; }
+.w-state__part:is([hidden], :empty) { display: none; }
+/* A separator before every visible part that follows a visible part (parts hidden by
+ * [hidden] or Alpine's x-show never leave a stray "·"). */
+.w-state__part:not([hidden], [style*="display: none"], :empty) ~ .w-state__part:not([hidden], [style*="display: none"], :empty)::before {
+    content: "·";
+    margin: 0 0.5em;
+    color: var(--wash-ink-3);
+    font-weight: 400;
+}
+.w-state__part[data-tone="attention"] { color: var(--wash-attention-ink); font-weight: var(--wash-type-label-weight); }
+.w-state__part[data-tone="danger"] { color: var(--wash-danger-ink); font-weight: var(--wash-type-label-weight); }
+.w-state__part[data-tone="quiet"] { color: var(--wash-ink-3); }
+a.w-state__part, button.w-state__part {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-decoration: none;
+    cursor: pointer;
+}
+a.w-state__part:hover, button.w-state__part:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* ------------------------------------------------------------ content column */
+/* Pages put their content in .w-leafbody: the same left edge and width as the header,
+ * the whole leaf (Mu §3.3). On wide screens list pages split into the list and a
+ * docked details pane (.w-split); settings use two columns (.w-formsection). */
+.w-leafbody {
+    max-width: var(--w-pagehead-max, none);
+    padding: var(--wash-space-8) var(--w-leaf-pad, 48px) var(--wash-space-9);
+    animation: w-mu-arrive var(--wash-motion-small) var(--wash-ease-small) 40ms backwards;
+}
+.w-leafbody[data-width="full"], .w-pagehead[data-width="full"] { max-width: none; }
+.w-leafbody[data-width="reading"] { max-width: calc(680px + 2 * var(--w-leaf-pad, 48px)); }
+
+/* ------------------------------------------------------------ split: list + dock (§7.2) */
+/*   <div class="w-split"><div class="w-split__main">…rows…</div>
+ *     <aside class="w-split__dock" data-dock aria-label="Details"></aside></div>
+ * From 1200px the dock sits beside the list and WashSheet.open renders into it; below,
+ * the dock is gone and the sheet floats over the page instead. */
+.w-split { display: block; }
+.w-split__dock { display: none; }
+@media (width >= 1200px) {
+    .w-split {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) clamp(340px, 38%, 600px);
+        align-items: start;
+        column-gap: var(--wash-space-8);
+    }
+    .w-split__dock {
+        position: sticky;
+        top: var(--wash-space-5);
+        display: block;
+        max-height: calc(100dvh - 2 * var(--w-leaf-gap, 14px) - 2 * var(--wash-space-5));
+        overflow: auto;
+        overscroll-behavior: contain;
+        padding: 0 0 var(--wash-space-6) var(--wash-space-7);
+        border-left: 1px solid var(--wash-hairline);
+    }
+}
+.w-dock__panel { position: relative; animation: w-mu-arrive var(--wash-motion-small) var(--wash-ease-small) backwards; }
+.w-dock__panel:focus { outline: none; }
+.w-dock__panel .w-sheet__close { position: absolute; top: -4px; right: 0; }
+.w-dock__panel .w-sheet__title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+}
+.w-dock__empty {
+    margin: var(--wash-space-7) 0 0;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-body-size);
+}
+.w-dock__empty[hidden], [data-dock]:has(.w-dock__panel) .w-dock__empty { display: none; }
+
+/* ------------------------------------------------------------ form sections (§10.6) */
+/*   <section class="w-formsection"><header class="w-formsection__head"><h2 class="w-formsection__title">Network</h2>
+ *     <p class="w-formsection__lede">…</p></header><div class="w-formsection__body">…fields…</div></section>
+ * Two columns from 1200px: what the section is on the left, its fields on the right. */
+.w-formsection + .w-formsection {
+    margin-top: var(--wash-space-7);
+    padding-top: var(--wash-space-7);
+    border-top: 1px solid var(--wash-hairline);
+}
+.w-formsection__title {
+    margin: 0;
+    color: var(--wash-ink);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+}
+.w-formsection__lede { margin: var(--wash-space-1) 0 0; color: var(--wash-ink-3); font-size: var(--wash-type-body-size); }
+.w-formsection__body { margin-top: var(--wash-space-4); min-width: 0; }
+@media (width >= 1200px) {
+    .w-formsection {
+        display: grid;
+        grid-template-columns: minmax(200px, 300px) minmax(0, 1fr);
+        column-gap: var(--wash-space-8);
+        align-items: start;
+    }
+    .w-formsection__head { position: sticky; top: var(--wash-space-5); }
+    .w-formsection__body { margin-top: 0; max-width: 820px; }
+}
+
+/* ------------------------------------------------------------ groups */
+.w-group + .w-group { margin-top: var(--wash-space-8); }
+.w-group__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--wash-space-3);
+    margin-bottom: var(--wash-space-2);
+}
+.w-group__title {
+    margin: 0 0 var(--wash-space-2);
+    color: var(--wash-ink);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+    letter-spacing: var(--wash-type-title-3-tracking, -0.005em);
+}
+.w-group__head .w-group__title { margin: 0; flex: 1 1 auto; }
+.w-group__more {
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-label-size);
+    text-decoration: none;
+}
+.w-group__more:hover { color: var(--wash-ink); text-decoration: none; }
+.w-group__empty { margin: 0; color: var(--wash-ink-3); }
+
+/* ------------------------------------------------------------ rows */
+.w-rows { margin: 0; padding: 0; list-style: none; }
+.w-row {
+    --w-row-gutter: calc(var(--wash-space-6) + 14px);
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "main when"
+        "main acts";
+    column-gap: var(--wash-space-5);
+    align-items: start;
+    min-height: var(--wash-size-row);
+    margin: 0 calc(-1 * var(--wash-space-3)) 0 calc(-1 * var(--w-row-gutter));
+    padding: var(--wash-space-3) var(--wash-space-3) var(--wash-space-3) var(--w-row-gutter);
+    border-radius: var(--wash-radius-md);
+    transition: background-color var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-row + .w-row::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: var(--w-row-gutter);
+    right: var(--wash-space-3);
+    height: 1px;
+    background: var(--wash-hairline);
+    transition: opacity var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-rows[data-spacing="loose"] .w-row + .w-row::before { display: none; }
+.w-row:is(:hover, :focus-within, [aria-selected="true"], [data-selected]) { background: var(--w-glass-fill-subtle); }
+.w-row:is(:hover, :focus-within, [aria-selected="true"], [data-selected])::before,
+.w-row:is(:hover, :focus-within, [aria-selected="true"], [data-selected]) + .w-row::before { opacity: 0; }
+.w-row > .w-sign {
+    position: absolute;
+    left: calc(var(--wash-space-3) + 2px);
+    top: calc(var(--wash-space-3) + 1px);
+    width: 16px;
+}
+.w-row__main {
+    grid-area: main;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+}
+a.w-row__main, button.w-row__main { cursor: pointer; }
+a.w-row__main:hover { text-decoration: none; }
+/* The whole row is the target: the main link's hit area covers it; actions sit above. */
+a.w-row__main::after, button.w-row__main::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.w-row__main:focus-visible { outline: none; }
+.w-row:has(> .w-row__main:focus-visible) { outline: 2px solid var(--wash-accent-ink); outline-offset: 0; }
+.w-row__title {
+    overflow: hidden;
+    color: var(--wash-ink);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+    font-weight: var(--wash-type-label-weight);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.w-row__key {
+    margin-right: var(--wash-space-2);
+    color: var(--wash-ink-3);
+    font-family: var(--wash-font-mono);
+    font-size: var(--wash-type-mono-sm-size, 12px);
+    font-weight: 400;
+}
+.w-row__sub {
+    overflow: hidden;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.w-row__sub [data-tone="attention"] { color: var(--wash-attention-ink); }
+.w-row__sub [data-tone="danger"] { color: var(--wash-danger-ink); }
+.w-row__sub code, .w-row__sub .w-mono { font-family: var(--wash-font-mono); font-size: 0.95em; }
+.w-row__when {
+    grid-area: when;
+    justify-self: end;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-body-line);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.w-row__actions {
+    grid-area: acts;
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--wash-space-4);
+    opacity: 0;
+    transition: opacity var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-row:is(:hover, :focus-within, [data-pinned], [aria-selected="true"]) .w-row__actions { opacity: 1; }
+@media (hover: none) { .w-row__actions { opacity: 1; } }
+.w-row__progress {
+    width: min(240px, 60%);
+    height: 2px;
+    margin-top: var(--wash-space-2);
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--wash-running-pigment) var(--w-progress, 0%), transparent 0);
+}
+/* Leaving Now (Mu §9.7): height collapse + fade. */
+.w-row[data-leaving] {
+    animation: w-row-leave var(--wash-motion-medium) var(--wash-ease-medium) forwards;
+    pointer-events: none;
+}
+@keyframes w-row-leave {
+    to { opacity: 0; min-height: 0; height: 0; padding-block: 0; margin-block: 0; }
+}
+
+/* ------------------------------------------------------------ status sign */
+.w-sign {
+    display: inline-block;
+    flex: none;
+    width: 1.1em;
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-body-line);
+    text-align: center;
+}
+.w-sign[data-status="waiting"] { color: var(--wash-attention-pigment); }
+.w-sign[data-status="failed"] { color: var(--wash-danger-ink); }
+.w-sign[data-status="unverified"] { color: var(--wash-caution-ink, var(--wash-attention-ink)); }
+.w-sign[data-status="done"], .w-sign[data-status="pending"], .w-sign[data-status="skipped"] { color: var(--wash-ink-3); }
+/* Running: a breathing dot instead of the glyph. */
+.w-sign[data-status="active"] { font-size: 0; }
+.w-sign[data-status="active"]::before {
+    content: "";
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-top: calc((var(--wash-type-body-line) - 7px) / 2);
+    border-radius: 50%;
+    background: var(--wash-running-pigment);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--wash-running-pigment) 22%, transparent);
+    animation: w-mu-breathe 2.4s ease-in-out infinite;
+    vertical-align: top;
+}
+.w-signword { color: var(--wash-ink-2); }
+.w-signword[data-status="waiting"] { color: var(--wash-attention-ink); }
+.w-signword[data-status="failed"] { color: var(--wash-danger-ink); }
+.w-signword :is(.w-sign) { margin-right: 0.3em; }
+
+/* ------------------------------------------------------------ facts */
+.w-facts {
+    display: grid;
+    grid-template-columns: minmax(96px, 128px) minmax(0, 1fr);
+    gap: var(--wash-space-2) var(--wash-space-4);
+    margin: 0;
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+}
+.w-facts dt { color: var(--wash-ink-3); }
+.w-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--wash-ink); }
+.w-facts .w-mono, .w-facts code { font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-sm-size, 12px); }
+
+/* ------------------------------------------------------------ disclosure */
+.w-disclose { margin-top: var(--wash-space-5); }
+.w-disclose > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wash-space-1);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+    list-style: none;
+    cursor: pointer;
+}
+.w-disclose > summary::-webkit-details-marker { display: none; }
+.w-disclose > summary::after { content: "▸"; font-size: 0.85em; transition: transform var(--wash-motion-micro) var(--wash-ease-micro); }
+.w-disclose[open] > summary::after { transform: rotate(90deg); }
+.w-disclose > summary:hover { color: var(--wash-ink); }
+.w-disclose[open] > :not(summary) { margin-top: var(--wash-space-3); }
+
+/* ------------------------------------------------------------ text button */
+.w-textbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wash-space-1);
+    padding: 2px 0;
+    border: 0;
+    background: none;
+    color: var(--wash-ink);
+    font: inherit;
+    font-size: var(--wash-type-label-size);
+    line-height: var(--wash-type-label-line);
+    font-weight: var(--wash-type-label-weight);
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.w-textbtn:hover { text-decoration: underline; text-underline-offset: 3px; }
+.w-textbtn:disabled, .w-textbtn[aria-disabled="true"] { color: var(--wash-ink-3); cursor: default; text-decoration: none; }
+.w-textbtn[data-tone="quiet"] { color: var(--wash-ink-3); font-weight: 400; }
+.w-textbtn[data-tone="quiet"]:hover { color: var(--wash-ink); }
+.w-textbtn[data-tone="danger"] { color: var(--wash-danger-ink); }
+.w-textbtn:focus-visible { outline-offset: 3px; border-radius: 4px; }
+
+/* ------------------------------------------------------------ decision block */
+.w-decision {
+    padding: var(--wash-space-5) var(--wash-space-5) var(--wash-space-4);
+    border-radius: var(--wash-radius-lg);
+    background: var(--wash-attention-wash);
+    color: var(--wash-ink);
+}
+.w-decision[data-tone="danger"] { background: var(--wash-danger-wash); }
+.w-decision[data-tone="plan"] { background: var(--wash-plan-wash, var(--wash-lilac-wash)); }
+.w-decision__q {
+    margin: 0;
+    font-size: var(--wash-type-body-lg-size);
+    line-height: var(--wash-type-body-lg-line);
+    font-weight: var(--wash-type-label-weight);
+}
+.w-decision__r { margin: var(--wash-space-1) 0 0; color: var(--wash-ink-2); font-size: var(--wash-type-body-size); }
+.w-decision pre, .w-decision__code {
+    margin: var(--wash-space-3) 0 0;
+    padding: var(--wash-space-2) var(--wash-space-3);
+    border-radius: var(--wash-radius-sm);
+    background: color-mix(in srgb, var(--wash-surface) 72%, transparent);
+    color: var(--wash-ink-2);
+    font: var(--wash-type-mono-sm-size, 12px) / 1.55 var(--wash-font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.w-decision__acts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--wash-space-4);
+    margin-top: var(--wash-space-4);
+}
+
+/* ------------------------------------------------------------ leaf alert */
+.w-leaf-alert {
+    position: sticky;
+    top: 0;
+    z-index: var(--wash-z-sticky);
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    padding: var(--wash-space-2) var(--w-leaf-pad, 48px);
+    background: color-mix(in srgb, var(--wash-caution-wash, var(--wash-attention-wash)) 85%, transparent);
+    color: var(--wash-ink);
+    font-size: var(--wash-type-label-size);
+}
+.w-leaf-alert[data-tone="danger"] { background: color-mix(in srgb, var(--wash-danger-wash) 88%, transparent); color: var(--wash-danger-ink); }
+.w-leaf-alert:empty, .w-leaf-alert:not(:has(> :not([hidden], [style*="display: none"]))) { display: none; }
+.w-leaf-alert > [hidden] { display: none; }
+
+/* ------------------------------------------------------------ sheet (§7.2) */
+.w-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: var(--wash-z-modal);
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--wash-space-3);
+    background: color-mix(in srgb, var(--wash-ink) 4%, transparent);
+    animation: w-fade-in var(--wash-motion-small) var(--wash-ease-small) backwards;
+}
+.w-sheet__panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: min(var(--wash-size-sheet), 100%);
+    height: 100%;
+    overflow: auto;
+    padding: var(--wash-space-7) var(--wash-space-7) var(--wash-space-8);
+    border-radius: var(--wash-radius-xl);
+    background: var(--w-glass-fill-strong);
+    box-shadow: var(--w-glass-lift-3);
+    backdrop-filter: var(--w-glass-filter-strong);
+    -webkit-backdrop-filter: var(--w-glass-filter-strong);
+    color: var(--wash-ink);
+    animation: w-sheet-in var(--wash-motion-medium) var(--wash-ease-medium) backwards;
+}
+.w-sheet[data-closing] { animation: w-fade-out var(--wash-motion-small) var(--wash-ease-micro) forwards; }
+.w-sheet[data-closing] .w-sheet__panel { animation: w-sheet-out var(--wash-motion-small) var(--wash-ease-micro) forwards; }
+.w-sheet__panel:focus { outline: none; }
+.w-sheet__close { position: absolute; top: var(--wash-space-5); right: var(--wash-space-5); }
+.w-sheet__title {
+    margin: 0;
+    padding-right: var(--wash-space-7);
+    color: var(--wash-plum);
+    font-size: var(--wash-type-title-2-size);
+    line-height: var(--wash-type-title-2-line);
+    font-weight: var(--wash-type-title-2-weight);
+    letter-spacing: var(--wash-type-title-2-tracking);
+}
+.w-sheet__state { margin-top: var(--wash-space-1); }
+.w-sheet__body > * + * { margin-top: var(--wash-space-6); }
+.w-sheet__body { margin-top: var(--wash-space-6); }
+@media (width < 840px) {
+    .w-sheet { padding: 0; }
+    .w-sheet__panel { border-radius: 0; padding: var(--wash-space-6) var(--wash-space-5); }
+}
+@keyframes w-sheet-in { from { opacity: 0; transform: translateX(24px); } }
+@keyframes w-sheet-out { to { opacity: 0; transform: translateX(24px); } }
+@keyframes w-fade-out { to { opacity: 0; } }
+
+/* ------------------------------------------------------------ setting row (§10.6) */
+.w-setting {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--wash-space-6);
+    padding: var(--wash-space-3) 0;
+}
+.w-setting + .w-setting { border-top: 1px solid var(--wash-hairline); }
+.w-setting__label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--wash-ink);
+    font-weight: var(--wash-type-label-weight);
+}
+.w-setting__help { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); font-weight: 400; }
+.w-setting > :not(.w-setting__label) { flex: none; width: auto; min-width: 0; }
+.w-setting .w-select { width: 180px; }
+.w-keys dt { white-space: nowrap; }
+.w-keys { grid-template-columns: max-content minmax(0, 1fr); }
+kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 0 0.4em;
+    border-radius: var(--wash-radius-xs);
+    background: var(--wash-sunken);
+    color: var(--wash-ink-2);
+    font: var(--wash-type-caption-size) / 1.6 var(--wash-font-mono);
+    text-align: center;
+}
+
+/* ------------------------------------------------------------ motion */
+@keyframes w-mu-arrive { from { opacity: 0; transform: translateY(4px); } }
+@keyframes w-mu-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+/* Switching tab or item (WashMotion, wash_shell.js): the old content fades out quickly
+ * ([data-leaving]), the new one fades in ([data-entering]; `backwards` holds the first frame). */
+@keyframes w-mu-enter { from { opacity: 0; } }
+[data-leaving] { opacity: 0; pointer-events: none; transition: opacity var(--wash-motion-micro) var(--wash-ease-micro); }
+[data-entering] { animation: w-mu-enter var(--wash-motion-medium) var(--wash-ease-small) backwards; }
+@media (prefers-reduced-motion: reduce) {
+    [data-entering] { animation: none; }
+    [data-leaving] { opacity: 1; transition: none; }
+    .w-pagehead, .w-leafbody, .w-sheet, .w-sheet__panel, .w-row[data-leaving] { animation: none; }
+    .w-sign[data-status="active"]::before { animation: none; }
+}
+
+/* ------------------------------------------------------------ leaf padding by width */
+.w-stage { --w-leaf-pad: 48px; --w-leaf-top: 40px; }
+@media (width < 1200px) { .w-stage { --w-leaf-pad: 32px; --w-leaf-top: 32px; } }
+@media (width < 840px) {
+    .w-stage { --w-leaf-pad: 16px; --w-leaf-top: 64px; }
+    /* The leaf padding is narrower than the row gutter: rows stop hanging into it. */
+    .w-row { margin-left: 0; }
+}
+
+/* ============================================================ revision 2 (2026-10-20)
+ * "Space used well": app-style workspaces instead of long documents. */
+
+/* ------------------------------------------------------------ the bar: a one-line page header
+ * Title, state sentence, tabs and actions share one line; the content gets the height.
+ * Same markup and WashHead API as before (templates/_layout.html). */
+.w-pagehead {
+    position: sticky;
+    top: 0;
+    z-index: var(--wash-z-sticky);
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+        "back back back back"
+        "title state tabs actions";
+    align-items: center;
+    column-gap: var(--wash-space-5);
+    max-width: none;
+    padding: var(--wash-space-3) var(--w-leaf-pad, 24px);
+    border-bottom: 1px solid var(--wash-hairline);
+    background: var(--wash-surface);
+}
+.w-pagehead__row { display: contents; }
+.w-pagehead__back { grid-area: back; margin-bottom: var(--wash-space-1); }
+.w-pagehead__title {
+    grid-area: title;
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+    letter-spacing: var(--wash-type-title-3-tracking);
+    color: var(--wash-ink);
+}
+.w-pagehead__state {
+    grid-area: state;
+    margin: 0;
+    overflow: hidden;
+    font-size: var(--wash-type-caption-size);
+    line-height: var(--wash-type-caption-line);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+/* Tabs wrap rather than scroll: a scrolling row would clip the More menu. */
+.w-pagehead .w-pagetabs { grid-area: tabs; margin: 0; align-self: stretch; align-items: center; flex-wrap: wrap; row-gap: 0; overflow: visible; }
+.w-pagehead .w-pagetabs__tab { padding-block: var(--wash-space-2); }
+.w-pagehead__actions { grid-area: actions; gap: var(--wash-space-3); }
+@media (width < 840px) {
+    /* Inside the shell the phone menu button floats over the bar's start. */
+    html[data-embed] .w-pagehead { padding-left: calc(var(--wash-space-3) + var(--wash-size-control) + var(--wash-space-3)); }
+    .w-pagehead {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "back back"
+            "title actions"
+            "state state"
+            "tabs tabs";
+        row-gap: var(--wash-space-1);
+    }
+}
+
+/* ------------------------------------------------------------ panes: side-by-side workspace
+ *   <div class="w-panes" data-layout="list-main-aside|list-main|main-aside">
+ *     <section class="w-pane" data-pane="list"><header class="w-pane__head">…</header>…</section>
+ *     <section class="w-pane" data-pane="main">…</section>
+ *     <aside class="w-pane" data-pane="aside">…</aside></div>
+ * Full height under the bar; every pane scrolls on its own; hairlines between, no boxes.
+ * The list pane's width is draggable (wash_shell.js, [data-pane-resize]) and remembered
+ * per page. Narrow leaves fold: below 1200 the aside drops under the main pane; below 840
+ * one pane shows at a time (data-show="list|main" on .w-panes, set by the page). */
+.w-stage:has(> .w-panes), .w-stage:has(> .w-leafbody > .w-panes) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.w-stage:has(> .w-leafbody > .w-panes) > .w-leafbody { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; padding: 0; max-width: none; }
+.w-panes {
+    --w-list-w: clamp(260px, 24%, 380px);
+    --w-aside-w: clamp(280px, 26%, 400px);
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-columns: var(--w-list-w) minmax(0, 1fr) var(--w-aside-w);
+    grid-template-areas: "list main aside";
+}
+.w-panes[data-layout="list-main"] { grid-template-columns: var(--w-list-w) minmax(0, 1fr); grid-template-areas: "list main"; }
+.w-panes[data-layout="main-aside"] { grid-template-columns: minmax(0, 1fr) var(--w-aside-w); grid-template-areas: "main aside"; }
+.w-panes[data-layout="main"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main"; }
+/* A pane the layout leaves out is gone (never an implicit grid row). */
+.w-panes[data-layout="list-main"] > [data-pane="aside"],
+.w-panes[data-layout="main-aside"] > [data-pane="list"],
+.w-panes[data-layout="main"] > :is([data-pane="list"], [data-pane="aside"]) { display: none; }
+.w-pane {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: var(--wash-space-5) var(--w-leaf-pad, 24px) var(--wash-space-7);
+}
+.w-pane[data-pane="list"] { grid-area: list; border-right: 1px solid var(--wash-hairline); padding-inline: var(--wash-space-4); }
+.w-pane[data-pane="main"] { grid-area: main; }
+.w-pane[data-pane="aside"] { grid-area: aside; border-left: 1px solid var(--wash-hairline); padding-inline: var(--wash-space-5); background: color-mix(in srgb, var(--wash-sunken) 35%, var(--wash-surface)); }
+/* Narrow panes have no gutter to hang a status sign in: rows keep it inside the pane. */
+.w-pane:is([data-pane="list"], [data-pane="aside"]) .w-row { margin-inline: calc(-1 * var(--wash-space-2)); padding-left: calc(var(--wash-space-2) + 22px); padding-right: var(--wash-space-2); }
+.w-pane:is([data-pane="list"], [data-pane="aside"]) .w-row > .w-sign { left: var(--wash-space-2); }
+.w-pane:is([data-pane="list"], [data-pane="aside"]) .w-row + .w-row::before { left: calc(var(--wash-space-2) + 22px); right: var(--wash-space-2); }
+.w-pane__head {
+    position: sticky;
+    top: calc(-1 * var(--wash-space-5));
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--wash-space-3);
+    margin: calc(-1 * var(--wash-space-5)) calc(-1 * var(--w-leaf-pad, 24px)) var(--wash-space-3);
+    padding: var(--wash-space-4) var(--w-leaf-pad, 24px) var(--wash-space-2);
+    background: inherit;
+}
+.w-pane[data-pane="list"] > .w-pane__head { margin-inline: calc(-1 * var(--wash-space-4)); padding-inline: var(--wash-space-4); background: var(--wash-surface); }
+.w-pane[data-pane="aside"] > .w-pane__head { margin-inline: calc(-1 * var(--wash-space-5)); padding-inline: var(--wash-space-5); background: color-mix(in srgb, var(--wash-sunken) 35%, var(--wash-surface)); }
+.w-pane[data-pane="main"] > .w-pane__head { background: var(--wash-surface); }
+.w-pane__title {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-label-size);
+    line-height: var(--wash-type-label-line);
+    font-weight: var(--wash-type-label-weight);
+}
+.w-pane__empty { margin: var(--wash-space-7) 0 0; color: var(--wash-ink-3); text-align: center; }
+.w-pane-resize {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -3px;
+    z-index: 2;
+    width: 6px;
+    cursor: col-resize;
+}
+.w-pane-resize:hover, .w-pane-resize[data-dragging] { background: color-mix(in srgb, var(--mu-accent, var(--wash-accent-pigment)) 40%, transparent); }
+@media (width < 1200px) {
+    .w-panes, .w-panes[data-layout="main-aside"] {
+        grid-template-columns: var(--w-list-w) minmax(0, 1fr);
+        grid-template-areas: "list main";
+    }
+    .w-panes[data-layout="main-aside"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main"; }
+    .w-panes > .w-pane[data-pane="aside"] { display: none; }
+    .w-panes[data-aside="open"] > .w-pane[data-pane="aside"] {
+        display: block;
+        position: absolute;
+        inset: 0 0 0 auto;
+        width: min(380px, 90%);
+        z-index: calc(var(--wash-z-sticky) + 1);
+        box-shadow: var(--w-glass-lift-3);
+    }
+    .w-panes { position: relative; }
+}
+@media (width < 840px) {
+    .w-panes, .w-panes[data-layout] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "only"; }
+    .w-panes > .w-pane { grid-area: only; border: 0; }
+    .w-panes:not([data-show="main"]) > .w-pane[data-pane="main"] { display: none; }
+    .w-panes[data-show="main"] > .w-pane[data-pane="list"] { display: none; }
+}
+
+/* ------------------------------------------------------------ boards: overview grids
+ *   <div class="w-board"><section class="w-board__cell" data-span="2?">
+ *     <header class="w-pane__head"><h2 class="w-pane__title">Fleet</h2>…</header>…</section></div>
+ * Flat sections side by side, divided by hairlines, never boxed. */
+.w-board {
+    container: w-board / inline-size;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+    gap: 0;
+    border-top: 1px solid var(--wash-hairline);
+}
+.w-board__cell {
+    min-width: 0;
+    padding: var(--wash-space-5) var(--w-leaf-pad, 24px) var(--wash-space-6);
+    border-bottom: 1px solid var(--wash-hairline);
+    border-right: 1px solid var(--wash-hairline);
+}
+.w-board__cell[data-span="2"] { grid-column: span 2; }
+.w-board__cell[data-span="all"] { grid-column: 1 / -1; }
+.w-board__cell > .w-pane__head { position: static; margin: 0 0 var(--wash-space-3); padding: 0; background: none; }
+.w-board__big {
+    display: block;
+    color: var(--wash-ink);
+    font-size: var(--wash-type-title-1-size);
+    line-height: var(--wash-type-title-1-line);
+    font-weight: 500;
+    letter-spacing: var(--wash-type-title-1-tracking);
+    font-variant-numeric: tabular-nums;
+}
+/* One track: a wide section spans it instead of opening an implicit column. */
+@container w-board (width < 760px) { .w-board__cell[data-span] { grid-column: 1 / -1; } }
+
+/* ------------------------------------------------------------ inline meter
+ *   <span class="w-bar" style="--v: 62%" data-tone="attention|danger|running?" role="img" aria-label="disk 62%"></span>
+ * A 4px track; the value in the tone's pigment (accent by default). */
+.w-bar {
+    display: inline-block;
+    width: var(--w-bar-w, 72px);
+    height: 4px;
+    border-radius: 2px;
+    vertical-align: middle;
+    background:
+        linear-gradient(90deg, var(--w-bar-fill, var(--mu-accent, var(--wash-accent-pigment))) var(--v, 0%), transparent 0),
+        var(--wash-sunken);
+}
+.w-bar[data-tone="attention"] { --w-bar-fill: var(--wash-attention-pigment); }
+.w-bar[data-tone="danger"] { --w-bar-fill: var(--wash-danger-pigment); }
+.w-bar[data-tone="running"] { --w-bar-fill: var(--wash-running-pigment); }
+.w-bar[data-tone="ok"] { --w-bar-fill: var(--wash-ok-pigment); }
+
+/* ------------------------------------------------------------ theme picker (Settings)
+ * One card per theme; each shows its light and dark side as a tiny page (canvas,
+ * a surface bar, two ink lines and the semantic pigments). Colours come from the
+ * tokens through custom properties on the markup (templates/settings.html). */
+/* Settings → Devices: the pairing QR beside its code (settings_devices.js). */
+.mu-pair { display: flex; flex-wrap: wrap; gap: var(--wash-space-5); align-items: flex-start; margin-bottom: var(--wash-space-4); }
+.mu-pair[hidden] { display: none; }
+.mu-pair__qr svg { display: block; width: 180px; height: auto; border-radius: var(--wash-radius-md); }
+.mu-pair__info { display: flex; flex-direction: column; gap: var(--wash-space-2); min-width: 0; flex: 1 1 220px; }
+.mu-pair__info p { margin: 0; }
+.mu-pair__code { font: var(--wash-type-title-2-size) / 1.2 var(--wash-font-mono); letter-spacing: 0.08em; color: var(--wash-ink); }
+
+.w-themes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+    gap: var(--wash-space-3);
+    margin-bottom: var(--wash-space-5);
+}
+.w-themecard {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wash-space-1);
+    padding: var(--wash-space-2) var(--wash-space-2) var(--wash-space-3);
+    border: 0;
+    border-radius: var(--wash-radius-md);
+    background: none;
+    box-shadow: inset 0 0 0 1px var(--wash-hairline);
+    color: var(--wash-ink);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: box-shadow var(--wash-motion-micro) var(--wash-ease-micro);
+}
+.w-themecard:hover { box-shadow: inset 0 0 0 1px var(--wash-hairline-strong); }
+.w-themecard[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--mu-accent-ink, var(--wash-accent-ink)); }
+.w-themecard__sides { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: var(--wash-space-1); }
+.w-themecard__side {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    height: 64px;
+    padding: 8px;
+    border-radius: var(--wash-radius-sm);
+    background: var(--sw-canvas);
+    box-shadow: inset 0 0 0 1px var(--sw-line);
+}
+.w-themecard__bar { height: 10px; border-radius: 3px; background: var(--sw-surface); box-shadow: inset 0 0 0 1px var(--sw-line); }
+.w-themecard__line { height: 3px; border-radius: 2px; background: var(--sw-ink); opacity: 0.85; }
+.w-themecard__line[data-w="long"] { width: 80%; }
+.w-themecard__line[data-w="short"] { width: 50%; background: var(--sw-ink3); }
+.w-themecard__dots { display: flex; gap: 3px; margin-top: auto; }
+.w-themecard__dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--sw-dot); }
+.w-themecard__label { font-weight: var(--wash-type-label-weight); font-size: var(--wash-type-label-size); }
+.w-themecard__note { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); line-height: var(--wash-type-caption-line); }
+
+/* Glass strength (Settings, Wash only): hidden while another palette is chosen. */
+[data-palette] [data-glass-setting] { display: none; }
+.w-glassctl { display: inline-flex; align-items: center; gap: var(--wash-space-3); }
+.w-glassctl .w-slider { width: 160px; }
+.w-glassctl output { min-width: 3.5ch; color: var(--wash-ink-2); font-variant-numeric: tabular-nums; text-align: right; }

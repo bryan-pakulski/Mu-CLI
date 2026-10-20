@@ -1,19 +1,35 @@
-/* Page bundle — Model pricing (/models/costs). W4: no legacy imports and no
- * chat CSS. Linked after wash.css (which declares the layer order);
+/* Page bundle — Insights › Costs (/models/costs). W4: no legacy imports and
+ * no chat CSS. Linked after wash.css (which declares the layer order);
  * everything here lives in the `patterns` layer.
+ *
+ * Mu §5.6: the table has no outer box, hairline rows and a sticky first
+ * column; six key columns by default (provider, model, billing, input,
+ * output, context) — .mc-table[data-columns="all"] shows the rest.
  *
  * The registry is one wide editable `.w-table`. Rows are a single control
  * high: role and notes sit side by side, and the notes field is one line
  * that grows while it has focus (it used to be a two-row textarea under the
- * role input, which doubled every row). */
+ * role input, which doubled every row).
+ *
+ * Cells read as text until you point at or focus them (no field boxes in
+ * every row); the billing caret shows on hover. Workspace (Mu §11b): providers
+ * | the table | the selected model with every field (.mc-dock, the aside pane). */
 @layer patterns {
-    /* The registry filter sits in the shared top bar. */
-    .model-cost-body .w-topbar .mc-search {
-        width: min(280px, 30vw);
+    /* The registry filter sits beside the section title. */
+    .mc-toolbar { align-items: center; flex-wrap: wrap; }
+    .mc-toolbar .mc-search {
+        width: min(280px, 100%);
         height: var(--wash-size-control);
         border-radius: var(--wash-radius-pill);
     }
-    .mc-path-chip { max-width: 360px; }
+    .mc-path { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+    .mc-path:empty { display: none; }
+
+    /* ⋯ menu in the page header (reset lives here, behind a confirmation). */
+    .mc-more { position: relative; }
+    .mc-more > summary { list-style: none; }
+    .mc-more > summary::-webkit-details-marker { display: none; }
+    .mc-more__menu { position: absolute; top: calc(100% + var(--wash-space-1)); right: 0; min-width: 240px; }
 
     .mc-loading {
         display: flex;
@@ -27,14 +43,26 @@
     .mc-error::before { content: "✗"; flex: none; font-weight: var(--wash-type-title-3-weight); }
 
     .mc-main { display: flex; flex-direction: column; gap: var(--wash-space-4); min-width: 0; }
-    .mc-page-head { justify-content: space-between; margin-bottom: 0; }
-    .mc-page-head .w-eyebrow { margin-bottom: var(--wash-space-2); }
-    .mc-lede { max-width: 72ch; margin: var(--wash-space-1) 0 0; color: var(--wash-ink-2); }
-    .mc-page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-2); }
 
     /* ---------------------------------------------------------- registry table */
-    .mc-table-scroll { max-height: calc(100dvh - 300px); min-height: 240px; }
-    .mc-table { width: max(100%, 2440px); table-layout: fixed; }
+    /* The table scrolls inside the middle pane (its header row stays put). */
+    .mc-table-scroll { max-height: calc(100dvh - 230px); min-height: 240px; }
+    .mc-shell .w-table-wrap { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+    .mc-table { width: 100%; table-layout: fixed; }
+    .mc-table[data-columns="all"] { width: max(100%, 2440px); }
+    /* Key columns only: provider, model, billing, input, output, context, actions. */
+    .mc-table[data-columns="key"] :is(th, td):is(:nth-child(3), :nth-child(4), :nth-child(5), :nth-child(8),
+        :nth-child(11), :nth-child(12), :nth-child(13), :nth-child(14), :nth-child(15), :nth-child(16)) { display: none; }
+    .mc-table th {
+        background: transparent;
+        color: var(--wash-ink-3);
+        font-size: var(--wash-type-caption-size);
+        font-weight: var(--wash-type-label-weight);
+    }
+    /* Sticky first column while the all-columns view scrolls sideways. */
+    .mc-table[data-columns="all"] :is(th, td):first-child { position: sticky; left: 0; z-index: 1; }
+    .mc-table[data-columns="all"] th:first-child { z-index: calc(var(--wash-z-raised) + 1); }
+    .mc-table[data-columns="all"] td:first-child { background: var(--w-glass-fill-strong); }
     .mc-table td {
         height: auto;
         padding: var(--wash-space-1) var(--wash-space-2);
@@ -58,16 +86,33 @@
         height: var(--wash-size-control-sm);
         padding: 0 var(--wash-space-2);
         border: 1px solid transparent;
-        border-radius: var(--wash-radius-xs);
+        border-radius: 0;
         background: transparent;
         color: var(--wash-ink);
         font: inherit;
         font-size: var(--wash-type-label-size);
     }
-    .mc-table tr:hover .mc-cell-input,
-    .mc-cell-input:hover { border-color: var(--wash-hairline-strong); background: var(--w-glass-fill); }
-    .mc-cell-input:focus { border-color: var(--wash-control-border); background: var(--w-glass-fill); }
-    select.mc-cell-input { padding-right: var(--wash-space-1); cursor: pointer; }
+    /* Text until pointed at; a hairline underline on hover and focus (no boxes per row). */
+    .mc-cell-input:hover { border-bottom-color: var(--wash-hairline-strong); }
+    .mc-cell-input:focus { border-color: transparent; border-bottom-color: var(--wash-control-border); background: var(--w-glass-fill); outline: none; box-shadow: none; }
+    .mc-cell-input:focus-visible { outline: 2px solid var(--wash-accent-ink); outline-offset: -2px; }
+    select.mc-cell-input { appearance: none; -webkit-appearance: none; padding-right: var(--wash-space-5); cursor: pointer; }
+    .mc-billing-cell { position: relative; }
+    .mc-billing-cell::after {
+        content: "▾";
+        position: absolute;
+        top: 50%;
+        right: var(--wash-space-3);
+        translate: 0 -50%;
+        color: var(--wash-ink-3);
+        font-size: var(--wash-type-caption-size);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--wash-motion-micro) var(--wash-ease-micro);
+    }
+    .mc-table tr:is(:hover, :focus-within) .mc-billing-cell::after { opacity: 1; }
+    .mc-table tbody tr { cursor: default; }
+    .mc-table tbody tr[data-selected] td { background: var(--w-glass-fill-subtle); }
     .mc-cell-input[type="number"] {
         font-family: var(--wash-font-mono);
         font-size: var(--wash-type-mono-sm-size);
@@ -99,6 +144,54 @@
         resize: vertical;
     }
     .mc-row-remove:hover { color: var(--wash-danger-ink); }
+
+    /* ---------------------------------------------------------- dock: the selected model */
+    /* In the middle pane the key columns stay narrow and the model name takes the rest. */
+    .mc-panes .mc-table[data-columns="key"] :is(th, td):nth-child(1) { width: 92px; }
+    .mc-panes .mc-table[data-columns="key"] :is(th, td):nth-child(2) { width: auto; min-width: 160px; }
+    .mc-panes .mc-table[data-columns="key"] :is(th, td):nth-child(6) { width: 136px; }
+    .mc-panes .mc-table[data-columns="key"] :is(th, td):is(:nth-child(7), :nth-child(9)) { width: 80px; }
+    .mc-panes .mc-table[data-columns="key"] :is(th, td):nth-child(10) { width: 96px; }
+    /* The dock edits the row: the inline remove button would repeat its action. */
+    .mc-panes .mc-table[data-columns="key"] :is(th, td):nth-child(17) { width: 36px; }
+    /* Filtered to one provider, the provider column would repeat it in every row. */
+    .mc-table[data-provider-filtered][data-columns="key"] :is(th, td):nth-child(1) { display: none; }
+    /* ---------------------------------------------------------- workspace (Mu §11b) */
+    .mc-panes { --w-list-w: clamp(176px, 15%, 240px); }
+    .mc-dock:has(.w-dock__panel) .w-dock__empty { display: none; }
+    .mc-provider[aria-selected="true"] { background: var(--w-glass-fill-subtle); }
+    .mc-provider[aria-selected="true"] .w-row__title { color: var(--mu-accent-ink, var(--wash-ink)); }
+    .mc-provider .w-row__main { padding-left: 0; }
+    .mc-listpane .w-row.mc-provider { padding-left: var(--wash-space-2); }
+    .mc-listpane .w-row.mc-provider + .w-row::before { left: var(--wash-space-2); }
+    .mc-dock-group + .mc-dock-group { margin-top: var(--wash-space-5); }
+    .mc-dock-group__title {
+        margin: 0 0 var(--wash-space-2);
+        color: var(--wash-ink-3);
+        font-size: var(--wash-type-caption-size);
+        font-weight: var(--wash-type-label-weight);
+    }
+    .mc-dock-grid {
+        display: grid;
+        grid-template-columns: minmax(120px, 40%) minmax(0, 1fr);
+        align-items: center;
+        gap: var(--wash-space-1) var(--wash-space-3);
+    }
+    .mc-dock-label { color: var(--wash-ink-2); font-size: var(--wash-type-label-size); }
+    .mc-dock-input { border-bottom-color: var(--wash-hairline); }
+    textarea.mc-dock-input { height: auto; min-height: 64px; padding-top: var(--wash-space-1); line-height: var(--wash-type-body-line); resize: vertical; }
+    .mc-dock-select { position: relative; display: block; }
+    .mc-dock-select::after {
+        content: "▾";
+        position: absolute;
+        top: 50%;
+        right: var(--wash-space-2);
+        translate: 0 -50%;
+        color: var(--wash-ink-3);
+        font-size: var(--wash-type-caption-size);
+        pointer-events: none;
+    }
+    .mc-dock-actions { margin-top: var(--wash-space-6); }
     .mc-table .mc-table-empty { padding: var(--wash-space-7); color: var(--wash-ink-3); text-align: center; }
 
     .mc-footer {
@@ -110,15 +203,14 @@
         color: var(--wash-ink-3);
         font-size: var(--wash-type-caption-size);
     }
-    .mc-footer strong { color: var(--wash-ink-2); font-variant-numeric: tabular-nums; }
+    #mc-count { color: var(--wash-ink-2); font-variant-numeric: tabular-nums; }
     #mc-status { color: var(--wash-ink-2); }
 
     @media (width < 840px) {
         .mc-table-scroll { max-height: none; }
     }
     @media (width < 600px) {
-        .model-cost-body .w-topbar .mc-search { width: 34vw; }
-        .mc-page-actions { width: 100%; }
+        .mc-toolbar .mc-search { width: 100%; }
     }
     @media (pointer: coarse) {
         .mc-cell-input { height: var(--wash-size-touch); }

@@ -21,7 +21,7 @@ Backoff with the defaults (base=0.4, max=30, budget=120):
     attempt 8+: 30s capped
     stops once cumulative >= 120s.
 
-Tests: `tests/test_provider_retry.py` (5 regression pins).
+Tests: `tests/agent/test_provider_retry.py` (5 regression pins).
 """
 
 from __future__ import annotations
@@ -470,9 +470,12 @@ def _stream_cache_kwargs(provider, messages, session=None) -> dict:
         from providers.base import CacheHint
         tail = 1 if messages and is_runtime_state_message(messages[-1]) else 0
         key = _cache_key(session) if session is not None else ""
-        if not tail and not key:
+        variables = getattr(session, "variables", None) or {}
+        ttl = str(variables.get("anthropic_cache_ttl", "1h") or "").strip().lower()
+        ttl = ttl if ttl in {"5m", "1h"} else ""
+        if not tail and not key and not ttl:
             return {}
-        return {"cache_hint": CacheHint(volatile_tail_parts=tail, cache_key=key)}
+        return {"cache_hint": CacheHint(volatile_tail_parts=tail, cache_key=key, ttl=ttl)}
     except Exception:  # noqa: BLE001 - caching is an optimisation, never a failure
         return {}
 

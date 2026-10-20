@@ -1,5 +1,7 @@
-/* Jobs mode shell (planos Shell): hash routes (#/ dashboard, #/jobs, #/job/<id>?tab=…,
- * #/activity, #/boards (Tickets), #/history, #/settings, #/setup with its Doctor tab at #/doctor), breadcrumbs, status chips (GET /api/jobs/vm/status),
+/* Jobs mode shell: hash routes (#/ Now, #/jobs, #/job/<id>?tab=…, #/activity, #/boards
+ * (Tickets), #/history, #/settings, #/setup with its Doctor tab at #/doctor), the page header
+ * (Mu §4: WashHead title / back link, the state sentence from GET /api/jobs/vm/status, the
+ * current tab), the leaf alert when the connection or Docker is broken, the header menus,
  * global commands and preferences, plus the New job sheet. Page modules (work/activity.js,
  * work_jira.js, work_management.js, work_stage_models.js) listen for the `mu:work-route` event. */
 (() => {
@@ -11,15 +13,21 @@
     const detailEl = document.getElementById('work-detail');
     const jobsEl = document.getElementById('work-jobs');
     const totalEl = document.getElementById('work-total');
+    // Mu §11b panes: the list (compact rows), the main pane (the board, a job, a page) and
+    // the aside (the open job's context; Activity's running stage).
+    const panesEl = document.getElementById('work-panes');
+    const listEl = document.getElementById('work-list');
+    const listCountEl = document.getElementById('work-list-count');
+    const asideEl = document.getElementById('work-aside');
+    const mainEl = document.getElementById('work-main');
     const refreshBtn = document.getElementById('work-refresh');
     const newBtn = document.getElementById('work-new');
     const backdrop = document.getElementById('work-create-backdrop');
     const createForm = document.getElementById('work-create-form');
     const createError = document.getElementById('work-create-error');
-    const sessionEl = document.getElementById('work-session-context');
     const repoHint = document.getElementById('job-repository-hint');
     const executionHelp = document.getElementById('work-execution-help');
-    const crumbsEl = document.getElementById('work-crumbs');
+    const stateEl = document.getElementById('work-state');
     // The session the page was opened from only preselects its workspace: jobs mode lists every
     // session's jobs and a new job asks for the workspace first (recent ones come from saved sessions).
     const entrySession = String(root.dataset.session || '').trim();
@@ -85,6 +93,8 @@
         const n = document.getElementById('work-notify');
         n.setAttribute('aria-pressed', String(prefs.notify));
         n.setAttribute('aria-label', prefs.notify ? 'Turn desktop notifications off' : 'Turn desktop notifications on');
+        const nLabel = n.querySelector('[data-notify-label]');
+        if (nLabel) nLabel.textContent = prefs.notify ? 'Turn notifications off' : 'Turn notifications on';
         n.querySelectorAll('[data-notify-icon]').forEach(i => i.toggleAttribute('hidden', (i.dataset.notifyIcon === 'on') !== prefs.notify));
         registerGlobal();
     }
@@ -99,28 +109,40 @@
         applyPrefs();
     }
 
-    /* ------------------------------------------------------------ status chips (planos StatusChips) */
-    let knownNeeds = null;
-    // Top-bar status chips are Wash status chips: tone via data-tone, glyph + label always.
-    const CHIP_TONE = { muted: 'neutral', warn: 'attention' };
-    function chip(name, tone, text, active) {
-        const el = root.querySelector(`[data-chip="${name}"]`);
-        if (!el) return;
-        el.dataset.tone = CHIP_TONE[tone] || tone;
-        el.querySelector('[data-chip-text]').textContent = text;
-        el.toggleAttribute('data-active', !!active);
-    }
+    /* ------------------------------------------------------------ state sentence (Mu §4.2) */
+    // One sentence under the title replaces the old status chips: needs you · running · checks ·
+    // spend today. Zeros are left out; "Nothing needs you" when nothing waits and nothing runs.
+    let knownNeeds = null, lastStatus = null;
     const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const money = v => `$${(Number(v) || 0).toFixed(2)}`;
+    function spendToday() {
+        if (!lastHome) return 0;
+        const start = new Date(); start.setHours(0, 0, 0, 0);
+        const since = start.getTime() / 1000;
+        return lastHome.jobs.filter(j => Number(j.updated_at || j.created_at) >= since).reduce((sum, j) => sum + (Number(j.cost_usd) || 0), 0);
+    }
+    function paintState() {
+        if (route.name === 'job') return;  // a job's own state sentence (work/view.js) owns the header there
+        const st = lastStatus || { agents: 0, checks: 0, needs_you: 0 };
+        const parts = [];
+        if (st.needs_you) parts.push({ text: `${st.needs_you} need${st.needs_you === 1 ? 's' : ''} you`, tone: 'attention', href: '#/' });
+        if (st.agents) parts.push({ text: `${st.agents} running`, href: '#/activity' });
+        if (st.checks) parts.push({ text: plural(st.checks, 'check'), href: '#/activity' });
+        const spend = spendToday();
+        if (spend >= 0.005) parts.push({ text: `${money(spend)} today`, tone: 'quiet' });
+        if (!parts.length && lastHome) parts.push({ text: lastHome.jobs.length ? 'Nothing needs you' : 'No jobs yet', tone: 'quiet' });
+        if (window.WashHead) window.WashHead.set({ state: parts });
+        else if (stateEl) stateEl.textContent = parts.map(p => p.text).join(' · ');
+    }
+    // Docker health is silent while it's fine: the leaf alert shows only when it's down.
     function renderStatus(st) {
-        chip('agents', st.agents ? 'running' : 'muted', plural(st.agents, 'agent'), st.agents > 0);
-        chip('checks', st.checks ? 'running' : 'muted', plural(st.checks, 'check'), st.checks > 0);
-        chip('needs', st.needs_you ? 'warn' : 'muted', `${st.needs_you} need${st.needs_you === 1 ? 's' : ''} you`, false);
-        const slot = root.querySelector('[data-chip-slot="engine"]');
+        lastStatus = st;
+        paintState();
         const engine = String(st.engine || '');
-        slot.hidden = !engine || engine === 'off';
-        if (!slot.hidden) {
-            chip('engine', engine === 'up' ? 'ok' : engine === 'down' ? 'danger' : 'muted', `docker ${engine}`, false);
-            root.querySelector('[data-chip="engine"]').title = `Container engine: docker ${engine}`;
+        const alert = document.querySelector('[data-alert="engine"]');
+        if (alert) {
+            alert.hidden = engine !== 'down';
+            alert.title = `Container engine: docker ${engine}`;
         }
     }
     // Older servers have no /vm/status: derive the counts from the home VM instead.
@@ -150,14 +172,50 @@
             }
         }
         knownNeeds = ids;
-        if (route.name === 'job') setCrumbs();
+        paintState();
+        if (route.name === 'job') setHead();
     }
+    // The connection is silent while live; "Reconnecting…" shows only after a few seconds down,
+    // so a page load or a brief blip never flashes it.
+    let offlineTimer = 0;
     function onConnection(live) {
-        const el = root.querySelector('[data-chip="live"]');
-        el.dataset.tone = live ? 'ok' : 'caution';
-        el.title = live ? 'Live updates connected' : 'Reconnecting to mucli…';
-        el.querySelector('[data-chip-glyph]').textContent = live ? '●' : '○';
-        el.querySelector('[data-chip-text]').textContent = live ? 'live' : 'offline';
+        const el = document.querySelector('[data-alert="live"]');
+        if (!el) return;
+        clearTimeout(offlineTimer);
+        if (live) { el.hidden = true; return; }
+        offlineTimer = setTimeout(() => { el.hidden = false; }, 3000);
+    }
+
+    /* ------------------------------------------------------------ header menus */
+    // The More tab and the ⋯ tools menu: click or ArrowDown opens; Esc, outside click, Tab or
+    // choosing an item closes; arrows move between items.
+    function bindMenus() {
+        root.querySelectorAll('[data-menu-wrap]').forEach(wrap => {
+            const toggle = wrap.querySelector('[data-menu-toggle]'), menu = wrap.querySelector('[data-menu]');
+            if (!toggle || !menu) return;
+            const items = () => [...menu.querySelectorAll('[role=menuitem]')];
+            const outside = e => { if (!wrap.contains(e.target)) close(false); };
+            function close(focus = true) {
+                menu.hidden = true; toggle.setAttribute('aria-expanded', 'false');
+                document.removeEventListener('mousedown', outside, true);
+                if (focus) toggle.focus();
+            }
+            function open() {
+                menu.hidden = false; toggle.setAttribute('aria-expanded', 'true');
+                document.addEventListener('mousedown', outside, true);
+                items()[0]?.focus();
+            }
+            toggle.addEventListener('click', () => (menu.hidden ? open() : close()));
+            toggle.addEventListener('keydown', e => { if (e.key === 'ArrowDown' && menu.hidden) { e.preventDefault(); open(); } });
+            menu.addEventListener('keydown', e => {
+                const list = items(), i = list.indexOf(document.activeElement);
+                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+                else if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length]?.focus(); }
+                else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length]?.focus(); }
+                else if (e.key === 'Tab') close(false);
+            });
+            menu.addEventListener('click', e => { if (e.target.closest('[role=menuitem]')) close(false); });
+        });
     }
 
     /* ------------------------------------------------------------ router */
@@ -179,21 +237,36 @@
         if (PAGES[page]) return { name: page, params };
         return { name: 'dashboard' };
     }
-    function setCrumbs() {
+    // The page header (Mu §4.1): "Work" on every tab; a job shows its own title under "← Jobs".
+    function setHead() {
         const trail = route.name === 'job'
             ? [{ label: 'Jobs', to: '#/jobs' }, { label: (() => { const j = view.job(); return j?.id === route.id ? (j.key || `#${j.id.slice(0, 8)}`) : `#${route.id.slice(0, 8)}`; })() }]
             : route.name === 'jobs' ? [{ label: 'Jobs' }]
             : route.name === 'setup' && route.params?.get('tab') === 'doctor' ? [{ label: 'Setup', to: '#/setup' }, { label: 'Doctor' }]
-            : PAGES[route.name] ? [{ label: PAGES[route.name] }] : [{ label: 'Dashboard' }];
-        // The shared top-bar breadcrumb (μcli › Work › …): Work links back to the dashboard.
-        crumbsEl.innerHTML = [{ label: 'Work', to: '#/' }, ...trail].map((c, i, all) => `<li class="w-breadcrumb__item">${c.to && i < all.length - 1 ? `<a href="${c.to}">${esc(c.label)}</a>` : `<span aria-current="${i === all.length - 1 ? 'page' : 'false'}">${esc(c.label)}</span>`}</li>`).join('');
+            : PAGES[route.name] ? [{ label: PAGES[route.name] }] : [{ label: 'Now' }];
+        if (route.name === 'job') {
+            const j = view.job();
+            const title = j?.id === route.id ? (j.title || trail[1].label) : trail[1].label;
+            // With the list pane beside the job (wide leaves) the way back is the list itself.
+            const listShown = window.matchMedia ? window.matchMedia('(width >= 840px)').matches : true;
+            window.WashHead?.set({ title, back: listShown ? null : { label: 'Jobs', href: '#/jobs' } });
+        } else {
+            window.WashHead?.set({ title: 'Work', back: null });
+            paintState();
+        }
+        if (newBtn) newBtn.hidden = route.name === 'job';
+        // A job is a full page under "← Jobs": the destination tabs step aside for the job's own.
+        root.dataset.routeName = route.name;
         document.title = `${trail[trail.length - 1].label} · Work · μcli`;
     }
     async function applyRoute() {
         const next = parseHash();
         if (!next) return;
         const changed = !route || route.name !== next.name;
+        // Another job from the list: the open one fades out and the next fades in (Mu §4.3).
+        const jobSwitch = !changed && next.name === 'job' && route.id !== next.id;
         route = next;
+        if (!jobSwitch) [detailEl, asideEl].forEach(el => el?.removeAttribute('data-leaving'));
         const swap = () => { root.querySelectorAll('[data-route]').forEach(s => { s.hidden = s.dataset.route !== route.name; }); };
         // Fade between sections like a page navigation (base.css names the stage w-stage);
         // tab and job changes within a section swap in place.
@@ -206,24 +279,44 @@
             const on = a.dataset.nav === route.name || (route.name === 'job' && a.dataset.nav === 'jobs');
             if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
         });
+        // "More" is the current tab while one of its pages is open.
+        root.querySelectorAll('[data-nav-group]').forEach(b => {
+            if (b.dataset.navGroup.split(' ').includes(route.name)) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+        });
         if (route.name !== 'job') view.leave();
-        setCrumbs();
-        (document.getElementById('w-main') || document.getElementById('work-main')).scrollTop = 0;
+        // Panes per route (Mu §11b): Now = list + board; a job = list + job + context;
+        // Activity = the page + its running stage docked in the aside; the rest = one pane.
+        if (panesEl) {
+            panesEl.dataset.layout = route.name === 'job' ? 'list-main-aside' : route.name === 'dashboard' ? 'list-main' : route.name === 'activity' ? 'main-aside' : 'main';
+            panesEl.removeAttribute('data-aside');
+            panesEl.dataset.show = 'main';
+        }
+        if (asideEl) asideEl.toggleAttribute('data-dock', route.name === 'activity');
+        setHead();
+        if (changed && mainEl) mainEl.scrollTop = 0;
         window.dispatchEvent(new CustomEvent('mu:work-route', { detail: { name: route.name, params: route.params || new URLSearchParams() } }));
+        // Now / Jobs share the dock's job preview (Mu §7.2); other routes close it.
+        view.listMode(route.name);
         if (route.name === 'job') {
+            if (jobSwitch && window.WashMotion) {
+                await window.WashMotion.leave([detailEl, asideEl]);
+                if (route !== next) return;                 // a newer route took over
+            }
             try { await view.select(route.id, { tab: route.tab }); } catch (e) {
                 const missing = /not found|404/i.test(e.message);
+                asideEl?.querySelector('.work-job-side')?.remove();
                 detailEl.innerHTML = `<div class="w-empty" data-variant="error" role="alert"><div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-alert-circle"></use></svg></div>
                     <h3 class="w-empty__title">${missing ? 'Job not found' : 'Couldn’t open this job'}</h3><p class="w-empty__body">${esc(missing ? `Job ${route.id} not found.` : e.message)}</p>
                     <div class="w-empty__actions"><a class="w-btn" data-variant="secondary" href="#/jobs">All jobs</a></div></div>`;
             }
-            setCrumbs();
+            if (jobSwitch) [detailEl, asideEl].forEach(el => (window.WashMotion ? window.WashMotion.enter(el) : el?.removeAttribute('data-leaving')));
+            setHead();
         }
     }
     window.addEventListener('hashchange', applyRoute);
 
     const view = window.MuJobWork.create({
-        api, toast, boardEl, detailEl, totalEl, jobsEl, onHome, onConnection,
+        api, toast, boardEl, detailEl, totalEl, jobsEl, listEl, listCountEl, asideEl, onHome, onConnection,
         onOpen: id => go(id ? `#/job/${encodeURIComponent(id)}` : '#/'),
         onRoute: ({ id, tab }) => {
             if (route.name !== 'job' || route.id !== id) return;
@@ -634,8 +727,6 @@
         }
     }
 
-    sessionEl.textContent = 'all sessions';
-    sessionEl.title = 'Jobs from every session. New jobs ask which workspace to work in' + (entrySession ? ` (default: ${entrySession}’s).` : '.');
     let workspaceTimer = 0;
     workspaceInput.addEventListener('input', () => {
         workspaceInput.dataset.touched = '1';
@@ -669,6 +760,7 @@
     document.getElementById('work-density').addEventListener('click', toggleDensity);
     document.getElementById('work-notify').addEventListener('click', () => void toggleNotify());
     root.querySelector('[data-route-theme]')?.addEventListener('click', () => setTimeout(registerGlobal, 0));
+    bindMenus();
 
     applyPrefs();
     ui.installKeys();

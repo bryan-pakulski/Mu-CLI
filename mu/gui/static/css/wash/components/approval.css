@@ -20,11 +20,14 @@
  *     </div>
  *   </section>
  *
- * A state card on glass: a tone-wash header strip (72% wash mixed into the
- * glass) carrying the "◆ Needs you" status chip. No side rule (G§3.4, §9.9).
- * attention (apricot) for approvals, danger (rose) for high-risk calls,
- * accent (lagoon) for questions. Approve is never auto-focused; the heading
- * takes focus and shows the focus ring.
+ * Mu §7.6, the decision block: the whole card is its tone wash, with no
+ * border, no header strip and no shadow — the only coloured surface on the
+ * leaf, so it is never lost among other tinted things. The heading is the
+ * one-sentence question; the status chip stays for assistive technology
+ * only (the colour and the question already say "needs you"). attention
+ * (apricot) for approvals, danger (rose) for high-risk calls, accent
+ * (lagoon) for questions. Approve is never auto-focused; the heading takes
+ * focus and shows the focus ring.
  */
 .w-approval {
     --w-approval-wash: var(--w-tone-wash, var(--wash-attention-wash));
@@ -33,11 +36,11 @@
     margin: var(--wash-space-2) 0;
     padding: 0;
     overflow: hidden;
-    border: 1px solid var(--w-glass-line);
+    border: 0;
     border-radius: var(--wash-radius-lg);
-    background: var(--w-glass-fill);
+    background: var(--w-approval-wash);
     color: var(--wash-ink);
-    box-shadow: var(--w-glass-lift);
+    box-shadow: none;
     font-size: var(--wash-type-body-size);
     line-height: var(--wash-type-body-line);
     animation: w-approval-in var(--wash-motion-bleed) var(--wash-ease-bleed) both;
@@ -55,25 +58,34 @@
     align-items: center;
     gap: var(--wash-space-3);
     flex-wrap: wrap;
-    padding: var(--wash-space-3) var(--wash-space-4) var(--wash-space-3) var(--wash-space-5);
-    border-bottom: 1px solid var(--wash-hairline);
-    background: color-mix(in srgb, var(--w-approval-wash) 72%, var(--w-glass-fill));
+    padding: var(--wash-space-5) var(--wash-space-5) 0;
+    border-bottom: 0;
+    background: none;
+}
+/* The status chip is for assistive technology only (Mu §7.6). */
+.w-approval__head > .w-chip {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 .w-approval__title {
     flex: 1 1 16rem;
     min-width: 0;
     margin: 0;
     color: var(--wash-ink);
-    font-size: var(--wash-type-body-size);
-    line-height: var(--wash-type-body-line);
-    font-weight: 600;
+    font-size: var(--wash-type-body-lg-size);
+    line-height: var(--wash-type-body-lg-line);
+    font-weight: var(--wash-type-label-weight);
     border-radius: var(--wash-radius-xs);
 }
 .w-approval__title :where(p) { margin: 0; }
 .w-approval__title code {
     padding: 1px 5px;
     border-radius: var(--wash-radius-xs);
-    background: var(--w-glass-fill-strong);
+    background: color-mix(in srgb, var(--wash-surface) 72%, transparent);
     font-family: var(--wash-font-mono);
     font-size: 0.9em;
     font-weight: 500;
@@ -94,7 +106,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--wash-space-3);
-    padding: var(--wash-space-4) var(--wash-space-4) var(--wash-space-4) var(--wash-space-5);
+    padding: var(--wash-space-3) var(--wash-space-5) var(--wash-space-4);
 }
 .w-approval__desc { color: var(--wash-ink-2); }
 .w-approval__tool { display: flex; flex-direction: column; gap: var(--wash-space-3); min-width: 0; }
@@ -115,7 +127,7 @@
     padding: var(--wash-space-3) var(--wash-space-4);
     overflow-x: auto;
     border-radius: var(--wash-radius-sm);
-    background: var(--w-glass-fill-subtle);
+    background: color-mix(in srgb, var(--wash-surface) 72%, transparent);
     color: var(--wash-ink);
     font-family: var(--wash-font-mono);
     font-size: var(--wash-type-mono-size);
@@ -144,7 +156,7 @@
     padding: var(--wash-space-3);
     overflow: auto;
     border-radius: var(--wash-radius-sm);
-    background: var(--w-glass-fill-subtle);
+    background: color-mix(in srgb, var(--wash-surface) 72%, transparent);
     color: var(--wash-ink);
     font-family: var(--wash-font-mono);
     font-size: var(--wash-type-mono-sm-size);
@@ -174,13 +186,25 @@
 .w-approval__risk { display: inline-flex; align-items: center; gap: 6px; color: var(--w-tone-ink, var(--wash-attention-ink)); font-weight: 500; }
 .w-approval__remember { font-size: var(--wash-type-caption-size); color: var(--wash-ink-2); }
 .w-approval .w-btn-row { margin-left: auto; }
+.w-approval { position: relative; }
+/* The diff preview sits on the wash as one sunken surface, not a card in a card. */
+.w-approval__preview :is(.w-diff) { border: 0; box-shadow: none; background: color-mix(in srgb, var(--wash-surface) 72%, transparent); }
 .w-approval[data-current] { scroll-margin: var(--wash-space-6); }
 
 @media (width < 600px) {
     .w-approval__head,
-    .w-approval__body { padding-left: var(--wash-space-4); padding-right: var(--wash-space-3); }
+    .w-approval__body { padding-left: var(--wash-space-4); padding-right: var(--wash-space-4); }
     .w-approval .w-btn-row { width: 100%; justify-content: flex-end; }
 }
 @media (prefers-reduced-motion: reduce) {
     .w-approval { animation: none; }
 }
+
+/* Mu §7.3: no outlined pills. The non-risky Deny / Cancel is a text button;
+ * a risky call keeps its danger button inside the decision. */
+.w-approval .w-btn-row .w-btn[data-variant="secondary"] {
+    border-color: transparent;
+    background: none;
+    box-shadow: none;
+}
+.w-approval .w-btn-row .w-btn[data-variant="secondary"]:hover { background: color-mix(in srgb, var(--wash-surface) 50%, transparent); }

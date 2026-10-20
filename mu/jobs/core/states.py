@@ -11,10 +11,6 @@ Two views of the same lifecycle live here, and only here:
   table; ``advance()`` is the explicit, total mapping that derives the next
   ``CoreState`` from the previous one and the status being written. It reads
   no event history, so the derived state is a pure function of its inputs.
-
-``from_legacy`` is migration-only: it maps a row written before the core
-columns existed (schema < v3) and old events without a ``core_state`` snapshot.
-Live writes never use it.
 """
 
 from __future__ import annotations
@@ -356,61 +352,3 @@ def to_legacy_status(core: CoreState) -> str:
         JobState.FAILED: FAILED_S, JobState.CANCELLED: CANCELLED_S,
     }[s]
 
-
-# ------------------------------------------------------------ migration only
-_ACTIVE_LEGACY = {
-    QUEUED: JobState.PROVISIONING,
-    PREPARING: JobState.PROVISIONING,
-    PLANNING_S: JobState.PLANNING,
-    RUNNING: JobState.IMPLEMENTING,
-    RECOVERING: JobState.IMPLEMENTING,
-    VERIFYING: JobState.CHECKING,
-    REVIEWING_S: JobState.REVIEWING,
-    PUBLISHING: JobState.PUSHING,
-}
-# Pre-v3 rows: ``approval_required`` was the plan gate's reason.
-PLAN_REVIEW_REASONS = frozenset({"approval_required", "plan_review"})
-REVIEW_DONE_REASONS = frozenset({"review_stalled", "review_done"})
-
-
-def _origin(history: Iterable[str]) -> Optional[JobState]:
-    """Most recent active state from newest-first legacy status history."""
-    for status in history:
-        mapped = _ACTIVE_LEGACY.get(str(status or ""))
-        if mapped is not None:
-            return mapped
-    return None
-
-
-def from_legacy(status: str, attention_reason: str = "", *, history: Iterable[str] = (),
-                fix_attempts: int = 0) -> CoreState:
-    """Migration-only map of a pre-v3 ``JobStatus`` (+ attention) onto the core model.
-
-    ``history`` is legacy statuses the row passed through, newest first (the
-    ``from_status`` of its ``status_changed`` events): the only record of
-    ``paused_from`` / ``failed_from`` an old row has. Live transitions use
-    ``advance()``.
-    """
-    status, reason = _value(status), _value(attention_reason)
-    if status in _ACTIVE_LEGACY:
-        return CoreState(_ACTIVE_LEGACY[status], fix_attempts=fix_attempts)
-    if status == NEEDS_HUMAN:
-        if reason in PLAN_REVIEW_REASONS:
-            return CoreState(JobState.PLAN_REVIEW, fix_attempts=fix_attempts)
-        if reason in REVIEW_DONE_REASONS:
-            return CoreState(JobState.REVIEW_DONE, fix_attempts=fix_attempts)
-        return CoreState(JobState.NEEDS_INPUT, paused_from=_origin(history) or JobState.IMPLEMENTING,
-                         fix_attempts=fix_attempts)
-    if status == CONFLICTED:
-        return CoreState(JobState.NEEDS_INPUT, paused_from=_origin(history) or JobState.IMPLEMENTING,
-                         fix_attempts=fix_attempts)
-    if status == READY_FOR_REVIEW:
-        return CoreState(JobState.PUSHED, fix_attempts=fix_attempts)
-    if status == MERGED:
-        return CoreState(JobState.DONE, fix_attempts=fix_attempts)
-    if status in FAILURE_STATUSES:
-        return CoreState(JobState.FAILED, failed_from=_origin(history) or JobState.PROVISIONING,
-                         fix_attempts=fix_attempts)
-    if status in {CANCELLED_S, "archived"}:
-        return CoreState(JobState.CANCELLED, fix_attempts=fix_attempts)
-    raise ValueError(f"unknown legacy status {status!r}")

@@ -11,7 +11,7 @@ The repository already contains the core building blocks for a tooling harness:
 - `mu/tools/descriptors.py` defines tool metadata (`ToolDefinition`, `ToolExecutionContext`), the `TOOLS` registry, approval flags, collated-tool membership, modification-preview helpers, bounds checks, and the descriptor-backed dispatch surface (`mu/tools/_dispatcher.py`).
 - `mu/session/session.py` coordinates tool-call execution inside the conversational loop, including approvals, structured tool results, memory promotion, and collation-aware behavior; `mu/agent/loop_body.py` drives the per-iteration tool loop.
 - `mu/gui/` exposes headless execution through async tasks, approval workflows, direct tool execution, and server-sent events for external clients (FastAPI app in `mu/gui/web_ui.py`, SSE via `sse_starlette` in `mu/gui/routers/chat.py`, REST routers under `mu/gui/routers/`).
-- `tests/test_batch_tool.py` and `tests/test_harness_layers.py` cover important pieces of batch execution and approval-aware orchestration.
+- `tests/tools/test_batch_tool.py` and `tests/tools/test_harness_layers.py` cover important pieces of batch execution and approval-aware orchestration.
 
 That means this work is not a greenfield design. It is a refinement effort: formalize the harness boundaries, clarify responsibilities, and create a roadmap for implementation.
 
@@ -375,10 +375,10 @@ Stage 2 clarifies that the registry should become the authoritative explanation 
 
 ### Implementation Notes
 
-- `tests/test_harness_layers.py` now provides layer-oriented harness tests (descriptor metadata, approval planning, structured results) instead of only feature-specific coverage.
-- `tests/test_batch_tool.py` covers composite flow behavior and approval-plan aggregation details.
-- `tests/test_session.py` exercises structured result envelopes, normalized errors, and modified-file telemetry.
-- The FastAPI GUI server (`mu/gui/`) is exercised through `tests/test_gui_history_panel.py` and the harness-layer tests; approval accept/reject paths are covered by `tests/test_harness_layers.py` and `tests/test_batch_tool.py`.
+- `tests/tools/test_harness_layers.py` now provides layer-oriented harness tests (descriptor metadata, approval planning, structured results) instead of only feature-specific coverage.
+- `tests/tools/test_batch_tool.py` covers composite flow behavior and approval-plan aggregation details.
+- `tests/sessions/` exercises structured result envelopes, normalized errors, and modified-file telemetry.
+- The FastAPI GUI server (`mu/gui/`) is exercised through `tests/gui/` and the harness-layer tests; approval accept/reject paths are covered by `tests/tools/test_harness_layers.py` and `tests/tools/test_batch_tool.py`.
 
 ### Exit Criteria
 

@@ -71,31 +71,9 @@ function muLayerColor(id, hue) {
     return `var(${muLayerToken(id, hue)})`;
 }
 
-// MuCLI session type icons — same Ionicons used by the mobile app.
-// Kept as local inline SVG so the web GUI has no CDN or icon-font dependency.
-const MUCLI_SESSION_TYPE_ICON_NAMES = Object.freeze({
-    workspace: "folder-open-outline",
-    container: "cube-outline",
-    chat: "chatbubble-ellipses-outline",
-});
-
-const MUCLI_SESSION_TYPE_ICON_CONTENT = Object.freeze({
-    workspace: [
-        '<path d="M64,192V120a40,40,0,0,1,40-40h75.89a40,40,0,0,1,22.19,6.72l27.84,18.56A40,40,0,0,0,252.11,112H408a40,40,0,0,1,40,40v40" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
-        '<path d="M479.9,226.55,463.68,392a40,40,0,0,1-39.93,40H88.25a40,40,0,0,1-39.93-40L32.1,226.55A32,32,0,0,1,64,192h384.1A32,32,0,0,1,479.9,226.55Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
-    ].join(""),
-    container: [
-        '<path d="M448,341.37V170.61A32,32,0,0,0,432.11,143l-152-88.46a47.94,47.94,0,0,0-48.24,0L79.89,143A32,32,0,0,0,64,170.61V341.37A32,32,0,0,0,79.89,369l152,88.46a48,48,0,0,0,48.24,0l152-88.46A32,32,0,0,0,448,341.37Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
-        '<polyline points="69 153.99 256 263.99 443 153.99" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
-        '<line x1="256" y1="463.99" x2="256" y2="263.99" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32"/>',
-    ].join(""),
-    chat: [
-        '<path d="M87.48,380c1.2-4.38-1.43-10.47-3.94-14.86A42.63,42.63,0,0,0,81,361.34a199.81,199.81,0,0,1-33-110C47.64,139.09,140.72,48,255.82,48,356.2,48,440,117.54,459.57,209.85A199,199,0,0,1,464,251.49c0,112.41-89.49,204.93-204.59,204.93-18.31,0-43-4.6-56.47-8.37s-26.92-8.77-30.39-10.11a31.14,31.14,0,0,0-11.13-2.07,30.7,30.7,0,0,0-12.08,2.43L81.5,462.78A15.92,15.92,0,0,1,76.84,464a9.61,9.61,0,0,1-9.58-9.74,15.85,15.85,0,0,1,.6-3.29Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="32"/>',
-        '<circle cx="160" cy="256" r="32" fill="currentColor"/>',
-        '<circle cx="256" cy="256" r="32" fill="currentColor"/>',
-        '<circle cx="352" cy="256" r="32" fill="currentColor"/>',
-    ].join(""),
-});
+// Session type icons: the Wash line icons from the shared sprite (the same set as
+// the rail), so a session's type reads in the site's own style everywhere.
+const MUCLI_SESSION_TYPE_ICON_NAMES = Object.freeze({ workspace: "folder", container: "box", chat: "message-circle" });
 
 // The rail represents user prompts (conversation checkpoints), not arbitrary
 // provider/tool messages. Scan bounded raw-turn pages until each explicit
@@ -109,15 +87,15 @@ window.sessionTypeIconName = function sessionTypeIconName(type) {
     return MUCLI_SESSION_TYPE_ICON_NAMES[normalized];
 };
 
-window.sessionTypeIconMarkup = function sessionTypeIconMarkup(type, className = "session-type-svg") {
+window.sessionTypeIconMarkup = function sessionTypeIconMarkup(type, className = "w-icon") {
     const normalized = type === "container" || type === "chat" ? type : "workspace";
-    const safeClass = String(className || "session-type-svg").replace(/[^A-Za-z0-9 _-]/g, "");
-    return `<svg class="${safeClass}" viewBox="0 0 512 512" aria-hidden="true" focusable="false">${MUCLI_SESSION_TYPE_ICON_CONTENT[normalized]}</svg>`;
+    const safeClass = String(className || "w-icon").replace(/[^A-Za-z0-9 _-]/g, "");
+    return `<svg class="${safeClass}" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-${MUCLI_SESSION_TYPE_ICON_NAMES[normalized]}"></use></svg>`;
 };
 
-// Session avatar (components/avatar.css): a pigment tile with the session's monogram and a
-// small session-type badge. The pigment is a stable hash of the name, so a session keeps its
-// colour everywhere (the Android drawer uses the same rule: src/ui/SessionAvatar.tsx).
+// Session avatar (components/avatar.css): a flat tile with the session type's line icon.
+// sessionMonogram / sessionPigment stay for the Android parity table and anything that
+// still wants a stable per-session colour.
 const MUCLI_AVATAR_PIGMENTS = Object.freeze(["lagoon", "meadow", "sun", "apricot", "rose", "lilac", "sky", "plum"]);
 const MUCLI_AVATAR_BADGE = Object.freeze({ workspace: "folder", container: "box", chat: "message-circle" });
 
@@ -141,11 +119,8 @@ window.sessionPigment = function sessionPigment(name) {
 window.sessionAvatarMarkup = function sessionAvatarMarkup(name, type, size = "") {
     const normalized = type === "container" || type === "chat" ? type : "workspace";
     const sizeAttr = size === "sm" || size === "lg" ? ` data-size="${size}"` : "";
-    // The monogram is letters and digits only (sessionMonogram), so it is safe as markup.
-    return `<span class="w-avatar" data-pigment="${sessionPigment(name)}"${sizeAttr} aria-hidden="true">`
-        + `<span class="w-avatar__mono">${sessionMonogram(name)}</span>`
-        + `<span class="w-avatar__badge" data-type="${normalized}"><svg class="w-icon" focusable="false">`
-        + `<use href="/static/icons/wash.svg#i-${MUCLI_AVATAR_BADGE[normalized]}"></use></svg></span></span>`;
+    return `<span class="w-avatar" data-type="${normalized}"${sizeAttr} aria-hidden="true">`
+        + `<svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-${MUCLI_AVATAR_BADGE[normalized]}"></use></svg></span>`;
 };
 
 // MUCLI_CONTAINER_PERSISTENCE_V1 — actionable session-load errors.
@@ -2310,6 +2285,20 @@ ${problem.text}`, "error", 16000);
         },
         async remove(thread) {
             if (!thread || !thread.thread_id) return;
+            const sessions = Alpine.store("sessions");
+            if (thread.session_name && thread.session_name === this.currentName) {
+                Alpine.store("toast").show("Switch to another thread before deleting this one.", "error", 6000);
+                return;
+            }
+            // The server refuses to delete a thread whose session is loaded in memory:
+            // unload it first (an idle, non-current thread loses nothing by unloading).
+            if (thread.session_name && sessions.isLoaded(thread.session_name)) {
+                if (sessions.isBusy(thread.session_name)) {
+                    Alpine.store("toast").show(`Thread '${thread.title || thread.session_name}' is running — wait for its turn to finish.`, "error", 6000);
+                    return;
+                }
+                if (!(await sessions.unload(thread.session_name))) return;
+            }
             try {
                 const params = new URLSearchParams({
                     session_name: this.currentName || "",
@@ -2327,7 +2316,7 @@ ${problem.text}`, "error", 16000);
                 await Alpine.store("sessions").load();
                 await this.load(this.currentName);
             } catch (e) {
-                Alpine.store("toast").show(String(e || "thread delete failed"), "error", 9000);
+                Alpine.store("toast").show((e && e.message) || String(e || "Thread delete failed"), "error", 9000);
             }
         },
     });
@@ -2413,12 +2402,18 @@ ${problem.text}`, "error", 16000);
             const r = await fetch(
                 `/api/sessions/${encodeURIComponent(target)}/artifacts/${encodeURIComponent(artifactId)}`,
                 { method: "DELETE" },
-            );
-            if (r.ok) {
-                this.bySession[target] = (this.bySession[target] || []).filter(
-                    a => a.artifact_id !== artifactId
-                );
+            ).catch(() => null);
+            if (!r || !r.ok) {
+                const d = r ? await r.json().catch(() => ({})) : {};
+                // Already gone on the server: drop it here too; anything else is reported.
+                if (!r || r.status !== 404) {
+                    Alpine.store("toast").show(d.detail || `Couldn't delete the artifact (${r ? r.status : "offline"})`, "error");
+                    return;
+                }
             }
+            this.bySession[target] = (this.bySession[target] || []).filter(
+                a => a.artifact_id !== artifactId
+            );
         },
         formatSize(bytes) {
             const n = Number(bytes) || 0;
@@ -2917,10 +2912,26 @@ ${problem.text}`, "error", 16000);
             this.hasExecutionWorkspace = !!data.has_execution_workspace;
             this.realMode = data.current || "default";
             this.active = this.realMode;
+            // Mu revision 2: the workspace panel is the chat page's aside pane. On a
+            // wide view it shows by default — the last view you chose, else Files
+            // (an attached workspace or a container) or Context — unless you closed it.
+            if (!this.panelModes.includes(this.active)) {
+                const fallback = this.defaultView();
+                if (fallback) this.active = fallback;
+            }
             const store = this.panelModes.includes(this.active)
                 ? Alpine.store(this.active)
                 : null;
             if (store && typeof store.load === "function") store.load();
+        },
+        defaultView() {
+            const layout = Alpine.store("layout");
+            if (!layout || !layout.panelOpen) return null;
+            if (!window.matchMedia || !window.matchMedia("(width >= 1200px)").matches) return null;
+            let saved = null;
+            try { saved = localStorage.getItem("mucli-panel-view"); } catch (e) { /* private mode */ }
+            if (saved && this.panelModes.includes(saved)) return saved;
+            return this.hasExecutionWorkspace ? "files" : "memory";
         },
         async set(name) {
             const r = await fetch(`/api/modes/${name}`, { method: "POST" });
@@ -2935,6 +2946,9 @@ ${problem.text}`, "error", 16000);
         },
         setView(name) {
             this.active = name;
+            if (this.panelModes.includes(name)) {
+                try { localStorage.setItem("mucli-panel-view", name); } catch (e) { /* private mode */ }
+            }
             const store = this.panelModes.includes(name)
                 ? Alpine.store(name)
                 : null;
@@ -3071,7 +3085,24 @@ ${problem.text}`, "error", 16000);
             this.announcement = "";
             requestAnimationFrame(() => { this.announcement = String(text || ""); });
         },
-        push(payload) { this.queue.push(payload); },
+        push(payload) {
+            if (!this.queue.some(x => x.id === payload.id)) this.queue.push(payload);
+        },
+        // Questions wait indefinitely on the server, so a reload or a dropped connection must
+        // bring them back: rebuild the queue from /api/prompts (new ones added, ended ones dropped).
+        async resync() {
+            try {
+                const r = await fetch("/api/prompts", { cache: "no-store" });
+                if (!r.ok) return;
+                const pending = (await r.json()).pending || [];
+                const ids = new Set(pending.map(p => p.id));
+                this.queue = this.queue.filter(x => ids.has(x.id));
+                for (const p of pending) {
+                    const { id, ...prompt } = p;
+                    this.push({ id, prompt, session_name: prompt.session_name || null });
+                }
+            } catch (_) { /* next reconnect retries */ }
+        },
         // Remove a specific id from the queue (used after answer/cancel
         // since the head isn't always the right one with cross-session
         // prompts in flight).
@@ -3497,6 +3528,8 @@ ${problem.text}`, "error", 16000);
             // Opening the mobile app should reveal the conversation first.
             // Drawer visibility on a phone must not overwrite desktop prefs.
             if (window.matchMedia('(max-width: 760px)').matches) this.sidebarOpen = false;
+            // The shell owns the desktop collapse (wash_shell.js, every page): follow it.
+            document.addEventListener('mucli:sidebar', (e) => { this.sidebarOpen = !!(e.detail && e.detail.open); });
         },
         _persist() {
             try {
@@ -3509,14 +3542,48 @@ ${problem.text}`, "error", 16000);
             } catch (e) {}
         },
         toggleSidebar() {
+            if (window.WashShell && !window.matchMedia('(max-width: 760px)').matches) {
+                window.WashShell.toggleSidebar();   // fires mucli:sidebar, which updates sidebarOpen
+                return;
+            }
             this.sidebarOpen = !this.sidebarOpen;
             if (!window.matchMedia('(max-width: 760px)').matches) this._persist();
         },
         closeMobileSidebar() {
             if (window.matchMedia('(max-width: 760px)').matches) this.sidebarOpen = false;
+            this.closeSessions();
+        },
+        // Inside the persistent shell the sessions column is the view's own list pane
+        // (templates/_layout.html .mu-viewside). Below 840px it hides; the session
+        // header's Sessions button opens it as an overlay.
+        sessionsOpen: false,
+        toggleSessions(force) {
+            this.sessionsOpen = typeof force === "boolean" ? force : !this.sessionsOpen;
+            const side = document.querySelector(".mu-viewside");
+            if (side) side.toggleAttribute("data-open", this.sessionsOpen);
+            if (this._sessionsAway) {
+                document.removeEventListener("pointerdown", this._sessionsAway, true);
+                this._sessionsAway = null;
+            }
+            if (this.sessionsOpen) {
+                // A tap outside the overlay (and outside its toggle) closes it.
+                this._sessionsAway = (e) => {
+                    if (e.target.closest(".mu-viewside, .w-chathead__sessions")) return;
+                    this.toggleSessions(false);
+                };
+                document.addEventListener("pointerdown", this._sessionsAway, true);
+            }
+        },
+        closeSessions() {
+            if (this.sessionsOpen) this.toggleSessions(false);
         },
         togglePanel() {
-            this.panelOpen = !this.panelOpen;
+            this.setPanel(!this.panelOpen);
+        },
+        // Open or close the workspace panel (Files, Context, Artifacts…) and remember it, so a
+        // closed panel stays closed across reloads.
+        setPanel(open) {
+            this.panelOpen = !!open;
             this._persist();
         },
         startDrag(which, e) {
@@ -6835,6 +6902,8 @@ function bootSSE() {
                 reconnectAttempt = 0;
             }, RECONNECT_STABLE_MS);
             bumpWatchdog();
+            // Pending questions survive reloads and outages (they never time out).
+            Alpine.store("prompts").resync();
             // On reconnect (not initial boot), re-sync state in case we
             // missed events while the connection was down.
             if (hasConnectedBefore) {
@@ -6865,6 +6934,8 @@ function bootSSE() {
                 }
                 return;
             }
+            // Orchestration wants the operator: refresh the sidebar badge (wash_shell.js).
+            if (data && data.kind === "orchestration_attention") document.dispatchEvent(new CustomEvent("mucli:orch-attention"));
             routeEvent(data);
         };
         source.addEventListener("ping", bumpWatchdog);
@@ -7086,6 +7157,8 @@ function routeEvent(ev) {
             prompts.push({ id: ev.id, prompt: ev.prompt, session_name: name });
             break;
         case "prompt_resolved":
+            // Answered — here, in another tab, on the phone or in the terminal: drop its card.
+            prompts._remove(ev.id);
             // Server-side YOLO auto-approvals carry the additive `auto: true`
             // flag (mu/gui/web_ui.py notify_auto_approved). Prompts a person
             // answered are recorded by the card itself on submit.
@@ -7101,7 +7174,11 @@ function routeEvent(ev) {
                 }, name);
             }
             break;
-        case "prompt_cancelled": break;
+        case "prompt_cancelled":
+            // Stop, another tab, the phone or the server ended this question: its card goes,
+            // so a stale card never locks the composer or sits beside the next question.
+            prompts._remove(ev.id);
+            break;
         case "turn_complete":
             // A terminal error is carried on turn_complete as well as the
             // immediate error event so reconnecting clients cannot remain
@@ -7852,6 +7929,50 @@ document.addEventListener("DOMContentLoaded", () => {
     Alpine.store("skills").load();
     Alpine.store("cmdComplete").load();
     Alpine.store("inspector").loadProviders();
+    // /?settings=open (the Settings page's "Chat and workspace" link) opens the
+    // settings drawer once, then drops the parameter so a reload doesn't reopen it.
+    try {
+        const url = new URL(location.href);
+        if (url.searchParams.get("settings") === "open" && document.querySelector(".w-chat")) {
+            url.searchParams.delete("settings");
+            history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+            Alpine.store("inspector").openDrawer();
+        }
+    } catch (e) { console.error("settings=open", e); }
+    // /?ask=<text> (other surfaces' "Ask about this", e.g. Orchestration's fleet results):
+    // the text lands in the composer, focused and unsent, so the operator reviews it first.
+    const prefillAsk = (text) => {
+        const box = document.querySelector(".w-chat .w-composer__textarea");
+        if (!box || !text) return false;
+        box.value = String(text).slice(0, 4000);
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+        box.focus();
+        box.setSelectionRange(box.value.length, box.value.length);
+        return true;
+    };
+    try {
+        const url = new URL(location.href);
+        const ask = url.searchParams.get("ask");
+        if (ask) {
+            url.searchParams.delete("ask");
+            history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+            setTimeout(() => prefillAsk(ask), 0);
+        }
+    } catch (e) { console.error("ask", e); }
+    // Inside the persistent shell the same links arrive as route changes: open the drawer
+    // or fill the composer in place instead of reloading the chat view (wash_shell.js `mu:route`).
+    window.addEventListener("mu:route", (event) => {
+        try {
+            const target = new URL(event.detail.href, location.href);
+            if (target.pathname !== "/" || !document.querySelector(".w-chat")) return;
+            if (target.searchParams.get("settings") === "open") {
+                event.preventDefault();
+                Alpine.store("inspector").openDrawer();
+            } else if (target.searchParams.get("ask") && prefillAsk(target.searchParams.get("ask"))) {
+                event.preventDefault();
+            }
+        } catch (e) { /* let the view reload */ }
+    });
     function pollVisible(storeName, interval) {
         let pending = false;
         const refresh = async () => {
@@ -8050,6 +8171,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const pane = document.createElement('section');
         pane.id = 'pricing-settings-pane';
         pane.className = 'settings-pane pricing-settings-pane';
+        pane.setAttribute('role', 'tabpanel');
         pane.setAttribute('x-show', "$store.inspector.tab === 'pricing'");
         pane.innerHTML = `
             <div class="pricing-settings-head">

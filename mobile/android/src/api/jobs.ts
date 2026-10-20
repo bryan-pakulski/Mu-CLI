@@ -1,8 +1,12 @@
+// Job REST routes that have no view-model / command equivalent (plan §6 Work: one client is
+// jobCore — VM + /api/jobs/cmd — for everything else): creating a job, saved sessions, settings
+// and run rules, toolchain images, Jira, history/report/archive, diagnostics, attempts and the
+// attention count.
+
 import { api } from './client';
 
 export type JobStatus = 'queued' | 'preparing' | 'running' | 'needs_human' | 'verifying' | 'planning' | 'reviewing' | 'publishing' | 'ready_for_review' | 'recovering' | 'conflicted' | 'failed' | 'timed_out' | 'budget_exceeded' | 'environment_error' | 'cancelled' | 'merged';
 export type AttentionReason = '' | 'question' | 'approval_required' | 'ambiguous_requirement' | 'secret_required' | 'merge_conflict' | 'budget_exceeded' | 'environment_failure' | 'verification_required' | 'test_failure' | 'unsafe_action' | 'worker_lost' | 'provider_error' | 'models_unset' | 'plan_review' | 'no_validation' | 'review_stalled' | 'publish_failed' | string;
-export type JobBoardSection = 'needs_you' | 'running' | 'queued' | 'ready' | 'failed' | 'done';
 
 export type JobStageName = 'plan' | 'implement' | 'review';
 
@@ -105,101 +109,6 @@ export interface JobAttempt {
   metadata: Record<string, unknown>;
 }
 
-export interface VerificationCheck {
-  command: string;
-  passed: boolean;
-  return_code: number | null;
-  timed_out: boolean;
-  duration_seconds: number;
-  stdout: string;
-  stderr: string;
-  error: string;
-}
-
-export interface VerificationRun {
-  id: string;
-  job_id: string;
-  status: string;
-  passed: boolean;
-  started_at: number;
-  completed_at: number;
-  checks: VerificationCheck[];
-  base_sha: string;
-  head_sha: string;
-  changed_files: string[];
-  additions: number;
-  deletions: number;
-  diff_stat: string;
-  dirty: boolean;
-  dirty_status: string;
-  manifest_path: string;
-  summary: Record<string, unknown>;
-}
-
-export interface WorkReceipt {
-  schema_version: number;
-  generated_at: number;
-  job: {
-    id: string;
-    title: string;
-    description: string;
-    status: JobStatus;
-    needs_attention: boolean;
-    attention_reason: AttentionReason;
-    attention_detail: string;
-  };
-  outcome: {
-    ready_for_review: boolean;
-    terminal: boolean;
-    attempts: number;
-    elapsed_seconds: number;
-    cost_usd: number;
-  };
-  ticket: {
-    acceptance_criteria: string[];
-    validation_commands: string[];
-  };
-  git: {
-    repository: string;
-    repository_id?: string | null;
-    base_branch: string;
-    base_sha: string;
-    branch: string;
-    worktree: string;
-    head_sha: string;
-    changed_files: string[];
-    additions: number;
-    deletions: number;
-    diff_stat: string;
-    dirty: boolean | null;
-  };
-  verification: VerificationRun | null;
-  attempts: JobAttempt[];
-  usage: {
-    cost_usd: number;
-    tokens: Record<string, number>;
-  };
-  activity: {
-    events: number;
-    agent_messages: number;
-    tool_calls: number;
-    human_responses: number;
-    checkpoints: number;
-    verification_runs: number;
-  };
-}
-
-export interface JobDiff {
-  job_id: string;
-  base_sha: string;
-  head_sha: string;
-  branch: string;
-  files: string[];
-  stat: string;
-  patch: string;
-  truncated: boolean;
-}
-
 export interface JobDiagnosticsSnapshot {
   job_id: string;
   status: JobStatus;
@@ -219,11 +128,6 @@ export interface JobDiagnosticsSnapshot {
   worker_log_size: number;
   worker_log_tail: string;
   worker_log_truncated: boolean;
-}
-
-export interface JobBoardResponse {
-  counts: Record<JobBoardSection, number>;
-  sections: Record<JobBoardSection, EngineeringJob[]>;
 }
 
 export interface CreateJobInput extends Record<string, unknown> {
@@ -246,13 +150,6 @@ export interface CreateJobInput extends Record<string, unknown> {
   environment?: Record<string, unknown>;
   execution?: Partial<JobExecutionProfile>;
   metadata?: Record<string, unknown>;
-}
-
-export interface JobInteractionResponse extends Record<string, unknown> {
-  detail?: string;
-  decision?: 'approve' | 'deny' | 'explain' | string;
-  value?: unknown;
-  selected?: unknown[];
 }
 
 /** Pipeline settings stored server-side in $MUCLI_HOME/jobs/settings.json. */
@@ -366,59 +263,6 @@ export interface ToolchainImage {
   started_at?: number;
   finished_at?: number;
 }
-
-export interface JobPlan {
-  summary?: string;
-  steps?: string[];
-  acceptance_criteria?: string[];
-  validation_commands?: string[];
-  model?: { provider?: string; model?: string };
-}
-
-/** Plan awaiting review: job metadata wins, attention context is the fallback. */
-export function planReviewDraft(job: Pick<EngineeringJob, 'acceptance_criteria' | 'validation_commands'> & { metadata?: Record<string, unknown> }, context: Record<string, unknown> = {}) {
-  const meta = (job.metadata || {}) as Record<string, unknown>;
-  const plan = ((meta.plan as JobPlan) || (context.plan as JobPlan) || {}) as JobPlan;
-  const pick = (primary: unknown, fallback: unknown): string[] => {
-    const list = Array.isArray(primary) && primary.length ? primary : (Array.isArray(fallback) ? fallback : []);
-    return list.map(item => String(item)).filter(Boolean);
-  };
-  return {
-    plan,
-    steps: Array.isArray(plan.steps) ? plan.steps.map(String) : [],
-    criteria: pick(job.acceptance_criteria, context.acceptance_criteria ?? plan.acceptance_criteria),
-    commands: pick(job.validation_commands, context.validation_commands ?? plan.validation_commands),
-  };
-}
-
-export function splitLines(value: string): string[] {
-  return String(value || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean);
-}
-
-export function planApprovalBody(criteriaText: string, commandsText: string, detail = ''): JobInteractionResponse {
-  return {
-    decision: 'approve',
-    detail: detail.trim(),
-    value: { acceptance_criteria: splitLines(criteriaText), validation_commands: splitLines(commandsText) },
-  };
-}
-
-export function missingStageModels(models: JobStageModels | undefined): JobStageName[] {
-  return JOB_STAGE_NAMES.filter(stage => {
-    const entry = models?.[stage];
-    return !(entry && String(entry.provider || '').trim() && String(entry.model || '').trim());
-  });
-}
-
-export type JobDeleteResult = {
-  job_id: string;
-  deleted: boolean;
-  forced?: boolean;
-  worktree_removed: boolean;
-  artifacts_removed: string[];
-  warnings: string[];
-  branch_preserved: string;
-};
 
 /** Secret-free Jira link view ($MUCLI_HOME/integrations/jira.json). */
 export interface JiraBoardPref { id: number; name: string; project?: string; type?: string }
@@ -653,7 +497,6 @@ export function jobHistoryQuery(q: JobHistoryQuery): Record<string, string | num
 }
 
 export const jobsApi = {
-  list: () => api.get<{ jobs: EngineeringJob[] }>('/api/jobs'),
   /** Every saved user session (job workers excluded), current first then most recent. */
   sessions: () => api.get<JobSessionsResponse>('/api/jobs/sessions'),
   getSettings: () => api.get<JobPipelineSettings>('/api/jobs/settings'),
@@ -664,29 +507,18 @@ export const jobsApi = {
   toolchains: () => api.get<{ toolchains: ToolchainImage[] }>('/api/jobs/toolchains'),
   /** Starts a background build of a saved row's image (400 when the base image is not in a saved row). */
   buildToolchain: (baseImage: string) => api.post<ToolchainImage>('/api/jobs/toolchains/build', { base_image: baseImage }),
-  board: () => api.get<JobBoardResponse>('/api/jobs/board'),
-  get: (jobId: string) => api.get<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}`),
   create: (input: CreateJobInput) => api.post<{ job: EngineeringJob }>('/api/jobs', input),
   /** New job sheet with a ticket key: import that Jira ticket with the sheet's workspace/execution as defaults. */
   importTicket: (key: string, sessionName: string | null | undefined, defaults: Record<string, unknown>, force = false) =>
     api.post<{ created: Array<{ key: string; job_id: string; title?: string }>; skipped?: Array<{ key: string; job_id: string; reason?: string }>; errors?: Array<{ key: string; error: string }> }>(
       '/api/jobs/jira/import', { keys: [key], session_name: sessionName || undefined, defaults, ...(force ? { force: true } : {}) },
     ),
-  receipt: (jobId: string) => api.get<{ receipt: WorkReceipt }>(`/api/jobs/${encodeURIComponent(jobId)}/receipt`),
+  /** Worker log, failure and diagnostic events (the Diagnostics tab; no VM equivalent). */
   diagnostics: (jobId: string) => api.get<{ diagnostics: JobDiagnosticsSnapshot }>(`/api/jobs/${encodeURIComponent(jobId)}/diagnostics`),
-  diff: (jobId: string) => api.get<{ diff: JobDiff }>(`/api/jobs/${encodeURIComponent(jobId)}/diff`),
-  events: (jobId: string, after = 0) => api.get<{ events: JobEvent[] }>(`/api/jobs/${encodeURIComponent(jobId)}/events`, { query: { after } }),
+  /** Jobs waiting on a human (the Work tab badge, as the web rail). */
+  attention: () => api.get<{ count: number; jobs: Array<{ id: string; title: string; status: string; attention_reason: string; attention_detail: string; updated_at: number }> }>('/api/jobs/attention', { timeoutMs: 6_000 }),
+  /** Attempts per stage run (Cost & audit tab; no VM equivalent). */
   attempts: (jobId: string) => api.get<{ attempts: JobAttempt[] }>(`/api/jobs/${encodeURIComponent(jobId)}/attempts`),
-  verifications: (jobId: string) => api.get<{ verifications: VerificationRun[] }>(`/api/jobs/${encodeURIComponent(jobId)}/verifications`),
-  respond: (jobId: string, response: JobInteractionResponse) => api.post<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}/respond`, response),
-  requestChanges: (jobId: string, feedback: string) => api.post<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}/request-changes`, { feedback }),
-  continue: (jobId: string, detail?: string) => api.post<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}/continue`, { detail }),
-  discard: (jobId: string, reason?: string) => api.post<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}/discard`, { reason }),
-  cancel: (jobId: string, reason?: string) => api.post<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { reason }),
-  resume: (jobId: string, detail?: string) => api.post<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}/resume`, { detail }),
-  retry: (jobId: string, reason?: string) => api.post<{ job: EngineeringJob }>(`/api/jobs/${encodeURIComponent(jobId)}/retry`, { reason }),
-  /** Single-step delete: cancels running work, archives, then purges record/telemetry/evidence. Git branch preserved. */
-  delete: (jobId: string, force = true) => api.delete<JobDeleteResult>(`/api/jobs/${encodeURIComponent(jobId)}?force=${force ? 1 : 0}`),
   /** History / management list (archived and terminal jobs included). */
   history: (q: JobHistoryQuery = {}) => api.get<JobHistoryResponse>('/api/jobs/history', { query: jobHistoryQuery(q) }),
   /** Aggregate report for the same filters as history. */

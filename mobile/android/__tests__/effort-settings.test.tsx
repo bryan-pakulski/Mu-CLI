@@ -4,7 +4,6 @@ import { effortApi, effortLabel, effortOptions } from '../src/api/effort';
 import { inspectorApi } from '../src/api/inspector';
 import { jobsApi } from '../src/api/jobs';
 import { providersApi } from '../src/api/providers';
-import { AdvancedSettingsSheet, optionLabel } from '../src/components/AdvancedSettingsSheet';
 import { EffortControl } from '../src/components/EffortControl';
 import { JobRulesForm } from '../src/components/JobRulesForm';
 import { ToastHost } from '../src/ui';
@@ -74,39 +73,6 @@ describe('EffortControl', () => {
     await waitFor(() => expect(getCurrent).toHaveBeenCalledTimes(1));
     act(() => { useConnectionStore.setState({ activeModel: 'glm-5.3' } as any); });
     await waitFor(() => expect(getCurrent).toHaveBeenCalledTimes(2));
-  });
-});
-
-describe('AdvancedSettingsSheet', () => {
-  const groups = [
-    { name: 'speed & effort', variables: [
-      { key: 'reasoning_effort', type: 'str', default: '', value: '', is_default: true, help: 'Effort',
-        options: ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
-      { key: 'turn_roll_deferred', type: 'bool', default: true, value: true, is_default: true, help: '' },
-    ] },
-    { name: 'ollama', variables: [
-      { key: 'ollama_num_ctx_default', type: 'int', default: 65536, value: 65536, is_default: true, help: '' },
-    ] },
-  ];
-
-  it('renders options as pickers and saves the chosen value', async () => {
-    inspector.getVariables.mockResolvedValue({ groups });
-    const screen = render(<AdvancedSettingsSheet visible onClose={jest.fn()} />);
-    await waitFor(() => expect(screen.getByText('Speed & effort')).toBeTruthy());
-    fireEvent.press(screen.getByText('Speed & effort'));
-    expect(screen.getByLabelText('reasoning_effort Default')).toBeTruthy();
-    fireEvent.press(screen.getByLabelText('reasoning_effort medium'));
-    await waitFor(() => expect(inspector.setVariable).toHaveBeenCalledWith('reasoning_effort', 'medium'));
-    expect(optionLabel('')).toBe('Default');
-  });
-
-  it('explains cloud vs local Ollama routes', async () => {
-    inspector.getVariables.mockResolvedValue({ groups });
-    const screen = render(<AdvancedSettingsSheet visible onClose={jest.fn()} />);
-    await waitFor(() => expect(screen.getByText('Ollama')).toBeTruthy());
-    fireEvent.press(screen.getByText('Ollama'));
-    expect(screen.getByText(/ignores num_ctx and keep_alive/)).toBeTruthy();
-    expect(screen.getByText(/at least 64k/)).toBeTruthy();
   });
 });
 

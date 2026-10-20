@@ -58,7 +58,7 @@
                 label: 'Show ' + (item.display_name || item.name) + ' panel',
                 icon: 'panel-right',
                 keywords: 'panel stage view ' + item.name,
-                run: function () { mode.setView(item.name); if (layout) layout.panelOpen = true; },
+                run: function () { mode.setView(item.name); if (layout) layout.setPanel(true); },
             };
         });
     }, { priority: 20 });

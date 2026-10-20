@@ -6,6 +6,7 @@
     jobTimer: null, lastLogSeq: 0, mounts: [], devices: [], editingName: null,
     stats: {}, statsTimer: null, // MUCLI_CONTAINER_MONITOR_V1
     hardware: null, // MUCLI_CONTAINER_HARDWARE_V1
+    selected: null, mainKey: '', history: {}, // Mu §11b: the chosen environment / template; live samples per environment
   };
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -65,6 +66,8 @@
   }
 
   // Container status → shared status vocabulary (glyph + label, never colour alone).
+  // Mu §5.4: one sign (.w-sign, keyed by the vocabulary `status` group) plus the
+  // word in the row's second line; colour only for running, needs-you and failed.
   const STATUS_STYLE = {
     running: {glyph: '●', tone: 'running', label: 'Running'},
     created: {glyph: '○', tone: 'neutral', label: 'Created'},
@@ -76,10 +79,22 @@
     error: {glyph: '✗', tone: 'danger', label: 'Error'},
     dead: {glyph: '✗', tone: 'danger', label: 'Dead'},
   };
-  const statusChip = status => {
+  // Container status → the vocabulary `status` group its sign uses.
+  const STATUS_SIGN = {running: 'active', restarting: 'active', paused: 'waiting', missing: 'failed', error: 'failed', dead: 'failed'};
+  const statusStyle = status => {
     const key = String(status || '').toLowerCase();
     const style = STATUS_STYLE[key] || {glyph: '○', tone: 'neutral', label: key ? key[0].toUpperCase() + key.slice(1) : 'Unknown'};
-    return `<span class="w-chip" data-tone="${style.tone}" data-status="${esc(key)}"><span class="w-chip__glyph" aria-hidden="true">${style.glyph}</span><span>${esc(style.label)}</span></span>`;
+    return {...style, sign: STATUS_SIGN[key] || 'pending'};
+  };
+  const statusSign = status => {
+    const style = statusStyle(status);
+    return `<span class="w-sign" data-status="${style.sign}" aria-hidden="true">${style.glyph}</span>`;
+  };
+  // The status word: attention / danger ink only when it asks for your eyes.
+  const statusWord = status => {
+    const style = statusStyle(status);
+    const tone = style.sign === 'failed' ? ' data-tone="danger"' : style.sign === 'waiting' ? ' data-tone="attention"' : '';
+    return `<span class="w-env-status"${tone}>${esc(style.label)}</span>`;
   };
 
   // ---------------------------------------------------------------- templates: "Used for jobs"
@@ -102,7 +117,7 @@
     const meta = [`${setup.length} setup command${setup.length === 1 ? '' : 's'}`, `${egress.length} domain${egress.length === 1 ? '' : 's'}`].join(' · ');
     return `<details class="w-env-jobs" data-template-jobs="${esc(name)}"${openJobs.has(name) ? ' open' : ''}>
       <summary class="w-env-jobs__summary"><span class="w-env-jobs__title">Used for jobs</span>
-        <span class="w-chip" data-variant="meta" data-template-used="${used}">Used by ${used} job${used === 1 ? '' : 's'}</span><span class="w-env-jobs__meta">${esc(meta)}</span></summary>
+        <span class="w-env-jobs__used" data-template-used="${used}">Used by ${used} job${used === 1 ? '' : 's'}</span><span class="w-env-jobs__meta">${esc(meta)}</span></summary>
       <form class="w-env-jobs__form" data-template-jobs-form="${esc(name)}" novalidate>
         <div class="w-field"><span class="w-field__label" id="tpl-setup-${esc(name)}">Job setup commands</span>
           <ol class="w-env-jobs__cmds" aria-labelledby="tpl-setup-${esc(name)}">${setup.map((c, i) => setupRow(name, c, i)).join('') || ''}</ol>
@@ -163,93 +178,308 @@
     state.templates = listing.templates || [];
     state.defaults = defaults;
     state.hardware = defaults.hardware || null;
+    if (!state.opened) {
+      state.opened = true;
+      if (!selectFromUrl()) autoSelect();
+    } else if (!selectedExists()) {
+      state.selected = null;
+      autoSelect();
+    }
     render();
-    renderStats();
     startStatsPolling();
   }
 
-  // Top-bar status chips (Wash shell, .w-chip): count + glyph + label.
-  function renderChips() {
-    const envChip = document.getElementById('container-count-chip');
-    if (envChip) {
-      const running = state.containers.filter(ref => ref.status === 'running').length;
-      const total = state.containers.length;
-      envChip.dataset.tone = running ? 'running' : 'neutral';
-      envChip.querySelector('[data-chip-glyph]').textContent = running ? '●' : '○';
-      envChip.querySelector('[data-chip-text]').textContent = running
-        ? `${running} of ${total} running`
-        : `${total} environment${total === 1 ? '' : 's'}`;
+  window.addEventListener('hashchange', () => { if ((location.hash || '').startsWith('#template-')) { selectFromUrl(); render(); } });
+
+  // ---------------------------------------------------------------- selection (Mu §11b)
+  // One thing is chosen at a time: an environment or a template. MAIN shows it,
+  // ASIDE its context. A row you pick goes in ?open= (a reload reopens it); the
+  // first environment is chosen on arrival without touching the URL.
+  const panes = () => $('env-panes');
+  function openParam() { try { return new URL(location.href).searchParams.get('open'); } catch (_) { return null; } }
+  function setOpenParam(value) {
+    try {
+      const url = new URL(location.href);
+      if (value) url.searchParams.set('open', value); else url.searchParams.delete('open');
+      history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+    } catch (_) { /* no URL support */ }
+  }
+  function selectedExists() {
+    const sel = state.selected;
+    if (!sel) return false;
+    return sel.kind === 'template' ? state.templates.some(item => item.name === sel.name) : state.containers.some(item => item.name === sel.name);
+  }
+  // ?open=<name> | ?open=template:<name> | #template-<name> (the job page's link).
+  function selectFromUrl() {
+    const param = openParam();
+    const hash = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+    if (param && param.startsWith('template:')) {
+      const name = param.slice('template:'.length);
+      if (state.templates.some(item => item.name === name)) { state.selected = {kind: 'template', name}; return true; }
+    } else if (param && state.containers.some(item => item.name === param)) {
+      state.selected = {kind: 'env', name: param}; return true;
+    } else if (hash.startsWith('template-')) {
+      const name = hash.slice('template-'.length);
+      if (state.templates.some(item => item.name === name)) { state.selected = {kind: 'template', name}; return true; }
     }
-    const tplChip = document.getElementById('template-count-chip');
-    if (tplChip) {
-      const count = state.templates.length;
-      tplChip.querySelector('[data-chip-text]').textContent = `${count} template${count === 1 ? '' : 's'}`;
+    return false;
+  }
+  function autoSelect() {
+    if (state.containers.length) state.selected = {kind: 'env', name: state.containers[0].name};
+    else if (state.templates.length) state.selected = {kind: 'template', name: state.templates[0].name};
+    else state.selected = null;
+  }
+  // `pick`: the user chose it (URL + narrow screens show the main pane).
+  let selectSeq = 0;
+  async function select(kind, name, {pick = false, show = true, animate = true} = {}) {
+    const prev = state.selected;
+    const switching = animate && pick && !!prev && (prev.kind !== kind || prev.name !== name);
+    state.selected = {kind, name};
+    if (pick) {
+      setOpenParam(kind === 'template' ? `template:${name}` : name);
+      if (show) panes().setAttribute('data-show', 'main');
     }
+    markSelected();
+    // Another environment: the open one fades out and the chosen one fades in (Mu §4.3).
+    const seq = ++selectSeq;
+    const fade = [$('env-main'), $('env-aside')];
+    if (switching && window.WashMotion) {
+      await window.WashMotion.leave(fade);
+      if (seq !== selectSeq) return;
+    }
+    renderMain();
+    renderAside();
+    if (switching) fade.forEach(el => (window.WashMotion ? window.WashMotion.enter(el) : el?.removeAttribute('data-leaving')));
+  }
+
+  // The state sentence under the page title (Mu §4.2): "2 running · 1 stopped ·
+  // 1 template", zeros left out. Written through WashHead when the frame has it.
+  function renderState() {
+    const running = state.containers.filter(ref => ref.status === 'running').length;
+    const other = state.containers.length - running;
+    const templates = state.templates.length;
+    const parts = [
+      running && {text: `${running} running`},
+      other && {text: `${other} stopped`, tone: 'quiet'},
+      templates && {text: `${templates} template${templates === 1 ? '' : 's'}`},
+    ].filter(Boolean);
+    if (window.WashHead) { window.WashHead.set({state: parts}); return; }
+    const el = $('environment-state');
+    if (el) el.innerHTML = parts.map(part => `<span class="w-state__part"${part.tone ? ` data-tone="${part.tone}"` : ''}>${esc(part.text)}</span>`).join('');
+  }
+
+  // A list row's second line (Mu §5.1): the state in words, then a live CPU meter
+  // and memory once a sample exists — never a "waiting for a sample" placeholder.
+  function rowSub(ref) {
+    const parts = [statusWord(ref.status)];
+    if ((ref.job_scan_blocks || []).length) parts.push('<span data-tone="attention">Secret scan blocked a job</span>');
+    const live = state.stats[ref.name];
+    if (live && live.status === 'running') {
+      const cpu = Number(live.cpu_percent || 0);
+      parts.push(`<span class="w-env-rowmeter"><span class="w-bar" style="--v: ${Math.min(100, cpu).toFixed(0)}%" data-tone="${cpu >= 85 ? 'danger' : 'running'}" role="img" aria-label="CPU ${cpu.toFixed(0)}%"></span>${cpu.toFixed(0)}%</span>`);
+      parts.push(formatBytes(live.memory_used_bytes));
+    } else if (live && live.storage_writable_bytes) {
+      parts.push(`${formatBytes(live.storage_writable_bytes)} retained`);
+    } else {
+      const sessions = (ref.attached_sessions || []).length;
+      if (sessions) parts.push(`${sessions} session${sessions === 1 ? '' : 's'}`);
+    }
+    return parts.join(' · ');
+  }
+
+  function envRow(ref) {
+    const blocked = (ref.job_scan_blocks || []).length > 0;
+    const selected = state.selected && state.selected.kind === 'env' && state.selected.name === ref.name;
+    return `<li class="w-row w-env-item" data-name="${esc(ref.name)}"${selected ? ' data-selected' : ''}>
+        ${blocked ? '<span class="w-sign" data-status="waiting" aria-hidden="true">◆</span>' : statusSign(ref.status)}
+        <button type="button" class="w-row__main" data-card-action="open" data-name="${esc(ref.name)}" aria-label="Open environment ${esc(ref.name)}"${selected ? ' aria-current="true"' : ''}>
+          <span class="w-row__title">${esc(ref.name)}</span>
+          <span class="w-row__sub" data-stats-line="${esc(ref.name)}">${rowSub(ref)}</span>
+        </button>
+      </li>`;
+  }
+
+  // The ⋯ menu on the main pane's head: the actions that aren't buttons there (Mu §7.3).
+  function overflowMenu(ref) {
+    return `<details class="w-env-overflow">
+          <summary class="w-btn" data-variant="icon" data-size="sm" title="More actions" aria-label="More actions for ${esc(ref.name)}">${icon('more-horizontal', 'sm')}</summary>
+          <div class="w-menu w-env-overflow__menu" role="menu" aria-label="Actions for ${esc(ref.name)}">
+            <button type="button" class="w-menu__item" role="menuitem" data-action="edit" data-name="${esc(ref.name)}">${icon('sliders-horizontal')}<span class="w-menu__label">Configure</span></button>
+            <button type="button" class="w-menu__item" role="menuitem" data-action="restart" data-name="${esc(ref.name)}">${icon('rotate-ccw')}<span class="w-menu__label">Restart</span></button>
+            <button type="button" class="w-menu__item" role="menuitem" data-action="clone" data-name="${esc(ref.name)}">${icon('copy')}<span class="w-menu__label">Clone</span></button>
+            <button type="button" class="w-menu__item" role="menuitem" data-action="attach" data-name="${esc(ref.name)}">${icon('link')}<span class="w-menu__label">Attach session</span></button>
+            <button type="button" class="w-menu__item" role="menuitem" data-action="snapshot" data-name="${esc(ref.name)}">${icon('layers')}<span class="w-menu__label">Create template</span></button>
+            <hr class="w-menu__separator">
+            <button type="button" class="w-menu__item" role="menuitem" data-tone="danger" data-action="remove" data-name="${esc(ref.name)}">${icon('trash-2')}<span class="w-menu__label">Remove environment</span></button>
+          </div>
+        </details>`;
+  }
+
+  function templateRow(item) {
+    const used = Number(item.jobs_using || 0);
+    const sub = [used ? `used by ${used} job${used === 1 ? '' : 's'}` : '', item.source_container ? `from ${esc(item.source_container)}` : esc(item.description || '')].filter(Boolean).join(' · ');
+    const selected = state.selected && state.selected.kind === 'template' && state.selected.name === item.name;
+    return `<li class="w-row w-env-item w-env-item--template" id="template-${esc(item.name)}" data-name="${esc(item.name)}"${selected ? ' data-selected' : ''}>
+        <span class="w-sign" data-status="pending" aria-hidden="true">○</span>
+        <button type="button" class="w-row__main" data-card-action="template" data-name="${esc(item.name)}" aria-label="Open template ${esc(item.name)}"${selected ? ' aria-current="true"' : ''}>
+          <span class="w-row__title">${esc(item.name)}</span>
+          <span class="w-row__sub">${sub || 'Template'}</span>
+        </button>
+      </li>`;
   }
 
   function render() {
-    renderChips();
-    $('container-empty').hidden = state.containers.length > 0;
-    $('container-list').innerHTML = state.containers.map(ref => {
-      const sessions = (ref.attached_sessions || []).map(name =>
-        `<span class="w-chip" data-variant="meta"><span>${esc(name)}</span><button type="button" class="w-chip__remove" data-action="detach" data-name="${esc(ref.name)}" data-session="${esc(name)}" title="Detach session" aria-label="Detach ${esc(name)}">${icon('x', 'sm')}</button></span>`
-      ).join('') || '<span class="w-env-muted">—</span>';
-      const running = ref.status === 'running';
-      const primary = running ? 'stop' : 'start';
-      return `<article class="w-card w-env-card" data-variant="interactive" data-card-action="edit" data-name="${esc(ref.name)}" tabindex="0" role="button" aria-label="Edit environment ${esc(ref.name)}">
-        <header class="w-card__head">
-          <span class="w-eyebrow" data-tone="ok"><i class="w-eyebrow__swatch"></i>Environment</span>
-          <div class="w-env-card__tools">
-            <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-action="${primary}" data-name="${esc(ref.name)}" title="${running ? 'Stop' : 'Start'} environment" aria-label="${primary} ${esc(ref.name)}">${icon(running ? 'square' : 'play', 'sm')}</button>
-            <details class="w-env-overflow">
-              <summary class="w-btn" data-variant="icon" data-size="sm" title="More actions" aria-label="More actions for ${esc(ref.name)}">${icon('more-horizontal', 'sm')}</summary>
-              <div class="w-menu w-env-overflow__menu" role="menu" aria-label="Actions for ${esc(ref.name)}">
-                <button type="button" class="w-menu__item" role="menuitem" data-action="shell" data-name="${esc(ref.name)}">${icon('terminal')}<span class="w-menu__label">Open shell</span></button>
-                <button type="button" class="w-menu__item" role="menuitem" data-action="restart" data-name="${esc(ref.name)}">${icon('rotate-ccw')}<span class="w-menu__label">Restart</span></button>
-                <button type="button" class="w-menu__item" role="menuitem" data-action="clone" data-name="${esc(ref.name)}">${icon('copy')}<span class="w-menu__label">Clone</span></button>
-                <button type="button" class="w-menu__item" role="menuitem" data-action="attach" data-name="${esc(ref.name)}">${icon('link')}<span class="w-menu__label">Attach session</span></button>
-                <button type="button" class="w-menu__item" role="menuitem" data-action="snapshot" data-name="${esc(ref.name)}">${icon('layers')}<span class="w-menu__label">Create template</span></button>
-                <hr class="w-menu__separator">
-                <button type="button" class="w-menu__item" role="menuitem" data-tone="danger" data-action="remove" data-name="${esc(ref.name)}">${icon('trash-2')}<span class="w-menu__label">Remove environment</span></button>
-              </div>
-            </details>
-          </div>
-          <h3 class="w-card__title w-env-card__title">${esc(ref.name)}</h3>
-          <div class="w-chip-row">
-            ${statusChip(ref.status)}
-            ${ref.jobs_using ? `<span class="w-chip w-env-jobs-badge" data-variant="meta" title="Non-finished jobs whose build environments snapshot this environment"><span>Used by ${Number(ref.jobs_using)} job${ref.jobs_using === 1 ? '' : 's'}</span></span>` : ''}
-          </div>
-        </header>
-        <div class="w-card__body">
-          ${(ref.job_scan_blocks || []).map(block => `<div class="w-env-scan-warning" role="note"><strong><span aria-hidden="true">◆</span> Secret scan blocked job <a href="/work#/job/${esc(block.job_id)}">#${esc(String(block.job_id).slice(0, 8))}</a></strong> (build environment ${esc(block.binding)}): remove these from the environment or allow them in Jobs → Settings → Build environments.<ul>${(block.paths || []).map(path => `<li><code>${esc(path)}</code></li>`).join('')}</ul></div>`).join('')}
-          <dl class="w-env-meta"><dt>Image</dt><dd>${esc(ref.image)}</dd><dt>Template</dt><dd>${esc(ref.template_name || 'custom')}</dd><dt>Sessions</dt><dd class="w-env-meta__chips">${sessions}</dd><dt>Network</dt><dd>${esc(ref.network_name || '—')}</dd><dt>Worker</dt><dd>${esc(ref.worker_port || '—')}</dd></dl>
-          <section class="w-env-monitor" data-stats-name="${esc(ref.name)}" aria-label="Live resource monitor for ${esc(ref.name)}">
-            <div class="w-env-monitor__waiting"><span class="w-skeleton" style="--w-skeleton-w: 60%"></span><span class="w-skeleton" style="--w-skeleton-w: 40%"></span></div>
-          </section>
-        </div>
-        <footer class="w-card__foot w-env-card__hint"><span>Open configuration</span><span aria-hidden="true">›</span></footer>
-      </article>`;
-    }).join('');
-
+    renderState();
+    $('container-list-empty').hidden = state.containers.length > 0;
+    $('container-list').hidden = state.containers.length === 0;
+    $('container-list').innerHTML = state.containers.map(envRow).join('');
     $('template-empty').hidden = state.templates.length > 0;
-    $('template-list').innerHTML = state.templates.map(item => `<article class="w-card w-env-card w-env-card--template" data-variant="interactive" data-template-action="use" data-name="${esc(item.name)}" id="template-${esc(item.name)}" aria-label="Template ${esc(item.name)}">
-      <header class="w-card__head">
-        <span class="w-eyebrow" data-tone="plan"><i class="w-eyebrow__swatch"></i>Template</span>
-        <div class="w-env-card__tools"><button type="button" class="w-btn" data-variant="icon" data-size="sm" data-template-action="remove" data-name="${esc(item.name)}" title="Delete template" aria-label="Delete template ${esc(item.name)}">${icon('trash-2', 'sm')}</button></div>
-        <h3 class="w-card__title w-env-card__title">${esc(item.name)}</h3>
-      </header>
-      <div class="w-card__body">
-        <p class="w-env-card__lede">${esc(item.description || 'Reusable container environment')}</p>
-        <dl class="w-env-meta"><dt>Source</dt><dd>${esc(item.source_container)}</dd><dt>Image</dt><dd>${esc(item.image)}</dd></dl>
-        ${templateJobsSection(item)}
-      </div>
-      <footer class="w-card__foot w-env-card__hint"><button type="button" class="w-btn w-env-card__use" data-variant="ghost" data-size="sm" data-template-action="use" data-name="${esc(item.name)}" aria-label="Create environment from template ${esc(item.name)}">Use as a base <span aria-hidden="true">›</span></button></footer>
-    </article>`).join('');
-    bindTemplateJobs();
+    $('template-list').hidden = state.templates.length === 0;
+    $('template-list').innerHTML = state.templates.map(templateRow).join('');
+    renderMain();
+    renderAside();
 
     $('environment-template').innerHTML = state.templates.map(item => `<option value="${esc(item.name)}">${esc(item.name)}</option>`).join('');
     const option = $('environment-source').querySelector('option[value="template"]');
     if (option) option.disabled = state.templates.length === 0;
+  }
+
+  function markSelected() {
+    document.querySelectorAll('#container-manager .w-env-item').forEach(row => {
+      const kind = row.classList.contains('w-env-item--template') ? 'template' : 'env';
+      const on = !!(state.selected && state.selected.kind === kind && state.selected.name === row.dataset.name);
+      row.toggleAttribute('data-selected', on);
+      const main = row.querySelector('.w-row__main');
+      if (main) { if (on) main.setAttribute('aria-current', 'true'); else main.removeAttribute('aria-current'); }
+    });
+  }
+
+  // ---------------------------------------------------------------- MAIN: the chosen thing
+  const CHARTS = [
+    {key: 'cpu', label: 'CPU'},
+    {key: 'mem', label: 'Memory'},
+    {key: 'net', label: 'Network', legend: [['rx', '↓ in'], ['tx', '↑ out']]},
+    {key: 'io', label: 'Disk I/O', legend: [['r', 'read'], ['w', 'write']]},
+  ];
+  function envHead(ref) {
+    const running = ref.status === 'running';
+    return `<header class="w-env-head">
+        <button type="button" class="w-textbtn w-env-back" data-env-back>${icon('arrow-left', 'sm')}<span>Environments</span></button>
+        <div class="w-env-head__title">
+          <h2 class="w-env-title">${esc(ref.name)}</h2>
+          <p class="w-state" id="env-main-state">${envState(ref)}</p>
+        </div>
+        <div class="w-env-head__acts">
+          <button type="button" class="w-textbtn" data-action="shell" data-name="${esc(ref.name)}">${icon('terminal', 'sm')}<span>Terminal</span></button>
+          <button type="button" class="w-textbtn" data-action="${running ? 'stop' : 'start'}" data-name="${esc(ref.name)}">${running ? 'Stop' : 'Start'}</button>
+          <button type="button" class="w-textbtn" data-action="edit" data-name="${esc(ref.name)}">Configure</button>
+          ${overflowMenu(ref)}
+          <button type="button" class="w-textbtn w-env-aside-toggle" data-tone="quiet" data-env-aside-toggle aria-controls="env-aside" aria-expanded="false">Details</button>
+        </div>
+      </header>`;
+  }
+  function envState(ref) {
+    const live = state.stats[ref.name];
+    const parts = [`<span class="w-state__part">${statusWord(ref.status)}</span>`];
+    if (live && live.status === 'running' && live.uptime_seconds) parts.push(`<span class="w-state__part">up ${esc(formatDuration(live.uptime_seconds))}</span>`);
+    const users = (ref.attached_sessions || []).length;
+    if (users) parts.push(`<span class="w-state__part">used by ${esc(ref.attached_sessions.slice(0, 2).join(', '))}${users > 2 ? ` +${users - 2}` : ''}</span>`);
+    if (ref.jobs_using) parts.push(`<span class="w-state__part w-env-jobs-badge" title="Non-finished jobs whose build environments snapshot this environment">used by ${Number(ref.jobs_using)} job${ref.jobs_using === 1 ? '' : 's'}</span>`);
+    return parts.join('');
+  }
+  function envMain(ref) {
+    return `${envHead(ref)}
+      ${(ref.job_scan_blocks || []).map(block => `<div class="w-decision w-env-scan-warning" role="note"><p class="w-decision__q">Secret scan blocked job <a href="/work#/job/${esc(block.job_id)}">#${esc(String(block.job_id).slice(0, 8))}</a></p><p class="w-decision__r">Build environment ${esc(block.binding)}: remove these from the environment, or allow them in Work › Settings › Build environments.</p><pre>${(block.paths || []).map(path => esc(path)).join('\n')}</pre></div>`).join('')}
+      <section class="w-env-monitor" data-stats-name="${esc(ref.name)}" aria-label="Live resource use for ${esc(ref.name)}">
+        <div class="w-env-charts">${CHARTS.map(chart => `
+          <figure class="w-env-chart" data-chart="${chart.key}">
+            <figcaption class="w-env-chart__cap"><span class="w-env-chart__label">${chart.label}</span><strong class="w-env-chart__value" data-chart-value></strong></figcaption>
+            ${chart.legend ? `<p class="w-env-chart__legend">${chart.legend.map(([series, text]) => `<span data-series="${series}"><i aria-hidden="true"></i>${text}</span>`).join('')}</p>` : ''}
+            <div class="w-env-chart__plot" data-chart-plot></div>
+          </figure>`).join('')}
+        </div>
+        <dl class="w-facts w-env-monitor__grid" data-monitor-facts></dl>
+        <p class="w-env-monitor__note" data-monitor-note hidden></p>
+      </section>`;
+  }
+  function templateMain(item) {
+    openJobs.add(item.name);  // in the main pane the editor is the point of the page: expanded
+    return `<header class="w-env-head">
+        <button type="button" class="w-textbtn w-env-back" data-env-back>${icon('arrow-left', 'sm')}<span>Environments</span></button>
+        <div class="w-env-head__title">
+          <h2 class="w-env-title">${esc(item.name)}</h2>
+          <p class="w-state"><span class="w-state__part">Template</span>${item.description ? `<span class="w-state__part">${esc(item.description)}</span>` : ''}</p>
+        </div>
+        <div class="w-env-head__acts">
+          <button type="button" class="w-textbtn" data-template-action="use" data-name="${esc(item.name)}">Use as a base</button>
+          <button type="button" class="w-textbtn w-env-aside-toggle" data-tone="quiet" data-env-aside-toggle aria-controls="env-aside" aria-expanded="false">Details</button>
+        </div>
+      </header>
+      <div class="w-env-template-jobs">${templateJobsSection(item)}</div>`;
+  }
+  function selectedRef() {
+    const sel = state.selected;
+    if (!sel) return null;
+    return sel.kind === 'template' ? state.templates.find(item => item.name === sel.name) : state.containers.find(item => item.name === sel.name);
+  }
+  // MAIN is rebuilt only when the chosen thing (or its shape) changes, so the live
+  // charts, an open ⋯ menu and the template editor's draft survive polling. The
+  // head holds every action (Terminal · Start/Stop · Configure · ⋯); the aside is
+  // context only (sessions, configuration), so each action has one home.
+  function renderMain() {
+    const body = $('env-main-body');
+    const ref = selectedRef();
+    const empty = !state.containers.length && !state.templates.length;
+    $('container-empty').hidden = !empty;
+    body.hidden = !ref;
+    if (!ref) { body.innerHTML = ''; state.mainKey = ''; syncTerminal(); return; }
+    const sel = state.selected;
+    const key = sel.kind === 'template'
+      ? `t:${ref.name}:${ref.jobs_using || 0}:${JSON.stringify(ref.job_setup || [])}:${JSON.stringify(ref.egress_allow || [])}`
+      : `e:${ref.name}:${ref.status}:${JSON.stringify(ref.job_scan_blocks || [])}`;
+    if (key !== state.mainKey) {
+      state.mainKey = key;
+      body.innerHTML = sel.kind === 'template' ? templateMain(ref) : envMain(ref);
+      if (sel.kind === 'template') bindTemplateJobs();
+      else renderStats();
+    } else if (sel.kind === 'env') {
+      const stateEl = $('env-main-state');
+      if (stateEl) stateEl.innerHTML = envState(ref);
+    }
+    syncTerminal();
+  }
+
+  // ---------------------------------------------------------------- ASIDE: context
+  function renderAside() {
+    const aside = $('env-aside');
+    const ref = selectedRef();
+    if (!ref) { aside.innerHTML = ''; return; }
+    if (state.selected.kind === 'template') {
+      const used = Number(ref.jobs_using || 0);
+      aside.innerHTML = `<header class="w-pane__head"><h2 class="w-pane__title">Template</h2></header>
+        <dl class="w-facts w-env-meta"><dt>Source</dt><dd class="w-mono">${esc(ref.source_container || '—')}</dd><dt>Image</dt><dd class="w-mono">${esc(ref.image || '—')}</dd><dt>Jobs</dt><dd>${used ? `used by ${used} job${used === 1 ? '' : 's'}` : 'not used by a job'}</dd></dl>
+        <div class="w-env-aside__acts">
+          <button type="button" class="w-textbtn" data-template-action="use" data-name="${esc(ref.name)}">Create an environment from it</button>
+          <button type="button" class="w-textbtn" data-tone="danger" data-template-action="remove" data-name="${esc(ref.name)}">Delete template</button>
+        </div>`;
+      return;
+    }
+    const sessions = (ref.attached_sessions || []).map(name =>
+      `<li class="w-env-session"><span>${esc(name)}</span><button type="button" class="w-textbtn" data-tone="quiet" data-action="detach" data-name="${esc(ref.name)}" data-session="${esc(name)}" title="Detach session" aria-label="Detach ${esc(name)}">Detach</button></li>`
+    ).join('');
+    aside.innerHTML = `
+      <section aria-labelledby="env-aside-sessions">
+        <header class="w-pane__head"><h2 class="w-pane__title" id="env-aside-sessions">Sessions</h2></header>
+        ${sessions ? `<ul class="w-env-sessions">${sessions}</ul>` : '<p class="w-group__empty">No sessions attached.</p>'}
+        <button type="button" class="w-textbtn" data-action="attach" data-name="${esc(ref.name)}">Attach a session</button>
+      </section>
+      <section aria-labelledby="env-aside-config">
+        <h2 class="w-pane__title w-env-aside__title" id="env-aside-config">Configuration</h2>
+        <dl class="w-facts w-env-meta"><dt>Template</dt><dd>${esc(ref.template_name || 'custom')}</dd><dt>Worker</dt><dd class="w-mono">${esc(ref.worker_port || '—')}</dd>${ref.jobs_using ? `<dt>Jobs</dt><dd>used by ${Number(ref.jobs_using)}</dd>` : ''}</dl>
+        <details class="w-disclose"><summary>Details</summary>
+          <dl class="w-facts w-env-meta"><dt>Image</dt><dd class="w-mono">${esc(ref.image)}</dd><dt>Network</dt><dd class="w-mono">${esc(ref.network_name || '—')}</dd></dl>
+        </details>
+      </section>`;
   }
 
   function formatBytes(value) {
@@ -271,50 +501,144 @@
     return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
   }
 
-  function metric(label, value, percent = null, detail = '') {
-    const pct = percent == null ? null : Math.max(0, Math.min(100, Number(percent) || 0));
-    const tone = pct == null ? '' : pct >= 85 ? 'danger' : pct >= 65 ? 'caution' : 'running';
-    return `<div class="w-env-metric">
-      <span class="w-env-metric__label">${esc(label)}</span><strong class="w-env-metric__value">${esc(value)}</strong>
-      ${detail ? `<small class="w-env-metric__detail">${esc(detail)}</small>` : ''}
-      ${pct == null ? '' : `<div class="w-progress" data-tone="${tone}" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}" style="--w-progress: ${pct}%"><span class="w-progress__bar"></span></div>`}
-    </div>`;
+  // ---------------------------------------------------------------- live samples
+  // A rolling buffer per environment (the last ~3 minutes of /api/containers/stats
+  // polls) feeds the charts; disk I/O is the rate between cumulative samples.
+  const HISTORY = 72;
+  function recordSamples() {
+    const now = Date.now();
+    Object.entries(state.stats).forEach(([name, value]) => {
+      if (!value || value.status !== 'running') { delete state.history[name]; return; }
+      const series = state.history[name] || (state.history[name] = []);
+      const prev = series[series.length - 1];
+      const br = Number(value.block_read_bytes || 0), bw = Number(value.block_write_bytes || 0);
+      const dt = prev ? Math.max(0.5, (now - prev.t) / 1000) : 0;
+      series.push({
+        t: now,
+        cpu: Number(value.cpu_percent || 0),
+        mem: Number(value.memory_used_bytes || 0),
+        memLimit: Number(value.memory_limit_bytes || 0),
+        rx: Number(value.network_rx_bytes_per_second || 0),
+        tx: Number(value.network_tx_bytes_per_second || 0),
+        br, bw,
+        r: prev && dt ? Math.max(0, (br - prev.br) / dt) : 0,
+        w: prev && dt ? Math.max(0, (bw - prev.bw) / dt) : 0,
+      });
+      if (series.length > HISTORY) series.splice(0, series.length - HISTORY);
+    });
+  }
+  const CHART_W = 320, CHART_H = 96;
+  // One chart = one axis (0 → its own max), thin 2px lines, a faint area under a
+  // single series, the latest value as text. Hover reads any sample back.
+  function chartSvg(points, lines, max) {
+    const n = points.length;
+    const x = i => n <= 1 ? CHART_W : (i / (n - 1)) * CHART_W;
+    const y = v => CHART_H - 2 - (max > 0 ? (v / max) * (CHART_H - 6) : 0);
+    const paths = lines.map(({key}) => points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(''));
+    const area = lines.length === 1 && n > 1 ? `<path class="w-env-chart__area" d="${paths[0]}L${x(n - 1).toFixed(1)},${CHART_H}L${x(0).toFixed(1)},${CHART_H}Z"></path>` : '';
+    return `<svg viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="none" role="img" aria-hidden="true">
+      <line class="w-env-chart__base" x1="0" y1="${CHART_H - 1}" x2="${CHART_W}" y2="${CHART_H - 1}"></line>
+      ${area}${lines.map((line, i) => `<path class="w-env-chart__line" data-series="${line.key}" d="${paths[i]}"></path>`).join('')}
+      <line class="w-env-chart__cursor" x1="0" x2="0" y1="0" y2="${CHART_H}" hidden></line>
+    </svg>`;
+  }
+  function chartModel(key, series, value) {
+    const last = series[series.length - 1] || {};
+    if (key === 'cpu') {
+      const max = Math.max(100, ...series.map(p => p.cpu));
+      return {lines: [{key: 'cpu'}], max, text: p => `${p.cpu.toFixed(1)}%`, value: `${Number(value.cpu_percent || 0).toFixed(1)}%`};
+    }
+    if (key === 'mem') {
+      const limit = last.memLimit || Math.max(...series.map(p => p.mem), 1);
+      return {lines: [{key: 'mem'}], max: limit, text: p => formatBytes(p.mem), value: `${formatBytes(value.memory_used_bytes)}${value.memory_limit_bytes ? ` of ${formatBytes(value.memory_limit_bytes)}` : ''}`};
+    }
+    if (key === 'net') {
+      const max = Math.max(1, ...series.map(p => Math.max(p.rx, p.tx)));
+      return {lines: [{key: 'rx'}, {key: 'tx'}], max, text: p => `↓ ${formatRate(p.rx)} · ↑ ${formatRate(p.tx)}`, value: `↓ ${formatRate(value.network_rx_bytes_per_second)} · ↑ ${formatRate(value.network_tx_bytes_per_second)}`};
+    }
+    const max = Math.max(1, ...series.map(p => Math.max(p.r, p.w)));
+    return {lines: [{key: 'r'}, {key: 'w'}], max, text: p => `read ${formatRate(p.r)} · write ${formatRate(p.w)}`, value: `read ${formatBytes(value.block_read_bytes)} · written ${formatBytes(value.block_write_bytes)}`};
   }
 
+  // Live numbers (Mu §5.5): list rows, the chosen environment's state line, charts
+  // and facts. Before the first sample nothing is drawn.
   function renderStats() {
+    document.querySelectorAll('[data-stats-line]').forEach(line => {
+      const ref = state.containers.find(item => item.name === line.dataset.statsLine);
+      if (ref) line.innerHTML = rowSub(ref);
+    });
+    const ref = selectedRef();
+    if (ref && state.selected.kind === 'env' && $('env-main-state')) $('env-main-state').innerHTML = envState(ref);
     document.querySelectorAll('[data-stats-name]').forEach(root => {
       const name = root.dataset.statsName;
       const value = state.stats[name];
-      const ref = state.containers.find(item => item.name === name);
-      if (!value) {
-        root.innerHTML = '<div class="w-env-monitor__waiting" role="status"><span class="w-inkdrop" data-size="sm" aria-hidden="true"></span>Waiting for a resource sample…</div>';
-        return;
-      }
+      root.hidden = !value;
+      if (!value) return;
       const running = value.status === 'running';
+      const series = state.history[name] || [];
+      const charts = root.querySelector('.w-env-charts');
+      charts.hidden = !running;
+      if (running) {
+        root.querySelectorAll('[data-chart]').forEach(fig => {
+          const model = chartModel(fig.dataset.chart, series, value);
+          fig._model = model;
+          fig._series = series;
+          if (!fig._hover) fig.querySelector('[data-chart-value]').textContent = model.value;
+          fig.querySelector('[data-chart-plot]').innerHTML = series.length > 1 ? chartSvg(series, model.lines, model.max) : '<p class="w-env-chart__wait">Collecting samples…</p>';
+        });
+      }
       const gpu = value.gpu || {};
       const gpuValue = gpu.requested
         ? gpu.utilization_percent == null ? 'N/A' : `${Number(gpu.utilization_percent).toFixed(1)}%`
-        : '—';
-      root.innerHTML = `
-        <div class="w-env-monitor__head"><div><strong>Live monitor</strong><small>${running ? `${value.pids || 0} processes · up ${formatDuration(value.uptime_seconds)}${value.restart_count ? ` · ${value.restart_count} restarts` : ''}` : `${esc(value.status || ref?.status || 'stopped')} · retained storage ${formatBytes(value.storage_writable_bytes)}`}</small></div>${running ? '<span class="w-inkdrop" data-size="sm" data-tone="ok" title="Live" aria-hidden="true"></span>' : ''}</div>
-        <div class="w-env-monitor__grid">
-          ${metric('CPU', running ? `${Number(value.cpu_percent || 0).toFixed(1)}%` : '—', running ? value.cpu_percent : null)}
-          ${metric('Memory', `${formatBytes(value.memory_used_bytes)} / ${formatBytes(value.memory_limit_bytes)}`, running ? value.memory_percent : null)}
-          ${metric('GPU', gpuValue, gpu.utilization_percent, gpu.requested && gpu.memory_total_bytes ? `${formatBytes(gpu.memory_used_bytes)} / ${formatBytes(gpu.memory_total_bytes)}` : '')}
-          ${metric('Network', `↓ ${formatRate(value.network_rx_bytes_per_second)} · ↑ ${formatRate(value.network_tx_bytes_per_second)}`, null, `${formatBytes(value.network_rx_bytes)} received · ${formatBytes(value.network_tx_bytes)} sent`)}
-          ${metric('Storage', formatBytes(value.storage_writable_bytes), null, `Writable layer · rootfs ${formatBytes(value.storage_rootfs_bytes)}`)}
-          ${metric('Block I/O', `R ${formatBytes(value.block_read_bytes)} · W ${formatBytes(value.block_write_bytes)}`)}
-        </div>
-        ${gpu.requested ? '<p class="w-env-monitor__note">GPU values are totals for the assigned physical device.</p>' : ''}
-        ${value.error ? `<p class="w-env-monitor__error" role="note"><span aria-hidden="true">✗</span> ${esc(value.error)}</p>` : ''}
-      `;
+        : '';
+      const rows = running ? [
+        ['Processes', `${value.pids || 0}`],
+        value.uptime_seconds ? ['Uptime', formatDuration(value.uptime_seconds)] : null,
+        value.restart_count ? ['Restarts', `${value.restart_count}`] : null,
+        gpuValue && ['GPU', `${gpuValue}${gpu.memory_total_bytes ? ` · ${formatBytes(gpu.memory_used_bytes)} of ${formatBytes(gpu.memory_total_bytes)}` : ''}`],
+        ['Storage', `${formatBytes(value.storage_writable_bytes)} writable`],
+      ] : [
+        ['Storage', `${formatBytes(value.storage_writable_bytes)} retained`],
+      ];
+      root.querySelector('[data-monitor-facts]').innerHTML = rows.filter(Boolean).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+      const note = root.querySelector('[data-monitor-note]');
+      const notes = [gpu.requested ? 'GPU values are totals for the assigned physical device.' : '', value.error ? `✗ ${value.error}` : ''].filter(Boolean);
+      note.hidden = !notes.length;
+      note.textContent = notes.join(' ');
+      note.classList.toggle('w-env-monitor__error', !!value.error);
     });
   }
+
+  // Hover reads a sample back into the chart's value (crosshair + text; Mu §9).
+  document.addEventListener('pointermove', event => {
+    const plot = event.target.closest && event.target.closest('[data-chart-plot]');
+    document.querySelectorAll('.w-env-chart').forEach(fig => {
+      if (plot && fig.contains(plot)) return;
+      if (fig._hover) { fig._hover = false; const cursor = fig.querySelector('.w-env-chart__cursor'); if (cursor) cursor.setAttribute('hidden', ''); if (fig._model) fig.querySelector('[data-chart-value]').textContent = fig._model.value; }
+    });
+    if (!plot) return;
+    const fig = plot.closest('.w-env-chart');
+    const series = fig._series || [];
+    if (series.length < 2 || !fig._model) return;
+    const box = plot.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
+    const index = Math.max(0, Math.min(series.length - 1, Math.round(frac * (series.length - 1))));
+    const sample = series[index];
+    fig._hover = true;
+    const age = Math.round((Date.now() - sample.t) / 1000);
+    fig.querySelector('[data-chart-value]').textContent = `${fig._model.text(sample)} · ${age ? `${age}s ago` : 'now'}`;
+    const cursor = fig.querySelector('.w-env-chart__cursor');
+    if (cursor) {
+      const xPos = (index / (series.length - 1)) * CHART_W;
+      cursor.setAttribute('x1', xPos); cursor.setAttribute('x2', xPos); cursor.removeAttribute('hidden');
+    }
+  });
 
   async function pollStats() {
     try {
       const response = await api('/api/containers/stats');
       state.stats = response.containers || {};
+      recordSamples();
       renderStats();
       state.statsTimer = setTimeout(pollStats, Math.max(1500, response.poll_after_ms || 2500));
     } catch (_) {
@@ -346,14 +670,12 @@
     $('environment-device-permissions').value = 'rwm';
     $('environment-start').checked = true;
     $('environment-error').textContent = '';
-    setKicker('New environment');
     $('environment-modal-title').textContent = 'Create environment';
     $('environment-modal-description').textContent = 'Standalone containers are not tied to a session.';
     setSubmitLabel('Create');
     syncSource(); renderMounts(); renderHardware(); updateSummaries(); goStep(0);
   }
 
-  function setKicker(text) { $('environment-kicker').lastChild.textContent = text; }
   function setSubmitLabel(text) { $('submit-environment').querySelector('span').textContent = text; }
 
   // Stepped create flow (G§9.13 stepper): Basics → Folders and hardware → Network and review.
@@ -388,7 +710,7 @@
     const rows = [
       ['Name', body.name || '—'],
       ['Base', body.template_name ? `template ${body.template_name}` : 'Dockerfile'],
-      ['Folders', `${body.mounts.length} mount${body.mounts.length === 1 ? '' : 's'}`],
+      ['Folders', body.mounts.length ? `${body.mounts.length} folder${body.mounts.length === 1 ? '' : 's'}` : 'none'],
       ['Hardware', $('hardware-summary').textContent],
       ['Network', body.template_name ? 'from the template' : $('network-summary').textContent],
     ];
@@ -413,12 +735,10 @@
     $('environment-gpu-mode').value = gpuRequest === 'all' ? 'all' : (gpuRequest ? 'selected' : 'none');
     $('environment-gpu-selection').value = gpuRequest.replace(/^device=/, '');
     if (editing) {
-      setKicker('Managed environment');
       $('environment-modal-title').textContent = `Edit ${sourceName}`;
       $('environment-modal-description').textContent = 'Saving recreates the worker while retaining named volumes and attached sessions.';
       setSubmitLabel('Save and recreate');
     } else if (clone) {
-      setKicker('Clone environment');
       $('environment-modal-title').textContent = `Clone ${sourceName}`;
       $('environment-modal-description').textContent = 'Review the copied configuration and choose a new name.';
     }
@@ -497,7 +817,9 @@
   function updateHardwareSummary() {
     const mode = $('environment-gpu-mode').value;
     const gpuText = mode === 'all' ? 'all GPUs' : mode === 'selected' ? `GPU ${$('environment-gpu-selection').value || 'selection required'}` : 'no GPU';
-    $('hardware-summary').textContent = `${gpuText} · ${state.devices.length} device${state.devices.length === 1 ? '' : 's'}`;
+    // Zeros are left out (Mu §5.5): "No GPU", "All GPUs · 2 devices".
+    const devices = state.devices.length ? ` · ${state.devices.length} device${state.devices.length === 1 ? '' : 's'}` : '';
+    $('hardware-summary').textContent = `${gpuText.charAt(0).toUpperCase()}${gpuText.slice(1)}${devices}`;
   }
 
   function addDevice() {
@@ -515,7 +837,9 @@
 
   function updateSummaries() {
     $('dockerfile-summary').textContent = `${$('environment-dockerfile').value.split('\n').filter(Boolean).length} lines · editable worker image`;
-    $('network-summary').textContent = `${splitLines($('environment-allow').value).length} allowed · ${splitLines($('environment-deny').value).length} blocked`;
+    const allowed = splitLines($('environment-allow').value).length;
+    const blocked = splitLines($('environment-deny').value).length;
+    $('network-summary').textContent = [allowed && `${allowed} allowed`, blocked && `${blocked} blocked`].filter(Boolean).join(' · ') || 'No outbound domains';
   }
 
   function payload() {
@@ -654,13 +978,43 @@
     }));
   }
 
+  // The terminal: inline in the main pane when it is showing beside the list (from
+  // 840px), the #shell-modal dialog on phones. One shell body moves between them,
+  // so its listeners, history and output come along.
+  const inlineShell = () => !window.matchMedia || window.matchMedia('(width >= 840px)').matches;
+  function placeShellBody(inline) {
+    const body = document.querySelector('.w-env-shell__body');
+    const target = inline ? $('env-terminal-host') : $('shell-modal').querySelector('.w-modal__dialog');
+    if (body && body.parentElement !== target) target.appendChild(body);
+  }
+  // Show the inline terminal only under the environment it is connected to.
+  function syncTerminal() {
+    const host = $('env-terminal-host');
+    const on = state.shellInline && state.shellContainer && state.selected && state.selected.kind === 'env' && state.selected.name === state.shellContainer;
+    host.hidden = !on;
+  }
+  function closeShell() {
+    if (state.shell) state.shell.close();
+    state.shellInline = false;
+    syncTerminal();
+    placeShellBody(false);
+  }
   function openShell(name) {
     if (state.shell) state.shell.close();
     $('shell-title').textContent = `Shell · ${name}`;
+    $('env-terminal-title').textContent = `Terminal · ${name}`;
     $('shell-output').textContent = '';
     state.shellFollow = true;
     loadShellHistory(name);
-    show('shell-modal');
+    state.shellInline = inlineShell();
+    placeShellBody(state.shellInline);
+    if (state.shellInline) {
+      if (!state.selected || state.selected.kind !== 'env' || state.selected.name !== name) select('env', name, {pick: true, animate: false});
+      syncTerminal();
+      $('env-terminal-host').scrollIntoView({block: 'nearest', behavior: 'smooth'});
+    } else {
+      show('shell-modal');
+    }
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = new WebSocket(`${protocol}//${location.host}/api/containers/${encodeURIComponent(name)}/shell`);
     state.shell = socket;
@@ -683,6 +1037,13 @@
     setTimeout(() => $('shell-command').focus(), 50);
   }
 
+  // Below 1200px the aside opens over the main pane on demand.
+  function toggleAside(force) {
+    const open = force == null ? panes().getAttribute('data-aside') !== 'open' : force;
+    if (open) panes().setAttribute('data-aside', 'open'); else panes().removeAttribute('data-aside');
+    document.querySelectorAll('[data-env-aside-toggle]').forEach(button => button.setAttribute('aria-expanded', String(open)));
+  }
+
   function snapshot(name) { $('snapshot-container').value = name; $('snapshot-name').value = name.replace(/^mucli-/, ''); $('snapshot-description').value = ''; $('snapshot-error').textContent = ''; show('snapshot-modal'); }
 
   document.addEventListener('click', async event => {
@@ -694,6 +1055,12 @@
     document.querySelectorAll('.w-env-overflow[open]').forEach(menu => { if (!menu.contains(event.target) || event.target.closest('.w-menu__item')) menu.open = false; });
     const removeMount = event.target.closest('[data-remove-mount]'); if (removeMount) { state.mounts.splice(Number(removeMount.dataset.removeMount), 1); renderMounts(); return; }
     const removeDevice = event.target.closest('[data-remove-device]'); if (removeDevice) { state.devices.splice(Number(removeDevice.dataset.removeDevice), 1); renderHardware(); return; }
+    const opener = event.target.closest('[data-card-action]');
+    if (opener) { select(opener.dataset.cardAction === 'template' ? 'template' : 'env', opener.dataset.name, {pick: true}); return; }
+    if (event.target.closest('[data-env-back]')) { panes().setAttribute('data-show', 'list'); return; }
+    const asideToggle = event.target.closest('[data-env-aside-toggle]');
+    if (asideToggle) { toggleAside(); return; }
+    if (panes().getAttribute('data-aside') === 'open' && !event.target.closest('#env-aside')) toggleAside(false);
     const button = event.target.closest('[data-action]');
     if (button) {
       const {action: actionName, name, session} = button.dataset;
@@ -736,20 +1103,21 @@
     });
   });
 
-  $('container-manager').addEventListener('keydown', async event => {
-    const card = event.target.closest('[data-card-action], article[data-template-action="use"]');
-    if (!card || !['Enter', ' '].includes(event.key)) return;
-    if (event.target.closest('button, summary, details, input, select, textarea, a')) return;
+  // j / k move between rows (Mu §9.6) and choose the focused one; Enter opens it on
+  // narrow screens. The dialogs carry aria-modal statically, so only a visible one
+  // blocks the keys.
+  const modalOpen = () => [...document.querySelectorAll('[aria-modal="true"]')].some(el => el.getClientRects().length > 0);
+  document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key !== 'j' && event.key !== 'k') return;
+    if (event.target.closest('input, textarea, select, [contenteditable="true"]') || modalOpen()) return;
+    const rows = [...document.querySelectorAll('#env-panes [data-pane="list"] .w-row__main')];
+    if (!rows.length) return;
+    const at = rows.indexOf(document.activeElement);
+    const next = event.key === 'j' ? Math.min(rows.length - 1, at + 1) : Math.max(0, at < 0 ? 0 : at - 1);
     event.preventDefault();
-    if (card.dataset.cardAction === 'edit') await openEdit(card.dataset.name, false);
-    else openCreate(card.dataset.name);
-  });
-
-  $('container-manager').addEventListener('click', async event => {
-    const card = event.target.closest('[data-card-action]');
-    if (!card || event.target.closest('button, summary, details, input, select, textarea, a')) return;
-    try { await openEdit(card.dataset.name, false); }
-    catch (error) { toast(String(error.message || error), 'danger'); }
+    rows[next].focus();
+    select(rows[next].dataset.cardAction === 'template' ? 'template' : 'env', rows[next].dataset.name, {pick: true, show: false});
   });
 
   $('container-manager').addEventListener('input', event => {
@@ -769,10 +1137,10 @@
     window.WashPalette.register('containers', () => [
       {id: 'env:new', group: 'Actions', label: 'New environment', icon: 'plus', run: () => openCreate()},
       {id: 'env:refresh', group: 'Actions', label: 'Refresh environments', icon: 'refresh-cw', run: () => load()},
-      {id: 'env:templates', group: 'Navigate', label: 'Show templates', icon: 'layers', run: () => $('templates-title').scrollIntoView({block: 'start'})},
+      {id: 'env:templates', group: 'Navigate', label: 'Show templates', icon: 'layers', run: () => { panes().setAttribute('data-show', 'list'); $('templates-title').scrollIntoView({block: 'start'}); }},
       ...state.containers.map(ref => ({
-        id: `env:open:${ref.name}`, group: 'Environments', label: `Configure ${ref.name}`, icon: 'box',
-        keywords: `${ref.status || ''} environment container`, run: () => openEdit(ref.name, false),
+        id: `env:open:${ref.name}`, group: 'Environments', label: ref.name, icon: 'box',
+        keywords: `${ref.status || ''} environment container configure`, run: () => select('env', ref.name, {pick: true}),
       })),
     ], {priority: 10});
   }
@@ -821,6 +1189,8 @@
   });
   $('shell-output').addEventListener('scroll', () => { state.shellFollow = shellNearBottom(); });
   $('close-shell').addEventListener('click', () => { if(state.shell)state.shell.close(); hide('shell-modal'); });
+  $('env-terminal-close').addEventListener('click', closeShell);
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && panes().getAttribute('data-aside') === 'open' && !modalOpen()) toggleAside(false); });
   $('environment-dockerfile').addEventListener('input', updateSummaries);
   $('environment-allow').addEventListener('input', updateSummaries);
   $('environment-deny').addEventListener('input', updateSummaries);

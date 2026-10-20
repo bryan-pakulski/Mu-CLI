@@ -57,7 +57,7 @@
     <div class="inspector-body">
 
         <!-- workspace -->
-        <section class="inspector-section" x-show="$store.inspector.tab === 'workspace'">
+        <section class="inspector-section" role="tabpanel" x-show="$store.inspector.tab === 'workspace'">
             <h3 class="inspector-section-title" title="Folders attached to the active session. The agent indexes them for retrieval and respects their .gitignore.">Attached folders</h3>
             <div class="kv-list" x-show="$store.inspector.workspace.folders.length">
                 <template x-for="(p, pi) in $store.inspector.workspace.folders" :key="pi">
@@ -97,7 +97,7 @@
         </section>
 
         <!-- memory -->
-        <section class="inspector-section" x-show="$store.inspector.tab === 'memory'">
+        <section class="inspector-section" role="tabpanel" x-show="$store.inspector.tab === 'memory'">
             <form @submit.prevent="$store.inspector.searchMemory()" class="inline-form inspector-inline-form">
                 <input type="text" class="w-input"
                        x-model="$store.inspector.memory.query"
@@ -181,7 +181,7 @@
         </section>
 
         <!-- stats -->
-        <section class="inspector-section" x-show="$store.inspector.tab === 'stats'">
+        <section class="inspector-section" role="tabpanel" x-show="$store.inspector.tab === 'stats'">
             <div x-show="$store.inspector.stats && $store.inspector.stats.active">
                 <!-- One fact list (Mu §5.3, §5.5): numbers only when they say something. -->
                 <dl class="inspector-facts w-facts" x-data="{
@@ -234,7 +234,7 @@
         </section>
 
         <!-- settings -->
-        <section class="settings-pane" x-show="$store.inspector.tab === 'settings'">
+        <section class="settings-pane" role="tabpanel" x-show="$store.inspector.tab === 'settings'">
             <div class="settings-pane-head">
                 <div>
                     <h3 class="settings-pane-title">Configuration</h3>

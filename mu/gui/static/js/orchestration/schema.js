@@ -2,7 +2,7 @@
  * validation as you type (documentation/plans/runbook_editor.md §4.1).
  *
  * validate(value, schema, path) returns the same error strings as the Python
- * validate(); tests/test_orch_web_pickers.py runs both on one generated case
+ * validate(); tests/orchestration/test_orch_web_pickers.py runs both on one generated case
  * list so the two cannot drift. The server (planRun, validateRunbook) stays
  * the authority: this only gives earlier feedback.
  */

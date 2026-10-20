@@ -605,7 +605,14 @@ kbd {
 /* ------------------------------------------------------------ motion */
 @keyframes w-mu-arrive { from { opacity: 0; transform: translateY(4px); } }
 @keyframes w-mu-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+/* Switching tab or item (WashMotion, wash_shell.js): the old content fades out quickly
+ * ([data-leaving]), the new one fades in ([data-entering]; `backwards` holds the first frame). */
+@keyframes w-mu-enter { from { opacity: 0; } }
+[data-leaving] { opacity: 0; pointer-events: none; transition: opacity var(--wash-motion-micro) var(--wash-ease-micro); }
+[data-entering] { animation: w-mu-enter var(--wash-motion-medium) var(--wash-ease-small) backwards; }
 @media (prefers-reduced-motion: reduce) {
+    [data-entering] { animation: none; }
+    [data-leaving] { opacity: 1; transition: none; }
     .w-pagehead, .w-leafbody, .w-sheet, .w-sheet__panel, .w-row[data-leaving] { animation: none; }
     .w-sign[data-status="active"]::before { animation: none; }
 }
@@ -720,9 +727,10 @@ kbd {
 .w-pane[data-pane="list"] { grid-area: list; border-right: 1px solid var(--wash-hairline); padding-inline: var(--wash-space-4); }
 .w-pane[data-pane="main"] { grid-area: main; }
 .w-pane[data-pane="aside"] { grid-area: aside; border-left: 1px solid var(--wash-hairline); padding-inline: var(--wash-space-5); background: color-mix(in srgb, var(--wash-sunken) 35%, var(--wash-surface)); }
-.w-pane[data-pane="list"] .w-row { margin-inline: calc(-1 * var(--wash-space-2)); padding-left: calc(var(--wash-space-2) + 22px); padding-right: var(--wash-space-2); }
-.w-pane[data-pane="list"] .w-row > .w-sign { left: var(--wash-space-2); }
-.w-pane[data-pane="list"] .w-row + .w-row::before { left: calc(var(--wash-space-2) + 22px); right: var(--wash-space-2); }
+/* Narrow panes have no gutter to hang a status sign in: rows keep it inside the pane. */
+.w-pane:is([data-pane="list"], [data-pane="aside"]) .w-row { margin-inline: calc(-1 * var(--wash-space-2)); padding-left: calc(var(--wash-space-2) + 22px); padding-right: var(--wash-space-2); }
+.w-pane:is([data-pane="list"], [data-pane="aside"]) .w-row > .w-sign { left: var(--wash-space-2); }
+.w-pane:is([data-pane="list"], [data-pane="aside"]) .w-row + .w-row::before { left: calc(var(--wash-space-2) + 22px); right: var(--wash-space-2); }
 .w-pane__head {
     position: sticky;
     top: calc(-1 * var(--wash-space-5));
@@ -877,3 +885,9 @@ kbd {
 .w-themecard__dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--sw-dot); }
 .w-themecard__label { font-weight: var(--wash-type-label-weight); font-size: var(--wash-type-label-size); }
 .w-themecard__note { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); line-height: var(--wash-type-caption-line); }
+
+/* Glass strength (Settings, Wash only): hidden while another palette is chosen. */
+[data-palette] [data-glass-setting] { display: none; }
+.w-glassctl { display: inline-flex; align-items: center; gap: var(--wash-space-3); }
+.w-glassctl .w-slider { width: 160px; }
+.w-glassctl output { min-width: 3.5ch; color: var(--wash-ink-2); font-variant-numeric: tabular-nums; text-align: right; }

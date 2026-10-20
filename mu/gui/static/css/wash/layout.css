@@ -45,10 +45,10 @@
     min-height: 0;
     margin: var(--w-leaf-gap) var(--w-leaf-gap) var(--w-leaf-gap) 0;
     border-radius: var(--wash-radius-xl);
-    background: var(--w-glass-fill);
+    background: var(--w-leaf-fill, var(--w-glass-fill));
     box-shadow: var(--w-leaf-lift);
-    backdrop-filter: var(--w-glass-filter);
-    -webkit-backdrop-filter: var(--w-glass-filter);
+    backdrop-filter: var(--w-glass-filter-leaf, var(--w-glass-filter));
+    -webkit-backdrop-filter: var(--w-glass-filter-leaf, var(--w-glass-filter));
     pointer-events: none;
 }
 .w-shell[data-shell="bare"] {

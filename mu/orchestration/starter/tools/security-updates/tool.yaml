@@ -1,0 +1,32 @@
+id: os.security-updates
+title: Install security updates
+summary: Install the packages that have security updates (apt, dnf/yum or zypper), one at a time when a batch is refused, and report what was installed, skipped and whether a reboot is now needed. Check mode lists what would be installed.
+category: security
+effect: mutating
+idempotent: true
+targets: {requires: [systemd]}
+privilege: {run_as: root}
+inputs:
+  type: object
+  properties:
+    refresh: {type: boolean, default: true, description: Refresh the package lists first (skipped in check mode)}
+  additionalProperties: false
+outputs:
+  type: object
+  properties:
+    manager: {type: [string, "null"]}
+    check_mode: {type: boolean}
+    count: {type: integer}
+    installed: {type: array, items: {type: string}}
+    candidates: {type: array, items: {type: string}}
+    skipped:
+      type: array
+      items:
+        type: object
+        properties:
+          package: {type: string}
+          reason: {type: string}
+    reboot_required: {type: boolean}
+  required: [manager, check_mode, count, installed, candidates, skipped, reboot_required]
+implementation: {runtime: python3, entry: security_updates.py, check_mode: true}
+limits: {timeout_s: 3600, max_output_kb: 512, memory_mb: 1024}

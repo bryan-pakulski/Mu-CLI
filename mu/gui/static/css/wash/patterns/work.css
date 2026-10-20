@@ -284,6 +284,20 @@
     .work-detail-facts { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
     .work-detail-facts .w-icon { width: 13px; height: 13px; vertical-align: -2px; }
     .work-detail-facts a { color: inherit; }
+    /* "Open a shell" (view.js shellBox): the cd command to paste, and what to do after. */
+    .work-detail-path { overflow-wrap: anywhere; }
+    .work-detail-facts [data-open-shell] { margin-left: var(--wash-space-2); }
+    .work-shellbox {
+        margin: var(--wash-space-3) 0 var(--wash-space-4);
+        padding: var(--wash-space-3) var(--wash-space-4);
+        border-radius: var(--wash-radius-md);
+        background: color-mix(in srgb, var(--wash-sunken) 60%, transparent);
+        font-size: var(--wash-type-caption-size);
+        color: var(--wash-ink-2);
+    }
+    .work-shellbox__lede, .work-shellbox__note { margin: 0; }
+    .work-shellbox__cmd { display: flex; align-items: center; gap: var(--wash-space-3); margin: var(--wash-space-2) 0; }
+    .work-shellbox__cmd code { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--wash-ink); }
     .work-detail-facts a:hover { color: var(--wash-ink); }
     .work-detail-key { color: var(--wash-ink-2); }
     .work-detail-budget { display: inline-flex; align-items: baseline; gap: var(--wash-space-3); }
@@ -506,6 +520,41 @@
     @media (width < 1200px) {
         .work-diff-layout { grid-template-columns: 1fr; }
         .work-diff-tree { position: static; max-height: 240px; }
+    }
+    /* The corner control above the diff, and review mode: the diff alone over the whole
+     * view (view.js setDiffZen), a wider file tree, the bar sticky at the top. */
+    .work-diff-bar { display: flex; align-items: center; gap: var(--wash-space-3); margin-bottom: var(--wash-space-2); }
+    .work-diff-bar__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .work-diff-bar__hint { font-size: var(--wash-type-caption-size); }
+    .work-tabpanel[data-zen] {
+        --work-zen-bar: calc(var(--wash-size-control-sm) + 2 * var(--wash-space-4));
+        position: fixed;
+        inset: 0;
+        z-index: var(--wash-z-overlay);
+        overflow: auto;
+        padding: 0 var(--wash-space-6) var(--wash-space-6);
+        background: var(--wash-surface);
+    }
+    .work-tabpanel[data-zen] .work-diff-bar {
+        position: sticky;
+        top: 0;
+        z-index: calc(var(--wash-z-raised) + 1);
+        box-sizing: border-box;
+        height: var(--work-zen-bar);
+        margin: 0 calc(-1 * var(--wash-space-6)) var(--wash-space-4);
+        padding: 0 var(--wash-space-6);
+        border-bottom: 1px solid var(--wash-hairline);
+        background: var(--wash-surface);
+    }
+    /* clip, not hidden: a hidden overflow would trap the sticky file header inside its file. */
+    .work-tabpanel[data-zen] .work-diff-file { overflow: clip; }
+    .work-tabpanel[data-zen] .work-diff-layout { grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: var(--wash-space-6); }
+    .work-tabpanel[data-zen] .work-diff-tree { top: calc(var(--work-zen-bar) + var(--wash-space-4)); max-height: calc(100dvh - var(--work-zen-bar) - 2 * var(--wash-space-4)); }
+    .work-tabpanel[data-zen] .work-diff-file-head { top: var(--work-zen-bar); }
+    @media (width < 840px) {
+        .work-tabpanel[data-zen] { padding-inline: var(--wash-space-3); }
+        .work-tabpanel[data-zen] .work-diff-layout { grid-template-columns: 1fr; }
+        .work-tabpanel[data-zen] .work-diff-tree { position: static; max-height: 240px; }
     }
 
     /* ------------------------------------------------------------ checks */
@@ -1213,4 +1262,79 @@
     .work-spark rect { fill: var(--mu-accent, var(--wash-accent-pigment)); }
     .work-spark rect:hover { fill: var(--mu-accent-ink, var(--wash-accent-ink)); }
     @media (width < 840px) { .work-app .work-main { padding-inline: var(--wash-space-4); } }
+
+    /* ------------------------------------------------------------ check artifacts (work/artifacts.js)
+     * The files on the left (grouped by who produced them), the viewer on the right. */
+    .work-art { display: flex; flex-direction: column; gap: var(--wash-space-3); container-type: inline-size; }
+    .work-art__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-2) var(--wash-space-4); }
+    .work-art__head .work-subhead { margin: 0; }
+    .work-art__filter { width: min(240px, 100%); height: var(--wash-size-control-sm); }
+    .work-art__body {
+        display: grid;
+        grid-template-columns: minmax(200px, 280px) minmax(0, 1fr);
+        gap: var(--wash-space-4);
+        min-height: 320px;
+    }
+    /* Stacks by its own width: the job page's main pane is narrow beside the list and summary. */
+    @container (width < 760px) {
+        .work-art__body { grid-template-columns: minmax(0, 1fr); }
+        .work-art__list { max-height: 220px; }
+    }
+    .work-art__list { display: flex; flex-direction: column; gap: var(--wash-space-3); max-height: 70vh; overflow: auto; }
+    .work-art__grouphead { margin-bottom: var(--wash-space-1); color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .work-art__file {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        width: 100%;
+        padding: var(--wash-space-2) var(--wash-space-3);
+        border: 0;
+        border-radius: var(--wash-radius-md);
+        background: none;
+        color: var(--wash-ink);
+        text-align: left;
+        cursor: pointer;
+    }
+    .work-art__file:hover, .work-art__file[aria-current="true"] { background: var(--w-glass-fill-subtle); }
+    .work-art__file[aria-current="true"] .work-art__name { font-weight: var(--wash-type-label-weight); }
+    .work-art__name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--wash-font-mono); font-size: var(--wash-type-caption-size); }
+    .work-art__meta { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .work-art__skipped { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .work-art__skipped ul { margin: var(--wash-space-2) 0 0; padding-left: var(--wash-space-4); }
+    .work-art__viewer { min-width: 0; display: flex; flex-direction: column; gap: var(--wash-space-3); }
+    .work-art__vhead { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-2) var(--wash-space-4); }
+    .work-art__vtitle { display: flex; flex-direction: column; min-width: 0; flex: 1 1 240px; }
+    .work-art__vtitle strong { overflow-wrap: anywhere; }
+    .work-art__modes { margin: 0; }
+    .work-art__vbody { display: flex; flex-direction: column; gap: var(--wash-space-3); min-width: 0; }
+    .work-art__tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-2) var(--wash-space-4); font-size: var(--wash-type-caption-size); }
+    .work-art__find { width: min(280px, 100%); height: var(--wash-size-control-sm); }
+    .work-art__status { width: auto; }
+    .work-art__opt { display: inline-flex; align-items: center; gap: var(--wash-space-1); color: var(--wash-ink-2); }
+    .work-art__protos { display: inline-flex; flex-wrap: wrap; gap: var(--wash-space-1) var(--wash-space-3); }
+    .work-art__protos [aria-pressed="true"] { color: var(--wash-ink); text-decoration: underline; }
+    .work-art__text, .work-art__hex {
+        max-height: 70vh;
+        overflow: auto;
+        margin: 0;
+        padding: var(--wash-space-2) 0;
+        border-radius: var(--wash-radius-md);
+        background: color-mix(in srgb, var(--wash-sunken) 70%, transparent);
+        font: var(--wash-type-caption-size) / 1.55 var(--wash-font-mono);
+    }
+    .work-art__hex { padding: var(--wash-space-3); white-space: pre; }
+    .work-art__line { display: flex; padding-right: var(--wash-space-3); }
+    .work-art__ln { flex: 0 0 auto; min-width: 5ch; padding: 0 var(--wash-space-3) 0 var(--wash-space-2); color: var(--wash-ink-3); text-align: right; user-select: none; }
+    .work-art__lt { white-space: pre; }
+    .work-art__text.is-wrapped .work-art__lt { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .work-art__line[data-level="error"] { background: color-mix(in srgb, var(--wash-danger-pigment) 12%, transparent); }
+    .work-art__line[data-level="error"] .work-art__lt { color: var(--wash-danger-ink); }
+    .work-art__line[data-level="warn"] { background: color-mix(in srgb, var(--wash-attention-pigment) 10%, transparent); }
+    .work-art__line.is-flash { outline: 2px solid var(--wash-danger-pigment); }
+    .work-art__grid { max-height: 70vh; overflow: auto; }
+    .work-art__grid td, .work-art__packets td { font-size: var(--wash-type-caption-size); }
+    .work-art__case summary { color: var(--wash-danger-ink); cursor: pointer; font-family: var(--wash-font-sans, inherit); }
+    .work-art__frame { width: 100%; height: 70vh; border: 1px solid var(--wash-hairline); border-radius: var(--wash-radius-md); background: var(--wash-surface); }
+    .work-art__image { overflow: auto; max-height: 70vh; }
+    .work-art__image img { max-width: 100%; height: auto; border-radius: var(--wash-radius-md); }
 }

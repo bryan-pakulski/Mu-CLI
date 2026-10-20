@@ -176,12 +176,15 @@
             theme: window.MuTheme ? window.MuTheme.preference() : null,
             decoration: window.MuDecoration ? window.MuDecoration.preference() : null,
             palette: window.MuPalette ? window.MuPalette.preference() : null,
+            glass: window.MuGlass ? window.MuGlass.preference() : null,
+            blur: window.MuGlassBlur ? window.MuGlassBlur.preference() : null,
         };
         views.forEach(function (view) { post(view, detail); });
     }
     window.addEventListener('mucli-theme-change', broadcast);
     window.addEventListener('mucli-decoration-change', broadcast);
     window.addEventListener('mucli-palette-change', broadcast);
+    window.addEventListener('mucli-glass-change', broadcast);
 
     navigate(location.href, { push: false, focus: false });
 })();

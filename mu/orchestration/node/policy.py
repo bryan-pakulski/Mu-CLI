@@ -49,6 +49,9 @@ class NodePolicy:
     quiet_hours: Tuple[str, ...] = ()
     canary: bool = False
     allow_agent_updates: bool = False   # the master may replace this agent (signed, digest-checked)
+    # The master may replace this policy file (signed orders, operator only). None (unset): follows
+    # allow_agent_updates — a node that accepts master-signed agents already trusts the master that far.
+    allow_remote_policy: Optional[bool] = None
     deny_all: bool = False
     errors: Tuple[str, ...] = ()
 
@@ -66,7 +69,7 @@ DENY_ALL = NodePolicy(deny_all=True, max_effect="read_only", allowed_tools=())
 _LIST_FIELDS = ("accept_categories", "allowed_run_as", "allowed_tools", "denied_tools",
                 "allowed_runtimes", "quiet_hours")
 _KNOWN = set(_LIST_FIELDS) | {"max_effect", "max_privilege", "require_check_mode_first", "canary",
-                              "allow_agent_updates"}
+                              "allow_agent_updates", "allow_remote_policy"}
 
 
 def _as_tuple(value: Any) -> Tuple[str, ...]:
@@ -108,7 +111,7 @@ def parse_policy(text: str) -> NodePolicy:
         if data["max_privilege"] not in PRIVILEGES:
             errors.append(f"max_privilege must be one of {', '.join(PRIVILEGES)}")
         values["max_privilege"] = str(data["max_privilege"])
-    for key in ("require_check_mode_first", "canary", "allow_agent_updates"):
+    for key in ("require_check_mode_first", "canary", "allow_agent_updates", "allow_remote_policy"):
         if key in data:
             if not isinstance(data[key], bool):
                 errors.append(f"{key} must be true or false")
@@ -266,6 +269,27 @@ def decide(envelope: Mapping[str, Any], manifest: Mapping[str, Any], policy: Nod
             if in_window(window, now):
                 return Decision(False, f"quiet hours ({window}): changes are not allowed now", "quiet_hours")
     return Decision(True, "allowed by node policy")
+
+
+def remote_policy_allowed(policy: NodePolicy) -> bool:
+    if policy.deny_all:
+        return False
+    if policy.allow_remote_policy is not None:
+        return bool(policy.allow_remote_policy)
+    return bool(policy.allow_agent_updates)
+
+
+def decide_policy_update(policy: NodePolicy) -> Decision:
+    """Whether the master may replace this node's policy file (the operator edits it on the master).
+    Decided by the policy in force now; an invalid local policy is only fixed on the node."""
+    if policy.deny_all:
+        return Decision(False, "this node's policy is invalid; fix /etc/mucli-node/policy.yaml on the node",
+                        "deny_all")
+    if not remote_policy_allowed(policy):
+        return Decision(False, "this node keeps its policy local (allow_remote_policy: false, or agent updates "
+                               "off); set allow_remote_policy: true in /etc/mucli-node/policy.yaml once",
+                        "allow_remote_policy")
+    return Decision(True)
 
 
 def decide_update(policy: NodePolicy, *, now: float) -> Decision:

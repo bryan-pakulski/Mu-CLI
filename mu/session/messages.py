@@ -24,9 +24,9 @@ provider call:
     history summaries.
 
 
-Tests: `tests/test_session.py` (history compression, ordering, image
-rehydration), `tests/test_vision_e2e.py` (image_input round-trip),
-`tests/test_mu_session_history.py` (token estimation pinning).
+Tests: `tests/sessions/` (history compression, ordering, image
+rehydration), `tests/agent/test_vision_e2e.py` (image_input round-trip),
+`tests/context/` (token estimation pinning).
 """
 
 from __future__ import annotations

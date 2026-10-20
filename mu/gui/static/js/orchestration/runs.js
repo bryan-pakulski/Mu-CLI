@@ -378,6 +378,10 @@
             ncount.failed ? `<span class="w-state__part" data-tone="danger">${esc(ncount.failed)} failed</span>` : '',
             sum.batches ? `batch ${Math.min((sum.batch || 0) + 1, sum.batches)} of ${sum.batches}` : '',
         ].filter(Boolean).map(x => x.startsWith('<span') ? x : `<span class="w-state__part">${esc(x)}</span>`).join('');
+        /* Fleet results lead a finished run (what came back matters most); while it runs they
+         * follow the grid and fill in as nodes report. */
+        const resultsSection = `<section class="w-group orch-results" aria-labelledby="orch-results-h"><div class="w-group__head"><h2 class="w-group__title" id="orch-results-h">Results</h2></div>
+            <div data-results></div></section>`;
         el.innerHTML = `${runHeader(run)}
             <div class="orch-detail">
                 <div class="orch-detail__main">
@@ -390,11 +394,13 @@
                     <p class="w-decision__r">${esc(run.paused_reason || 'Waiting for you.')}</p>
                     <div class="w-decision__acts">${ui.actionButtons(run.actions, { only: decisionIds, showDisabled: false })}</div></div>` : ''}
                 ${run.reason && !['proposed', 'paused'].includes(run.state) ? `<p class="orch-muted">${esc(run.reason)}</p>` : ''}
+                ${run.finished_at ? resultsSection : ''}
                 ${run.state === 'proposed' ? planView(run, i => names[i] || i) : `
                     <section class="w-group" aria-labelledby="orch-grid-h"><div class="w-group__head"><h2 class="w-group__title" id="orch-grid-h">Nodes</h2></div>
                         <div class="orch-progressline"><span class="w-bar" style="--v: ${esc(pct)}%; --w-bar-w: 100%"${ncount.failed ? ' data-tone="danger"' : ''} role="img" aria-label="${esc(pct)}% of nodes done"></span><p class="w-state orch-progress">${progress}</p></div>
                         <div data-grid>${gridTable(run)}</div>
-                        <p class="orch-sub">Select a cell for its log and output.</p></section>`}
+                        <p class="orch-sub">Select a cell for its log and output.</p></section>
+                    ${run.finished_at ? '' : resultsSection}`}
                 <section class="w-group" aria-labelledby="orch-notes-h"><h2 class="w-group__title" id="orch-notes-h">Timeline</h2>${Orch.catalog.notesTimeline(run.notes)}</section>
                 </div>
                 <aside class="orch-detail__aside" aria-label="About this run">
@@ -457,6 +463,15 @@
             if (user) Orch.setQuery({ exec: id });
         }
         if (panel) showExec(selectedExec);
+        /* Fleet results: every node's outputs as one table (mu/orchestration/results.py);
+         * choosing a node shows its execution like a grid cell does. */
+        Orch.results?.mount(el.querySelector('[data-results]'), {
+            url: `runs/${encodeURIComponent(run.id)}/results`,
+            csv: (step, view) => `/api/orchestration/runs/${encodeURIComponent(run.id)}/results.csv?step=${encodeURIComponent(step)}&view=${encodeURIComponent(view)}`,
+            empty: ['running', 'approved', 'scheduled'].includes(run.state) ? 'Results appear here as nodes report back.' : 'No node returned output.',
+            onRow: row => { if (panel && asideShows()) showExec(row.exec_id, { user: true }); else openExecution(row.exec_id); },
+            ask: v => `Look at the fleet results of run ${run.id} (${run.target}, ${v.label} view${v.filter ? `, filtered by "${v.filter}"` : ''}) with fleet_results and tell me what needs attention.`,
+        });
         const bindGrid = () => {
             el.querySelectorAll('[data-exec]').forEach(b => b.addEventListener('click', () => {
                 if (panel && asideShows()) showExec(b.dataset.exec, { user: true });

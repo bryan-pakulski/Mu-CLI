@@ -8,7 +8,7 @@ pass applied to the base + default prompts.
 Companion code: `mu/prompts/` (loader), `mu/commands/prompts.py`
 (`/prompts`), `mu/commands/_prompt_flags.py` (CLI flags),
 `mu/gui/routers/system_prompts.py` (GUI editor API),
-`mu/prompts/templates/` (refined templates). Tests: `tests/test_prompts.py`.
+`mu/prompts/templates/` (refined templates).
 
 ---
 
@@ -190,11 +190,8 @@ reload is sufficient — no restart.
   constants are the fallback, and the existing
   `agentic_system_base_override` / `agentic_mode_prompt_<mode>` runtime
   overrides keep working unchanged.
-- `tests/test_mode_sota_patterns.py` asserts substrings against the
-  Python constants `AGENTIC_SYSTEM_BASE` / `AGENTIC_MODES[...]`. Those
-  constants are untouched (still the fallback), so every existing test
-  passes without modification — verified (145 prompt/mode/security/gui
-  tests + 182 session/context/loop/provider tests).
+- The Python constants `AGENTIC_SYSTEM_BASE` / `AGENTIC_MODES[...]` are
+  untouched (still the fallback).
 - New code paths import `mu.prompts` lazily inside the assembly block, so
   a failure to read the prompts dir degrades gracefully to the hardcoded
   fallback (the `or` in `loop_body.py:449-454`).
@@ -238,14 +235,12 @@ Refinement approach:
 - **Default workflow:** condensed each of the 8 steps' prose; kept every
   tool name and the parallel/verify/memory anchors.
 
-Both refined templates pass `validate()` clean (zero missing anchors) —
-verified in `tests/test_prompts.py::test_validate_passes_for_refined_templates`
-and `test_refined_{base,default}_no_longer_than_original`.
+Both refined templates pass `validate()` clean (zero missing anchors).
 
 The other five modes are externalizable (the loader supports them; `/prompts init <mode>`
 seeds them verbatim from the hardcoded fallback) but their refinement is
 intentionally deferred — each is large (security 4 356, teacher 14 483)
-and pinned by `test_mode_sota_patterns.py` substrings, so refining them
+and carries many critical anchors, so refining them
 is a follow-up with its own validation pass rather than a rushed edit.
 
 ---
@@ -253,8 +248,7 @@ is a follow-up with its own validation pass rather than a rushed edit.
 ## 4. Drift detection (`validate`)
 
 `mu.prompts.validate(name, text)` checks the resolved prompt still names
-the critical anchors for its kind. The required substrings mirror
-`tests/test_mode_sota_patterns.py` so a hand-edited file that drops a
+the critical anchors for its kind (`_CRITICAL` in `mu/prompts/__init__.py`), so a hand-edited file that drops a
 frontier feature (e.g. `spawn_agent`, `plan mode`, `retrieve_relevant_context`)
 is surfaced as a warning rather than a silent regression. Tuples mean
 any-of (e.g. `("parallel", "concurrent")`).
@@ -263,8 +257,6 @@ Surfaces:
 - `/prompts validate [name]` — CLI, prints per-prompt OK / missing anchors.
 - `GET /api/system-prompts/{name}` and `PUT ...` — returns `validation`
   warnings so the GUI editor can show them inline.
-- `tests/test_prompts.py::test_validate_passes_for_hardcoded_constants` —
-  guards the shipped hardcoded prompts against drift.
 
 `teacher` has no pinned anchors (free-form content) and validates clean by
 design. (`history` was removed from `AGENTIC_MODES` — it is now a GUI view

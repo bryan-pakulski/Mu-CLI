@@ -11,11 +11,16 @@ from typing import Any
 
 VALID_SESSION_TYPES = frozenset({"chat", "workspace", "container", "orchestration"})
 
+# Read-only fleet tools (mu/orchestration/fleet_tools.py): every interactive session may read
+# what the managed fleet reported. They never mutate and need an existing orchestration store.
+FLEET_TOOLS = frozenset({"fleet_overview", "fleet_results"})
+
 # Keep conversational sessions useful without exposing host filesystem/process
 # capabilities.  Artifact tools are safe because they write only to the
 # session-owned registry directory.
 CHAT_TOOLS = frozenset(
     {
+        *FLEET_TOOLS,
         "web_search",
         "url_grounding",
         "arxiv_search",
@@ -54,6 +59,7 @@ CHAT_TOOLS = frozenset(
 ORCHESTRATION_PREFIX = "orch_"
 ORCHESTRATION_TOOLS = frozenset(
     {
+        *FLEET_TOOLS,
         "orch_catalog_search",
         "orch_tool_describe",
         "orch_nodes_list",

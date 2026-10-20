@@ -204,12 +204,67 @@ def _nodes(orch) -> List[str]:
     return lines
 
 
+def _results(orch, target: str, view: str, sort: str) -> List[str]:
+    """Fleet results as a terminal table (mu/orchestration/results.py, fleet_tools.compact)."""
+    from mu.orchestration import results
+    from mu.orchestration.fleet_tools import compact
+    if target.startswith("r_"):
+        run = orch.store.get_run(target)
+        if run is None:
+            raise ValueError(f"unknown run {target}")
+        steps = results.run_results(orch.store, run)["steps"]
+        tables = steps[-1]["tables"] if steps else []
+        title = f"{run.title} · {run.state}"
+    else:
+        if orch.store.latest_version(target) is None:
+            raise ValueError(f"unknown tool {target}")
+        tables = results.latest_results(orch.store, target)["tables"]
+        title = f"{target} · latest result per node"
+    if not tables or not any(t["rows"] for t in tables):
+        return [title, "", "No results yet."]
+    table = next((t for t in tables if t["key"] == view), None)
+    if table is None:
+        raise ValueError(f"unknown view {view!r}; available: {', '.join(t['key'] for t in tables)}")
+    data = compact(table, sort=sort, limit=60)
+    fmt = {c["label"]: c["format"] for c in table["columns"]}
+
+    def show(label, value):
+        if value is None:
+            return "—"
+        kind = fmt.get(label)
+        if kind == "bytes" and isinstance(value, (int, float)):
+            size, unit = float(value), "B"
+            for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
+                if abs(size) < 1024 or unit == "PB":
+                    break
+                size /= 1024
+            return f"{size:.0f} {unit}" if unit == "B" or size >= 100 else f"{size:.1f} {unit}"
+        if kind == "percent" and isinstance(value, (int, float)):
+            return f"{value:g}%"
+        if kind == "days" and isinstance(value, (int, float)):
+            return f"{value:g}d"
+        return str(value)
+
+    cells = [[show(label, v) for label, v in zip(data["columns"], row)] for row in data["rows"]]
+    widths = [min(32, max([len(h)] + [len(r[i]) for r in cells])) for i, h in enumerate(data["columns"])]
+    line = lambda vals: "  ".join(_short(v, w).ljust(w) for v, w in zip(vals, widths)).rstrip()
+    out = [f"{title} · {table['label']} ({data['matched']} rows, sorted by {data['sorted_by'] or 'node'})", "",
+           line(data["columns"]), line(["─" * w for w in widths])]
+    out += [line(r) for r in cells]
+    if data["truncated"]:
+        out.append(f"… {data['matched'] - len(cells)} more (the web Results tab has every row, with CSV export)")
+    others = [t["key"] for t in tables if t["key"] != table["key"]]
+    if others:
+        out += ["", f"Other views: {', '.join(others)}  (/orch results {target} <view> [sort column])"]
+    return out
+
+
 @command(
     "/orch",
     "/orchestration",
     help=(
         "Fleet orchestration: /orch shows what needs you (runs to approve, paused runs, reviews, nodes to accept); "
-        "runs [state], run <id>, nodes; approve <run> [typed-id], reject <run> [reason], continue|pause-run|cancel|"
+        "runs [state], run <id>, nodes, results <tool|run> [view] [sort]; approve <run> [typed-id], reject <run> [reason], continue|pause-run|cancel|"
         "rollback <run>, accept|quarantine|release <node>, pause [reason] / resume (the kill switch), "
         "update-agents [node...]. Reviews and authoring happen on the web Orchestration page."
     ),
@@ -238,6 +293,10 @@ def orch_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
             lines = _run(orch, rest[0])
         elif sub == "nodes":
             lines = _nodes(orch)
+        elif sub == "results":
+            if not rest:
+                raise ValueError("usage: /orch results <tool|run id> [view] [sort column]")
+            lines = _results(orch, rest[0], rest[1] if len(rest) > 1 else "summary", " ".join(rest[2:]))
         elif sub in RUN_ACTIONS:
             if not rest:
                 raise ValueError(f"usage: /orch {sub} <run id>")

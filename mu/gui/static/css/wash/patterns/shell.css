@@ -127,12 +127,12 @@
     transition: opacity var(--mu-fade) var(--wash-ease-bleed);
 }
 .mu-ambient__layer[data-on] { opacity: 1; }
-.mu-ambient__layer[data-mode="chat"] { --mu-layer-art: var(--wash-art-ambient-dawn); --mu-layer-tint: var(--wash-apricot-wash); }
-.mu-ambient__layer[data-mode="work"] { --mu-layer-art: var(--wash-art-ambient-lagoon); --mu-layer-tint: var(--wash-sky-wash); }
-.mu-ambient__layer[data-mode="orchestration"] { --mu-layer-art: var(--wash-art-ambient-lagoon); --mu-layer-tint: var(--wash-lilac-wash); }
-.mu-ambient__layer[data-mode="environments"] { --mu-layer-art: var(--wash-art-ambient-meadow); --mu-layer-tint: var(--wash-meadow-wash); }
-.mu-ambient__layer[data-mode="insights"] { --mu-layer-art: var(--wash-art-ambient-lagoon); --mu-layer-tint: var(--wash-lagoon-wash); }
-.mu-ambient__layer[data-mode="settings"] { --mu-layer-art: var(--wash-art-ambient-dawn); --mu-layer-tint: var(--wash-plum-wash); }
+.mu-ambient__layer[data-mode="chat"] { --mu-layer-art: var(--wash-art-scene-dawn); --mu-layer-tint: var(--wash-apricot-wash); }
+.mu-ambient__layer[data-mode="work"] { --mu-layer-art: var(--wash-art-scene-lagoon); --mu-layer-tint: var(--wash-sky-wash); }
+.mu-ambient__layer[data-mode="orchestration"] { --mu-layer-art: var(--wash-art-scene-lagoon); --mu-layer-tint: var(--wash-lilac-wash); }
+.mu-ambient__layer[data-mode="environments"] { --mu-layer-art: var(--wash-art-scene-meadow); --mu-layer-tint: var(--wash-meadow-wash); }
+.mu-ambient__layer[data-mode="insights"] { --mu-layer-art: var(--wash-art-scene-lagoon); --mu-layer-tint: var(--wash-lagoon-wash); }
+.mu-ambient__layer[data-mode="settings"] { --mu-layer-art: var(--wash-art-scene-dawn); --mu-layer-tint: var(--wash-plum-wash); }
 :root[data-decoration="reduced"] .mu-ambient__layer { background: var(--mu-layer-tint, var(--wash-canvas)); }
 @media (prefers-reduced-transparency: reduce) { .mu-ambient__layer { background: var(--mu-layer-tint, var(--wash-canvas)); } }
 @media (prefers-reduced-motion: reduce) {
@@ -140,14 +140,20 @@
 }
 
 /* ------------------------------------------------------------ views */
-.mu-views { overflow: hidden; }
+.mu-views { overflow: hidden; clip-path: inset(0 round var(--mu-view-radius, var(--wash-radius-xl))); }
+.mu-views { --mu-view-radius: var(--wash-radius-xl); }
+@media (width < 840px) { .mu-views { --mu-view-radius: 0px; } }
+/* clip-path, not just border-radius: composited layers inside a view (sticky frosted bars,
+ * scrolling panes) can escape a border-radius clip on the GPU, squaring the leaf's corners.
+ * The compositor always honours clip-path. */
 .mu-view {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     border: 0;
-    border-radius: inherit;
+    border-radius: var(--mu-view-radius);
+    clip-path: inset(0 round var(--mu-view-radius));
     background: var(--wash-surface);
     opacity: 0;
     visibility: hidden;
@@ -190,3 +196,47 @@ html[data-embed] .w-shell > .mu-viewside {
     html[data-embed] .w-shell:has(> .mu-viewside) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage"; }
     html[data-embed] .w-shell > .mu-viewside { display: none; }
 }
+
+/* ============================================================ glass (Wash only)
+ * Settings → Appearance → Glass (route_theme.js MuGlass: localStorage `mucli-glass`,
+ * 0–100) sets --mu-glass (0–1) and html[data-glass]; Blur (MuGlassBlur: `mucli-glass-blur`,
+ * 0–100) sets --mu-blur, the backdrop blur (up to 40px on the leaf, 22px on bars). With the Wash theme the leaf turns
+ * to frosted glass over the full painting: opacity eases from 100% down to a floor of 80%
+ * (blurred) to 88% (no blur) (scripts/design/check_contrast.py verifies every text colour over
+ * every painting at both ends) and the blur grows with the strength. Views go transparent so the leaf
+ * shows through; their sticky bars frost what scrolls under them. Other themes, reduced
+ * decoration and reduced transparency stay flat. */
+:root { --mu-glass: 0; }
+:root[data-glass]:not([data-palette], [data-decoration="reduced"]) {
+    /* Opacity floor by blur: 80% once the painting is blurred (≥ 60% blur), rising to 88% with no
+     * blur, where the painting behind text is sharp (check_contrast verifies both ends). */
+    --mu-clear: calc(12% - 8% * min(1, var(--mu-blur, 0.6) / 0.6));
+    --w-leaf-fill: color-mix(in srgb, var(--wash-surface) calc(100% - var(--mu-clear) * var(--mu-glass)), transparent);
+    --w-glass-filter-leaf: blur(calc(40px * var(--mu-blur, 0.6))) saturate(calc(1 + 0.6 * var(--mu-glass)));
+    --w-glass-filter-bar: blur(calc(22px * var(--mu-blur, 0.6))) saturate(calc(1 + 0.4 * var(--mu-glass)));
+    --w-leaf-lift: var(--wash-glass-highlight), var(--w-glass-ring), var(--wash-glass-shadow);
+    --mu-plane: transparent;
+    --mu-bar-fill: color-mix(in srgb, var(--wash-surface) calc(100% - 26% * var(--mu-glass)), transparent);
+    --mu-aside-fill: color-mix(in srgb, var(--wash-sunken) calc(55% * var(--mu-glass) + 0%), transparent);
+}
+@media (prefers-reduced-transparency: reduce) {
+    :root[data-glass] { --w-leaf-fill: initial; --w-glass-filter-leaf: initial; --mu-plane: initial; --mu-bar-fill: initial; --mu-aside-fill: initial; }
+}
+/* The shell's views and a view's own planes let the frosted leaf through. */
+:root[data-glass]:not([data-palette], [data-decoration="reduced"]) .mu-view { background: transparent; }
+html[data-embed][data-glass]:not([data-palette], [data-decoration="reduced"]),
+html[data-embed][data-glass]:not([data-palette], [data-decoration="reduced"]) .w-shell { background: transparent; }
+html[data-embed][data-glass]:not([data-palette], [data-decoration="reduced"]) body[data-ambient]::before { background: transparent; }
+html[data-embed][data-glass]:not([data-palette], [data-decoration="reduced"]) :is(.w-pagehead, .w-pane__head) {
+    background: var(--mu-bar-fill);
+    backdrop-filter: var(--w-glass-filter-bar);
+    -webkit-backdrop-filter: var(--w-glass-filter-bar);
+}
+/* The page header sits on the leaf's top corners. Some engines (Firefox) don't clip a
+ * backdrop-filter to the view's rounded clip-path, so the frosted bar would show square
+ * corners there; rounding the bar itself (which backdrop-filter always honours) matches the
+ * leaf. Not clip-path: the bar's menus must overflow it. */
+html[data-embed] .w-pagehead { border-radius: var(--mu-leaf-radius, var(--wash-radius-xl)) var(--mu-leaf-radius, var(--wash-radius-xl)) 0 0; }
+@media (width < 840px) { html[data-embed] .w-pagehead { --mu-leaf-radius: 0px; } }
+html[data-embed][data-glass]:not([data-palette], [data-decoration="reduced"]) .w-pane[data-pane="aside"],
+html[data-embed][data-glass]:not([data-palette], [data-decoration="reduced"]) .w-pane[data-pane="aside"] > .w-pane__head { background: var(--mu-aside-fill); }

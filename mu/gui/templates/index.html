@@ -40,20 +40,20 @@
 {#- Rail Sessions (Mu §3.2, G§9.20): one line per session — name, a running
     dot, the count of prompts waiting for you; no avatars (the type shows on
     hover). The heading's + starts a new session. Threads of the current
-    session move to the session header's ⋯ menu; the Threads list below
-    appears only when the current session has several. Rows are role=button
+    session sit above (also in the session header's ⋯ menu): the heading and
+    its + always show; rows list once the session has several threads. Rows are role=button
     with keyboard support; unload / delete show on hover or focus. -#}
 {% block sidebar_extra %}{% if session_active %}
 <div class="sidebar product-sidebar w-chat-sidebar">
-    <section class="nav-section sessions-only-section"
-             x-show="$store.threads.groupRoster.length > 1"
-             x-cloak aria-labelledby="w-threads-title">
+    <section class="nav-section sessions-only-section w-threads-section" aria-labelledby="w-threads-title">
         <div class="nav-section-title w-sessions__head">
             <span class="w-sessions__title" id="w-threads-title">Threads</span>
             <button type="button" class="w-sessions__add" @click="$store.threads.create()"
                     title="New thread" aria-label="New thread">{{ w.icon("plus", size="sm") }}</button>
         </div>
-        <ul class="w-sessions">
+        <p class="w-threads__empty" x-show="$store.threads.groupRoster.length <= 1" x-cloak>
+            This session has one thread. <button type="button" class="w-textbtn" @click="$store.threads.create()">New thread</button> runs another beside it.</p>
+        <ul class="w-sessions" x-show="$store.threads.groupRoster.length > 1" x-cloak>
             <template x-for="t in $store.threads.groupRoster" :key="t.thread_id">
                 <li>
                     <div class="nav-item w-session"

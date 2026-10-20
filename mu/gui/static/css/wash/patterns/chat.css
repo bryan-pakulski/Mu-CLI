@@ -618,7 +618,7 @@
             border: 0;
             border-left: 1px solid var(--wash-hairline);
             border-radius: 0;
-            background: color-mix(in srgb, var(--wash-sunken) 35%, var(--wash-surface));
+            background: var(--mu-aside-fill, color-mix(in srgb, var(--wash-sunken) 35%, var(--wash-surface)));
             box-shadow: none;
             overflow: hidden;
         }
@@ -655,6 +655,8 @@
     }
     .w-sessions__add .w-icon { width: 14px; height: 14px; }
     .w-sessions__add:hover { background: var(--w-glass-fill-subtle); color: var(--wash-ink); }
+    .w-threads__empty { margin: 0 var(--wash-space-3) var(--wash-space-2); color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); line-height: var(--wash-type-caption-line); }
+    .w-threads__empty .w-textbtn { font-size: inherit; padding: 0; }
     .w-session__type { display: inline-flex; flex: none; color: var(--wash-ink-3); }
     .w-session__type .w-icon { width: 15px; height: 15px; }
     .w-session[aria-current="true"] .w-session__type { color: var(--mu-accent-ink, var(--wash-accent-ink)); }

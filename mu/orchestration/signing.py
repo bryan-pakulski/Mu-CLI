@@ -127,6 +127,12 @@ class KeyRing:
         order["sig"] = self.sign(env.update_payload(order))
         return order
 
+    def sign_policy(self, order: Dict[str, Any]) -> Dict[str, Any]:
+        order = dict(order)
+        order.pop("sig", None)
+        order["sig"] = self.sign(env.policy_payload(order))
+        return order
+
     def sign_bundle(self, bundle_digest: str) -> Dict[str, str]:
         return {"key_id": self.signing_key_id, "public_key": b64e(self.signing_public),
                 "signature": self.sign(env.bundle_payload(bundle_digest))}

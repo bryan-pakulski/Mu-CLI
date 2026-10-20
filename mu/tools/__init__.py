@@ -363,7 +363,7 @@ def _load_builtin_tools() -> None:
             "mu.tools: failed to load session tool package: %s", exc
         )
     try:
-        from . import orchestration as _orchestration_tools  # noqa: F401 — registers orch_* (orchestration sessions only)
+        from . import orchestration as _orchestration_tools  # noqa: F401 — registers orch_* (orchestration sessions only) and the read-only fleet_* tools
     except Exception as exc:  # pragma: no cover — defensive
         import logging
         logging.getLogger("mucli").warning(

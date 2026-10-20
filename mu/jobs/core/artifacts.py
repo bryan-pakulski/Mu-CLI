@@ -247,60 +247,18 @@ def artifacts_for(job: Any, root: Optional[str] = None) -> JobArtifacts:
     return JobArtifacts(getattr(job, "id", job), root=root)
 
 
-def backfill(job: Any, root: Optional[str] = None) -> JobArtifacts:
-    """Lazy migration (guide §10): write artifacts from legacy metadata once.
-
-    Never overwrites existing files and never mutates ``job.metadata``.
-    """
+def ensure_ticket(job: Any, root: Optional[str] = None) -> JobArtifacts:
+    """The job's artifact folder with ``ticket.json`` written once from the job (and any linked
+    ticket in its metadata). Never overwrites an existing ticket."""
     art = artifacts_for(job, root).ensure()
-    meta = dict(getattr(job, "metadata", None) or {})
     if not os.path.exists(art.ticket):
+        meta = dict(getattr(job, "metadata", None) or {})
         ticket = {**dict(meta.get("jira") or {}), **dict(meta.get("ticket") or {})}
         ticket.setdefault("title", getattr(job, "title", ""))
         ticket.setdefault("description", getattr(job, "description", ""))
         ticket.setdefault("acceptance_criteria", list(getattr(job, "acceptance_criteria", []) or []))
         art.write_json("ticket.json", ticket)
-    plan = meta.get("plan")
-    if plan and not os.path.exists(art.plan):
-        from .plan_doc import PlanDoc
-
-        doc = PlanDoc.from_legacy(plan, job)
-        art.write_text("plan.md", doc.render())
-        art.write_text(os.path.join("plans", f"plan.v{doc.version}.md"), doc.render())
-    rounds = list(meta.get("review_rounds") or [])
-    if rounds and not os.path.exists(art.review):
-        from .review_report import ReviewReport
-
-        report = ReviewReport.from_legacy(rounds[-1], job_id=art.job_id)
-        art.write_json("review.json", report.to_dict())
     return art
-
-
-def migrate_metadata(service, job):
-    """Archive legacy embedded handoffs before replacing them with file pointers."""
-    meta = dict(job.metadata or {})
-    keys = ("plan", "review_rounds", "plan_contract")
-    if not any(k in meta for k in keys):
-        return job
-    art = backfill(job)
-    if not art.read_json("legacy-handoffs.json"):
-        art.write_json("legacy-handoffs.json", {k: meta[k] for k in keys if k in meta})
-    for index, report in enumerate(meta.get("review_rounds") or [], 1):
-        name = f"logs/review.round{index}.json"
-        if art.read_json(name) is None:
-            art.write_json(name, report)
-    if meta.get("plan_contract") and not art.read_json("plans/contract.json"):
-        art.write_json("plans/contract.json", meta["plan_contract"])
-    for key in keys:
-        meta.pop(key, None)
-    meta["artifacts"] = art.pointers()
-    # A worker may have added runtime metadata while files were being written.
-    # Replace only the snapshot we migrated; a later open can retry otherwise.
-    from ..store import _json
-    with service.store._transaction() as conn:
-        conn.execute("UPDATE jobs SET metadata_json=?, version=version+1 WHERE id=? AND metadata_json=?",
-                     (_json(meta), job.id, _json(job.metadata or {})))
-    return service.get(job.id)
 
 
 # ------------------------------------------------------------------ live diff

@@ -1,5 +1,5 @@
 /* Wash utilities layer — the last layer, and the only place `!important`
- * is allowed (tests/test_wash_css_contract.py).
+ * is allowed.
  *
  * These are the overrides that must beat everything, including inline style
  * attributes and Wash components: hiding, reduced motion, and the

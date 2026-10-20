@@ -108,6 +108,9 @@ class Hub:
                 reply["rotate_credential"] = rotated
         if node.facts_at is None and "facts" not in body:
             reply["collect_facts"] = True
+        # A policy the operator edited on the master: delivered until the node reports it in force.
+        from . import node_policy
+        node_policy.on_heartbeat(self.store, self.store.get_node(node.id) or node, body, reply)
         return reply
 
     # ------------------------------------------------------------ claim

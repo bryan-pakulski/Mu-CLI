@@ -17,7 +17,7 @@
                 role="tab">Context map</button>
     </div>
 
-    <section class="memory-knowledge" x-show="$store.memory.tab === 'knowledge'">
+    <section class="memory-knowledge" role="tabpanel" x-show="$store.memory.tab === 'knowledge'">
         <div class="panel-head">
             <div>
                 <div class="panel-subject">Memory ledger</div>
@@ -225,7 +225,7 @@
         </section>
     </section>
 
-    <section x-show="$store.memory.tab === 'context'" class="context-observatory">
+    <section role="tabpanel" x-show="$store.memory.tab === 'context'" class="context-observatory">
         <div class="panel-empty w-empty" data-size="sm" data-tone="plan" x-show="!$store.memory.active">
             <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-brain"></use></svg></div>
             <h3 class="w-empty__title">Context observatory is ready</h3>

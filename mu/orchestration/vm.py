@@ -37,6 +37,13 @@ def node_online(node: Node, now: float) -> bool:
     return bool(node.last_seen) and now - float(node.last_seen) <= OFFLINE_AFTER_S
 
 
+def node_presence(store, node: Node, now: float) -> str:
+    """online | connecting | offline (see ``attention.presence``: just after the master starts, a
+    node it hasn't heard from yet is connecting, not offline)."""
+    from .attention import master_started_at, presence
+    return presence(node, now, master_started_at(store))
+
+
 def facts_summary(facts: Mapping[str, Any]) -> Dict[str, Any]:
     facts = facts or {}
     disks = [d for d in facts.get("disks") or [] if isinstance(d, dict)]
@@ -52,16 +59,20 @@ def facts_summary(facts: Mapping[str, Any]) -> Dict[str, Any]:
         "uptime_days": round(up.get("uptime_s", 0) / 86400, 1) if up.get("uptime_s") else None,
         "load": (up.get("load") or [None])[0], "systemd": facts.get("systemd"),
         "services": len(facts.get("services") or []), "provides": facts.get("provides") or [],
+        # None: the agent predates the reboot check (1.2.0).
+        "reboot_required": (bool((facts.get("reboot") or {}).get("required")) if isinstance(facts.get("reboot"), dict) else None),
+        "reboot_reasons": list((facts.get("reboot") or {}).get("reasons") or [])[:5] if isinstance(facts.get("reboot"), dict) else [],
     }
 
 
 def node_vm(store, node: Node, now: Optional[float] = None, *, detail: bool = False) -> Dict[str, Any]:
     now = store.now() if now is None else now
     online = node_online(node, now)
-    status_key = "offline" if node.status == "active" and not online else node.status
+    where = node_presence(store, node, now)
+    status_key = where if node.status == "active" and where != "online" else node.status
     out = {
         "id": node.id, "name": node.name, "labels": node.labels, "status": node.status,
-        "style": table_style("orch_node_status", status_key), "online": online, "kind": node.kind,
+        "style": table_style("orch_node_status", status_key), "online": online, "presence": where, "kind": node.kind,
         "canary": node.canary, "last_seen": node.last_seen, "last_seen_ago": _ago(node.last_seen, now),
         "agent_version": node.agent_version, "address": node.address, "facts_at": node.facts_at,
         "summary": facts_summary(node.facts), "groups": runs.node_groups(store, node),
@@ -69,11 +80,36 @@ def node_vm(store, node: Node, now: Optional[float] = None, *, detail: bool = Fa
         "policy_errors": list((node.policy or {}).get("errors") or []),
         "actions": act.as_dicts(act.node_actions(node)), "created_at": node.created_at,
         "accepted_at": node.accepted_at, "agent": agent_status(node),
+        "remote_policy": _remote_policy(store, node),
+        "busy": node_busy(store, node),
     }
     if detail:
         out["facts"] = node.facts
         out["recent_executions"] = [execution_vm(e) for e in store.list_executions(node_id=node.id)[-30:]][::-1]
     return out
+
+
+BUSY_STATES = ("dispatched", "running")
+
+
+def node_busy(store, node: Node) -> Optional[Dict[str, Any]]:
+    """What the node is doing now: executions handed to it (dispatched) or running there, and
+    the queued ones waiting for its next poll. None when it's idle."""
+    live = store.list_executions(node_id=node.id, states=[*BUSY_STATES, "queued"], limit=50)
+    if not live:
+        return None
+    working = [e for e in live if e.state in BUSY_STATES]
+    lead = (working or live)[0]
+    run = store.get_run(lead.run_id)
+    return {"state": "running" if working else "queued", "count": len(working), "queued": len(live) - len(working),
+            "run_id": lead.run_id, "exec_id": lead.id, "title": run.title if run else lead.run_id,
+            "tool": lead.tool_id, "step_name": lead.step_name, "check_mode": bool(lead.check_mode),
+            "since": lead.started_at or lead.dispatched_at or lead.created_at}
+
+
+def _remote_policy(store, node: Node) -> Dict[str, Any]:
+    from .node_policy import status
+    return status(store, node)
 
 
 def agent_status(node: Node) -> Dict[str, Any]:
@@ -266,8 +302,9 @@ def label_index(store) -> Dict[str, Any]:
         groups.append(dict(g, count=count))
     return {"labels": {k: dict(sorted(v.items())) for k, v in sorted(labels.items())}, "groups": groups,
             "nodes": [{"id": n.id, "name": n.name, "status": n.status, "online": node_online(n, now),
+                       "presence": node_presence(store, n, now),
                        "canary": runs.is_canary(n), "kind": n.kind, "labels": n.labels,
-                       "style": table_style("orch_node_status", "offline" if n.status == "active"
+                       "style": table_style("orch_node_status", node_presence(store, n, now) if n.status == "active"
                                             and not node_online(n, now) else n.status)} for n in nodes]}
 
 
@@ -363,7 +400,8 @@ def overview(orch) -> Dict[str, Any]:
     nodes = store.list_nodes()
     counts: Dict[str, int] = {}
     for n in nodes:
-        key = "offline" if n.status == "active" and not node_online(n, now) else n.status
+        where = node_presence(store, n, now)
+        key = where if n.status == "active" and where != "online" else n.status
         counts[key] = counts.get(key, 0) + 1
     tools = store.list_versions(statuses=["published"])
     recent = store.list_runs(limit=12)
@@ -380,4 +418,11 @@ def overview(orch) -> Dict[str, Any]:
         "paused": [run_brief(r) for r in store.list_runs(states=["paused"], limit=50)],
         "unreachable": unreachable[:20], "dispatch_paused": orch.dispatch_paused(),
         "network": orch.network(), "time": now,
+        # Nodes that report they need a reboot (agent ≥ 1.2.0; mu/orchestration/maintenance.py).
+        "reboot": _reboot_summary(store),
     }
+
+
+def _reboot_summary(store) -> Dict[str, Any]:
+    from .maintenance import fleet_reboot_summary
+    return fleet_reboot_summary(store)

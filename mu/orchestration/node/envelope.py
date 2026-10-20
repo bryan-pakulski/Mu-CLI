@@ -22,6 +22,7 @@ DISPATCH_TAG = b"mucli-orch/dispatch/v1\n"
 CANCEL_TAG = b"mucli-orch/cancel/v1\n"
 BUNDLE_TAG = b"mucli-orch/bundle/v1\n"
 UPDATE_TAG = b"mucli-orch/agent-update/v1\n"
+POLICY_TAG = b"mucli-orch/node-policy/v1\n"
 
 # Fields of a dispatch envelope that are not covered by its signature: the signature itself
 # and secret values (delivered beside the envelope over the pinned TLS channel; their names
@@ -67,6 +68,46 @@ def cancel_payload(cancel: Mapping[str, Any]) -> bytes:
 def update_payload(order: Mapping[str, Any]) -> bytes:
     body = {k: v for k, v in order.items() if k != "sig"}
     return UPDATE_TAG + canonical(body)
+
+
+def policy_payload(order: Mapping[str, Any]) -> bytes:
+    body = {k: v for k, v in order.items() if k != "sig"}
+    return POLICY_TAG + canonical(body)
+
+
+def verify_policy_update(order: Mapping[str, Any], *, node_id: str, signing_key: bytes,
+                         replay: Optional["ReplayCache"], now: Optional[float] = None) -> "Check":
+    """Authenticate a policy order from the master: ``{kind: policy_update, node_id, text, sha256,
+    issued_at, deadline, nonce, by, sig}``. ``replay`` None checks without consuming the nonce
+    (the agent checks first; the root helper consumes it)."""
+    now = time.time() if now is None else float(now)
+    if not isinstance(order, Mapping) or order.get("kind") != "policy_update":
+        return Check(False, "not a policy update")
+    if str(order.get("node_id") or "") != node_id:
+        return Check(False, "policy is addressed to another node")
+    if not verify_b64(signing_key, policy_payload(order), str(order.get("sig") or "")):
+        return Check(False, "bad policy signature")
+    text = order.get("text")
+    if not isinstance(text, str) or len(text) > 16384:
+        return Check(False, "policy text missing or too long")
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != str(order.get("sha256") or ""):
+        return Check(False, "policy text doesn't match its digest")
+    try:
+        deadline, issued_at = float(order.get("deadline")), float(order.get("issued_at"))
+    except (TypeError, ValueError):
+        return Check(False, "missing deadline")
+    if deadline < now:
+        return Check(False, "policy order expired")
+    if issued_at > now + MAX_CLOCK_SKEW_S:
+        return Check(False, "policy issued in the future (clock skew)")
+    nonce = str(order.get("nonce") or "")
+    if len(nonce) < 16:
+        return Check(False, "missing nonce")
+    if replay is not None:
+        if replay.seen(nonce):
+            return Check(False, "replayed policy order (nonce already used)")
+        replay.add(nonce, deadline)
+    return Check(True)
 
 
 def bundle_payload(bundle_digest: str) -> bytes:

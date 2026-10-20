@@ -12,6 +12,12 @@ thread, so we:
    ``answer(id, value)`` which stores the value and sets the event.
 4. The caller wakes, reads the value via ``take(id)``, and returns it
    into the agent loop.
+
+Questions never time out: the agent waits for as long as the person takes
+(user decision, 2026-10-20). A question ends only when it is answered, or
+cancelled by the person (the card's cancel, Stop → ``cancel_session``) or by
+the GUI shutting down (``cancel_all``). Waiters poll in short slices
+(``wait()``) so an interrupt delivered to the agent thread still lands.
 """
 
 from __future__ import annotations
@@ -59,6 +65,22 @@ class PromptStore:
                 {"id": pid, **payload}
                 for pid, payload in self._payloads.items()
             ]
+
+    def cancel_session(self, session_name: Optional[str]) -> int:
+        """Cancel every pending prompt of one session (Stop); returns how many."""
+        with self._lock:
+            ids = [pid for pid, payload in self._payloads.items()
+                   if session_name is None or payload.get("session_name") == session_name]
+        for pid in ids:
+            self.cancel(pid)
+        return len(ids)
+
+    @staticmethod
+    def wait(event: threading.Event, slice_s: float = 0.25) -> None:
+        """Block until the prompt resolves — indefinitely, in short slices so the
+        agent thread runs Python between them (an async interrupt can land)."""
+        while not event.wait(slice_s):
+            pass
 
     def cancel_all(self) -> None:
         with self._lock:

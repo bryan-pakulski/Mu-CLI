@@ -782,20 +782,20 @@ async def worker_prompt(
 
     prompt = dict(payload.get("prompt") or {})
     prompt["session_name"] = session_name
-    timeout = max(1.0, min(float(payload.get("timeout") or 600.0), 3600.0))
     prompt_id, event = request.app.state.prompts.open(prompt)
     await request.app.state.bus.publish(
         {"kind": "prompt", "id": prompt_id, "prompt": prompt, "session_name": session_name}
     )
-    answered = await asyncio.to_thread(event.wait, timeout)
-    if not answered:
-        request.app.state.prompts.cancel(prompt_id)
-        await request.app.state.bus.publish(
-            {"kind": "prompt_cancelled", "id": prompt_id, "session_name": session_name}
-        )
+    # No time limit: the question waits for the person (answer, cancel, Stop). It is dropped
+    # only if the worker's request goes away (the container stopped or was interrupted).
+    while not await asyncio.to_thread(event.wait, 1.0):
+        if await request.is_disconnected():
+            request.app.state.prompts.cancel(prompt_id)
+            break
     answer = request.app.state.prompts.take(prompt_id)
+    cancelled = not answer or (isinstance(answer, dict) and answer.get("cancelled"))
     await request.app.state.bus.publish(
-        {"kind": "prompt_resolved", "id": prompt_id, "session_name": session_name}
+        {"kind": "prompt_cancelled" if cancelled else "prompt_resolved", "id": prompt_id, "session_name": session_name}
     )
     return {"ok": True, "answer": answer or {"cancelled": True}}
 

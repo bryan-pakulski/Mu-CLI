@@ -859,7 +859,53 @@ def _overlay_peer(orch, args, actor):
 
 @handler("installStarterPack")
 def _starter(orch, args, actor):
-    return {"installed": orch.install_starter_pack(force=bool(args.get("force")))}
+    only = args.get("only")
+    return {"installed": orch.install_starter_pack(force=bool(args.get("force")),
+                                                   only=[str(x) for x in only] if isinstance(only, list) else None)}
+
+
+@handler("validateNodePolicy")
+def _validate_node_policy(orch, args, actor):
+    """Read-only: the policy editor's live check (errors, what changes, warnings)."""
+    from . import node_policy
+    node = _node(orch, args)
+    return node_policy.validate(str(args.get("text") or ""), node_policy.status(orch.store, node)["text"])
+
+
+@handler("setNodePolicy")
+def _set_node_policy(orch, args, actor):
+    """Replace a node's policy.yaml from the master. Operator only (never in AI_COMMANDS), audited;
+    the node accepts it only when its policy in force allows remote edits."""
+    from . import node_policy
+    try:
+        return node_policy.set_policy(orch, node_id=str(_arg(args, "node_id")), text=str(_arg(args, "text")), actor=actor)
+    except node_policy.PolicyError as exc:
+        raise CommandError(str(exc)) from exc
+
+
+@handler("cancelNodePolicy")
+def _cancel_node_policy(orch, args, actor):
+    from . import node_policy
+    try:
+        return node_policy.cancel(orch, node_id=str(_arg(args, "node_id")), actor=actor)
+    except node_policy.PolicyError as exc:
+        raise CommandError(str(exc)) from exc
+
+
+@handler("nodeMaintenance")
+def _node_maintenance(orch, args, actor):
+    """The node page's Maintenance panel: propose a built-in maintenance run (operator only;
+    the access policy and each node's own policy still decide, exactly like any run)."""
+    from . import maintenance
+    ids = args.get("node_ids")
+    if not isinstance(ids, list):
+        ids = [str(_arg(args, "node_id"))]
+    try:
+        run = maintenance.propose(orch, actor=actor, action=str(_arg(args, "action")), node_ids=[str(i) for i in ids],
+                                  params=args.get("params") or {}, check_mode=bool(args.get("check_mode")))
+    except ValueError as exc:
+        raise CommandError(str(exc)) from exc
+    return {"run": run.to_dict()}
 
 
 @handler("startTestNode")

@@ -2,7 +2,7 @@
 """WCAG contrast checks over mu/design/tokens.json (Wash spec §3.4).
 
 Exit status is non-zero when any pair falls below its floor. The same
-checks run in tests/test_wash_tokens.py.
+checks run in tests/design/test_wash_tokens.py.
 """
 
 from __future__ import annotations
@@ -59,6 +59,34 @@ def glass_backdrops(theme: str) -> list[tuple[str, tuple, tuple]]:
     return out
 
 
+# The Wash glass leaf at full strength (patterns/shell.css: 100% − 20% opacity) over the full
+# scene paintings behind the persistent shell. Blur approximates the leaf's backdrop blur at
+# screen size (the painting at 400px wide, 6px Gaussian).
+GLASS_LEAF_ALPHA = 0.80          # blurred (Blur ≥ 60%)
+GLASS_LEAF_ALPHA_SHARP = 0.88    # no blur: the painting behind text is sharp
+
+
+def scene_backdrops(theme: str, alpha: float = GLASS_LEAF_ALPHA, *, sharp: bool = False) -> list[tuple[str, tuple, tuple]]:
+    """(scene, darkest, lightest) for the surface at ``alpha`` over each scene painting: blurred
+    like the leaf at 60% blur, or sharp (no blur, at 800px wide so fine detail counts)."""
+    from PIL import Image, ImageFilter
+
+    surface = _hex_rgb(load_tokens()["themes"][theme]["color"]["surface"])
+    out = []
+    for scene in load_tokens()["glass"]["ambient"]:
+        im = Image.open(ART / f"{scene}-{theme}-1600.webp").convert("RGB")
+        im = im.resize((800, 450)) if sharp else im.resize((400, 225)).filter(ImageFilter.GaussianBlur(6))
+        mixed = Image.blend(im, Image.new("RGB", im.size, surface), alpha)
+        # Extremes by luma, then exact luminance over the darkest and lightest few.
+        luma = list(mixed.convert("L").getdata())
+        order = sorted(range(len(luma)), key=luma.__getitem__)
+        rgb = list(mixed.getdata())
+        dark = min((rgb[i] for i in order[:64]), key=_lum)
+        light = max((rgb[i] for i in order[-64:]), key=_lum)
+        out.append((scene, dark, light))
+    return out
+
+
 def _ratio(fg_rgb, bg_rgb) -> float:
     a, b = sorted((_lum(fg_rgb), _lum(bg_rgb)), reverse=True)
     return (a + 0.05) / (b + 0.05)
@@ -101,6 +129,14 @@ def failures() -> list[tuple[str, str, str, float, float]]:
                 ratio = min(_ratio(_hex_rgb(fg), dark), _ratio(_hex_rgb(fg), light))
                 if ratio < TEXT_FLOOR:
                     out.append((theme, fg_name, f"glass/{wash}", ratio, TEXT_FLOOR))
+        # Glass leaf at full strength over the scene paintings (the persistent shell).
+        for label, backdrops in (("leaf", scene_backdrops(theme)),
+                                 ("leaf-sharp", scene_backdrops(theme, GLASS_LEAF_ALPHA_SHARP, sharp=True))):
+            for scene, dark, light in backdrops:
+                for fg_name, fg in fgs.items():
+                    ratio = min(_ratio(_hex_rgb(fg), dark), _ratio(_hex_rgb(fg), light))
+                    if ratio < TEXT_FLOOR:
+                        out.append((theme, fg_name, f"{label}/{scene}", ratio, TEXT_FLOOR))
         accent = pigments[tokens["semantic"]["accent"]]["ink"]
         ratio = contrast_ratio(accent, colors["surface"])
         if ratio < UI_FLOOR:

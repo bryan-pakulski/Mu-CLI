@@ -14,6 +14,11 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+import sys
+
+# Tests live in pillar folders (tests/<pillar>/, documentation/testing/harness.md); shared
+# helpers (orch_helpers, job_helpers, docker_helpers) live in tests/helpers/.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "helpers"))
 
 
 # This must happen before importing any project module. ``utils.config``

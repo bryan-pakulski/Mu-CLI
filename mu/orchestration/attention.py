@@ -15,6 +15,27 @@ import time
 from typing import Any, Dict, Optional
 
 OFFLINE_AFTER_S = 90.0
+# After the master starts, nodes need a moment to reconnect (their agents back off up to 60 s
+# plus jitter, then long-poll). Until then a node it hasn't heard from is "connecting", not offline.
+CONNECT_GRACE_S = 120.0
+
+
+def presence(node, now: float, started_at: Optional[float]) -> str:
+    """online | connecting | offline for an active node (from its last poll and the master start)."""
+    last = float(node.last_seen or 0)
+    if last and now - last <= OFFLINE_AFTER_S:
+        return "online"
+    if started_at and now - float(started_at) < CONNECT_GRACE_S and last < float(started_at):
+        return "connecting"
+    return "offline"
+
+
+def master_started_at(store) -> Optional[float]:
+    value = store.get_setting("master_started_at", None)
+    try:
+        return float(value) if value else None
+    except (TypeError, ValueError):
+        return None
 
 
 def counts(store) -> Dict[str, Any]:
@@ -24,8 +45,8 @@ def counts(store) -> Dict[str, Any]:
     rb_review = store.list_runbook_versions(statuses=["in_review"])
     pending_nodes = store.list_nodes(statuses=["pending"])
     now = store.now()
-    offline = [n for n in store.list_nodes(statuses=["active"])
-               if n.last_seen is None or now - float(n.last_seen) > OFFLINE_AFTER_S]
+    started = master_started_at(store)
+    offline = [n for n in store.list_nodes(statuses=["active"]) if presence(n, now, started) == "offline"]
     total = len(proposed) + len(paused) + len(in_review) + len(rb_review) + len(pending_nodes)
     return {"approvals": len(proposed), "paused_runs": len(paused), "reviews": len(in_review) + len(rb_review),
             "pending_nodes": len(pending_nodes), "offline_nodes": len(offline),

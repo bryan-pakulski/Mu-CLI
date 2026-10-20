@@ -246,6 +246,14 @@
 .chat-body .w-composer__form { container: w-composer / inline-size; }
 @container w-composer (width < 560px) {
     .chat-body .w-composer__effort-label { display: none; }
+    /* Send, mic and the context ring never leave the bar: the gaps tighten and the
+     * text items (mode, model, effort) share what's left, truncating with an ellipsis. */
+    .chat-body .w-composer__bar { gap: var(--wash-space-2); }
+    .chat-body .w-composer__bar > :is(.composer-mode-picker, .w-composer__effort) { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+    .chat-body .w-composer__bar > .composer-settings { min-width: 8ch; }
+}
+@container w-composer (width < 420px) {
+    .chat-body .w-composer__bar > .w-composer__effort { display: none; }
 }
 .chat-body .w-composer__bar .composer-settings-btn { max-width: 100%; min-width: 0; overflow: hidden; }
 .chat-body .w-composer__bar .w-composer__effort { min-width: 0; }

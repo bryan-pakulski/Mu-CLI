@@ -228,3 +228,85 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
     else apply(null, { silent: true });
 })();
+
+// Glass (Mu revision 2; Wash theme only) — Settings → Appearance → Glass.
+// Preference (localStorage `mucli-glass`): 0–100, default 60. Applied as the CSS
+// variable --mu-glass (0–1) and html[data-glass] when above 0 (the pre-paint
+// bootstrap does the same); patterns/shell.css turns the leaf to frosted glass
+// only when no other palette is chosen and decoration isn't reduced.
+// Controls: any input[data-glass-range]; output[data-glass-value] shows the value.
+(function () {
+    'use strict';
+    var KEY = 'mucli-glass';
+    var DEFAULT = 60;
+    function clamp(value) {
+        var n = parseInt(value, 10);
+        if (isNaN(n)) return DEFAULT;
+        return Math.max(0, Math.min(100, Math.round(n / 5) * 5));
+    }
+    function preference() {
+        try { var raw = localStorage.getItem(KEY); return raw == null ? DEFAULT : clamp(raw); } catch (_) { return DEFAULT; }
+    }
+    function apply(value, opts) {
+        var v = clamp(value == null ? preference() : value);
+        var root = document.documentElement;
+        root.style.setProperty('--mu-glass', String(v / 100));
+        if (v > 0) root.setAttribute('data-glass', ''); else root.removeAttribute('data-glass');
+        document.querySelectorAll('[data-glass-range]').forEach(function (input) { if (String(input.value) !== String(v)) input.value = v; input.style.setProperty('--w-fill', v + '%'); });
+        document.querySelectorAll('[data-glass-value]').forEach(function (out) { out.textContent = v ? v + '%' : 'Off'; });
+        if (!(opts && opts.silent)) window.dispatchEvent(new CustomEvent('mucli-glass-change', { detail: { glass: v } }));
+        return v;
+    }
+    function set(value) {
+        var v = clamp(value);
+        try { localStorage.setItem(KEY, String(v)); } catch (_) { /* private mode */ }
+        return apply(v);
+    }
+    document.addEventListener('input', function (event) {
+        var input = event.target.closest && event.target.closest('[data-glass-range]');
+        if (input) set(input.value);
+    });
+    window.addEventListener('storage', function (event) { if (event.key === KEY) apply(event.newValue == null ? DEFAULT : event.newValue); });
+    window.MuGlass = { KEY: KEY, DEFAULT: DEFAULT, preference: preference, set: set, apply: apply };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
+    else apply(null, { silent: true });
+})();
+
+// Glass blur (Wash theme only) — Settings → Appearance → Blur, beside Glass.
+// Preference (localStorage `mucli-glass-blur`): 0–100, default 60 → --mu-blur (0–1);
+// patterns/shell.css scales the leaf's backdrop blur (up to 40px) and the frosted bars by it.
+// Controls: input[data-blur-range]; output[data-blur-value].
+(function () {
+    'use strict';
+    var KEY = 'mucli-glass-blur';
+    var DEFAULT = 60;
+    function clamp(value) {
+        var n = parseInt(value, 10);
+        if (isNaN(n)) return DEFAULT;
+        return Math.max(0, Math.min(100, Math.round(n / 5) * 5));
+    }
+    function preference() {
+        try { var raw = localStorage.getItem(KEY); return raw == null ? DEFAULT : clamp(raw); } catch (_) { return DEFAULT; }
+    }
+    function apply(value, opts) {
+        var v = clamp(value == null ? preference() : value);
+        document.documentElement.style.setProperty('--mu-blur', String(v / 100));
+        document.querySelectorAll('[data-blur-range]').forEach(function (input) { if (String(input.value) !== String(v)) input.value = v; input.style.setProperty('--w-fill', v + '%'); });
+        document.querySelectorAll('[data-blur-value]').forEach(function (out) { out.textContent = v ? v + '%' : 'Off'; });
+        if (!(opts && opts.silent)) window.dispatchEvent(new CustomEvent('mucli-glass-change', { detail: { blur: v } }));
+        return v;
+    }
+    function set(value) {
+        var v = clamp(value);
+        try { localStorage.setItem(KEY, String(v)); } catch (_) { /* private mode */ }
+        return apply(v);
+    }
+    document.addEventListener('input', function (event) {
+        var input = event.target.closest && event.target.closest('[data-blur-range]');
+        if (input) set(input.value);
+    });
+    window.addEventListener('storage', function (event) { if (event.key === KEY) apply(event.newValue == null ? DEFAULT : event.newValue); });
+    window.MuGlassBlur = { KEY: KEY, DEFAULT: DEFAULT, preference: preference, set: set, apply: apply };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
+    else apply(null, { silent: true });
+})();

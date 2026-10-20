@@ -10,8 +10,11 @@
     const Orch = (window.Orch = window.Orch || { routes: {} });
     Orch.routes = Orch.routes || {};
 
-    const STATUSES = ['active', 'offline', 'pending', 'quarantined', 'revoked'];
-    const statusKey = n => (n.status === 'active' && !n.online ? 'offline' : n.status);
+    const STATUSES = ['active', 'connecting', 'offline', 'pending', 'quarantined', 'revoked'];
+    /* Presence (vm.node_presence): just after the master starts, a node it hasn't heard from yet is
+     * "connecting" (pending), not offline. Older payloads without presence fall back to online. */
+    const presence = n => n.presence || (n.online ? 'online' : 'offline');
+    const statusKey = n => (n.status === 'active' && presence(n) !== 'online' ? presence(n) : n.status);
 
     /* ------------------------------------------------------------ shared bits */
     function endpointCard(ep) {
@@ -65,10 +68,16 @@
         return `${esc(n.agent_version)} <span data-tone="attention" title="${esc(a.updatable ? `Can be updated to ${a.current}` : a.reason)}">(${esc(a.updatable ? 'update available' : 'outdated')})</span>`;
     }
     /* Propose an update job (an ordinary run: plan, approval per the access policy, canary first). */
-    async function updateAgents(nodeIds, button) {
+    /* `stay`: from a node page the job shows (and is approved) right there, under Maintenance. */
+    async function updateAgents(nodeIds, button, { stay = false } = {}) {
         try {
             const res = await ui.command('proposeAgentUpdate', nodeIds ? { nodes: nodeIds } : {}, { quiet: true, button });
             const run = res.data.run;
+            if (stay) {
+                ui.toast(run.state === 'proposed' ? 'Update job proposed: approve it under Maintenance' : 'Update job started', 'ok');
+                Orch.refresh();
+                return;
+            }
             ui.toast(run.state === 'proposed' ? 'Update job proposed. Review and approve it to start.' : 'Update job started', 'ok');
             Orch.go(`#/run/${encodeURIComponent(run.id)}`);
         } catch (_) { /* toasted */ }
@@ -165,6 +174,67 @@
         });
     }
 
+    /* ------------------------------------------------------------ node policy (edited on the master)
+     * mu/orchestration/node_policy.py: the operator edits policy.yaml here; the master signs it, the
+     * node's next poll carries it and the node (root helper) checks it again before installing.
+     * Operator only (setNodePolicy is never available to the AI); no approval step — this is the
+     * operator's own edit, like changing the file over SSH. */
+    function policyDialog(node, done) {
+        const rp = node.remote_policy || {};
+        const form = document.createElement('form');
+        form.className = 'orch-stack orch-policyedit';
+        const id = ui.uid('policy');
+        form.innerHTML = `<div class="w-field"><label class="w-field__label" for="${id}">policy.yaml on ${esc(node.name)}</label>
+            <textarea class="w-textarea" data-mono id="${id}" rows="16" data-autofocus spellcheck="false">${esc(rp.text || '')}</textarea>
+            <p class="w-field__hint">The node checks it again before installing and keeps the previous file as policy.yaml.prev. Runs are still decided by the access policy.</p></div>
+            <div class="orch-policyedit__check" data-check aria-live="polite"></div>
+            <p class="w-field__error" data-error role="alert"></p>
+            <div class="w-btn-row orch-dialog__actions"><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="submit" class="w-btn" data-variant="primary" disabled>Send to ${esc(node.name)}</button></div>`;
+        const d = ui.dialog({ title: `Node policy · ${node.name}`, body: form, size: 'md' });
+        const area = form.querySelector(`#${id}`);
+        const submit = form.querySelector('[type=submit]');
+        const box = form.querySelector('[data-check]');
+        const fmt = v => (Array.isArray(v) ? (v.length ? v.join(', ') : 'none') : (v === null || v === undefined ? 'unset' : String(v)));
+        const check = ui.debounce(async () => {
+            let res;
+            try { res = (await api.cmd('validateNodePolicy', { node_id: node.id, text: area.value })).data; }
+            catch (err) { box.innerHTML = `<p class="w-field__error">${esc(err.message)}</p>`; submit.disabled = true; return; }
+            const same = area.value.trim() === String(rp.text || '').trim();
+            submit.disabled = !res.ok || same;
+            box.innerHTML = !res.ok
+                ? `<p class="w-field__error"><span aria-hidden="true">✗</span> ${res.errors.map(esc).join('<br>')}</p>`
+                : same ? '<p class="orch-sub">No changes yet.</p>'
+                : `${res.changes.length ? `<dl class="w-facts orch-policyedit__changes">${res.changes.map(c => `<dt>${esc(c.key)}</dt><dd>${esc(fmt(c.from))} → <strong>${esc(fmt(c.to))}</strong></dd>`).join('')}</dl>` : '<p class="orch-sub">Formatting or comments only.</p>'}
+                   ${res.warnings.map(w => `<p class="orch-note" data-tone="attention">◆ ${esc(w)}</p>`).join('')}`;
+        }, 250);
+        area.addEventListener('input', check);
+        check();
+        form.querySelector('[data-cancel]').onclick = () => d.close();
+        form.onsubmit = async e => {
+            e.preventDefault();
+            try {
+                await ui.busy(submit, () => api.cmd('setNodePolicy', { node_id: node.id, text: area.value }));
+                ui.toast(`Policy sent; ${node.name} installs it on its next check-in`, 'ok');
+                d.close();
+                done?.();
+            } catch (err) { form.querySelector('[data-error]').innerHTML = `<span aria-hidden="true">✗</span> ${esc(err.message)}`; }
+        };
+    }
+    function policyState(node) {
+        const rp = node.remote_policy || {};
+        const p = rp.pending;
+        const head = rp.allowed
+            ? '<button type="button" class="w-textbtn" data-edit-policy>Edit policy</button>'
+            : `<span class="orch-sub" title="${esc(rp.reason || '')}">Edited on the node</span>`;
+        let line = '';
+        if (p && p.state === 'pending') line = `<p class="orch-note" data-tone="attention">◆ An edit by ${esc(p.by || 'the operator')} is waiting for ${esc(node.name)} to check in (sent ${esc(ui.ago(p.at))}). <button type="button" class="w-textbtn" data-tone="quiet" data-cancel-policy>Cancel it</button></p>`;
+        else if (p && p.state === 'refused') line = `<p class="orch-note" data-tone="danger">✗ ${esc(node.name)} refused the last edit: ${esc(p.reason || 'no reason given')}</p>`;
+        else if (p && p.state === 'applied' && p.applied_at && Date.now() / 1000 - p.applied_at < 3600) line = `<p class="orch-note">✓ The edit by ${esc(p.by || 'the operator')} is in force (${esc(ui.ago(p.applied_at))}).</p>`;
+        else if (p && p.state === 'expired') line = '<p class="orch-note" data-tone="attention">◆ The last edit expired before the node checked in.</p>';
+        if (!rp.allowed && rp.reason) line += `<p class="orch-sub">${esc(rp.reason)}</p>`;
+        return { head, line };
+    }
+
     /* ------------------------------------------------------------ groups */
     function groupDialog(group, done) {
         const form = document.createElement('form');
@@ -213,14 +283,39 @@
     const meters = s => [meter('disk', s?.max_disk_used_pct), meter('mem', s?.memory_used_pct)].filter(Boolean).join('');
     /* One node as a row: sign (online / status), name, the state in words when it isn't
      * simply active, its meters, agent drift; last seen on the right. */
+    /* Work in flight on a node (vm.node_busy): a pulsing ● and what's running, so a run in
+     * progress is visible from the fleet list and the node page. */
+    const busyRunning = n => n.busy?.state === 'running' && n.status === 'active';
+    function busyWord(n) {
+        const b = n.busy;
+        if (!b) return '';
+        const more = b.count + b.queued > 1 ? ` +${b.count + b.queued - 1}` : '';
+        return b.state === 'running'
+            ? `<span class="orch-busy" data-tone="running">Running ${esc(b.title)}${more}</span>`
+            : `<span class="orch-busy">Queued: ${esc(b.title)}${more}</span>`;
+    }
+    function busyStrip(n) {
+        const b = n.busy;
+        if (!b) return '';
+        const href = `#/run/${encodeURIComponent(b.run_id)}`;
+        return `<div class="orch-busy-strip" role="status" aria-live="polite">${ui.rows([ui.row({
+            status: b.state === 'running' ? 'active' : 'pending', title: b.title, href,
+            sub: ui.subline([b.state === 'running' ? `running here${b.step_name && b.step_name !== 'main' ? `: ${esc(b.step_name)}` : ''}` : 'queued for the node’s next poll',
+                `<span class="w-mono">${esc(b.tool)}</span>`, b.check_mode ? 'dry run' : '',
+                b.count + b.queued > 1 ? `${b.count + b.queued - 1} more here` : '']),
+            when: b.since ? ui.time(b.since) : '', pinned: true,
+            actions: `<a class="w-textbtn" data-tone="quiet" href="${href}">Open run</a>`,
+        })])}</div>`;
+    }
     function nodeRow(n, { pinnedAccept = true } = {}) {
         const accept = pinnedAccept && (n.actions || []).find(a => a.id === 'acceptNode' && a.enabled);
         const offline = statusKey(n) === 'offline';
         const stWord = statusKey(n) === 'active' ? '' : `<span${offline || n.status === 'revoked' ? ' data-tone="danger"' : (n.status === 'pending' ? ' data-tone="attention"' : '')}>${esc(ui.cap(offline ? 'offline' : (n.style?.label || n.status)))}</span>`;
         return ui.row({
-            status: offline ? 'failed' : ui.statusKey(n.style), title: n.name || n.id, href: `#/node/${encodeURIComponent(n.id)}`,
+            status: offline ? 'failed' : busyRunning(n) ? 'active' : ui.statusKey(n.style), title: n.name || n.id, href: `#/node/${encodeURIComponent(n.id)}`,
             titleHtml: `${esc(n.name || n.id)}${n.canary ? ' <span class="orch-tag">canary</span>' : ''}${n.kind === 'container' ? ' <span class="orch-tag">test node</span>' : ''}`,
-            sub: ui.subline([stWord, meters(n.summary), n.agent?.outdated ? `<span data-tone="attention">agent ${esc(n.agent_version)} → ${esc(n.agent.current)}</span>` : '',
+            sub: ui.subline([stWord, busyWord(n), meters(n.summary), n.summary?.reboot_required ? `<span data-tone="attention" title="${esc((n.summary.reboot_reasons || []).join('; '))}">needs reboot</span>` : '',
+                n.agent?.outdated ? `<span data-tone="attention">agent ${esc(n.agent_version)} → ${esc(n.agent.current)}</span>` : '',
                 n.sandbox === 'none' ? sandboxCell(n) : '', (n.policy_errors || []).length ? policyCell(n) : '']),
             when: n.last_seen ? ui.time(n.last_seen) : '', pinned: !!accept,
             actions: accept ? `<button type="button" class="w-textbtn" data-accept="${esc(n.id)}">Accept</button>` : '',
@@ -382,6 +477,10 @@
                 <div class="orch-detail__main">
                 ${n.sandbox === 'none' ? ui.banner('caution', '◆', '<strong>No sandbox.</strong> This node runs tools directly on the host (its local policy sets <code>sandbox: none</code>). Keep it to test or low-risk machines.') : ''}
                 ${(n.policy_errors || []).length ? ui.banner('danger', '✗', `<strong>The node’s local policy has errors</strong>, so it refuses work until they’re fixed: ${n.policy_errors.map(esc).join('; ')}`) : ''}
+                ${busyStrip(n)}
+                <section class="w-group orch-maint" aria-labelledby="orch-maint-h" data-maint>
+                    <div class="w-group__head"><h2 class="w-group__title" id="orch-maint-h">Maintenance</h2><span class="orch-sub">updates, reboots and services, as reviewed runs</span></div>
+                    ${ui.loading('Checking what this node allows…')}</section>
                 <section class="w-group" aria-labelledby="orch-hw-h"><div class="w-group__head"><h2 class="w-group__title" id="orch-hw-h">Machine</h2><span class="orch-sub">${n.facts_at ? `facts collected ${esc(ui.ago(n.facts_at))}` : 'facts not collected yet'}</span></div>
                     <div class="orch-gauges">
                         ${s.max_disk_used_pct != null ? `<div class="orch-gauge"><span class="orch-gauge__label">Fullest disk</span><span class="orch-gauge__num">${esc(Math.round(s.max_disk_used_pct))}%</span><span class="w-bar" style="--v: ${esc(Math.round(s.max_disk_used_pct))}%; --w-bar-w: 100%"${meterTone(s.max_disk_used_pct) ? ` data-tone="${meterTone(s.max_disk_used_pct)}"` : ''} aria-hidden="true"></span></div>` : ''}
@@ -400,7 +499,8 @@
                     ${labels.length ? `<p class="orch-labels">${labels.map(([k, v]) => `<span class="orch-label">${esc(k)}=${esc(v)}</span>`).join('')}</p>` : '<p class="orch-muted">No labels. Runs target nodes by label; set some from the actions.</p>'}
                     <p class="orch-sub">${(n.groups || []).length ? `In ${n.groups.map(esc).join(', ')}` : 'In no group (groups are label selectors, set on the fleet page).'}</p>
                 </section>
-                <section class="w-group" aria-labelledby="orch-pol-h"><div class="w-group__head"><h2 class="w-group__title" id="orch-pol-h">Node-local policy</h2><span class="orch-sub">what this node will refuse</span></div>
+                <section class="w-group" aria-labelledby="orch-pol-h" data-policy-section><div class="w-group__head"><h2 class="w-group__title" id="orch-pol-h">Node-local policy</h2><span class="orch-sub">what this node will refuse</span>${policyState(n).head}</div>
+                    ${policyState(n).line}
                     ${Object.keys(policy).length ? ui.kv(POLICY_ROWS.filter(([k]) => k in policy).map(([k, label]) => [label, listText(policy[k])])) : '<p class="orch-muted">The node hasn’t reported a policy yet.</p>'}</section>
                 </div>
                 <aside class="orch-detail__aside" aria-label="About this node">
@@ -418,14 +518,20 @@
                 </aside>
             </div>`;
         Orch.itemState([
-            { text: ui.cap(n.status === 'active' && !n.online ? 'offline' : (n.style?.label || n.status)), tone: n.status === 'pending' ? 'attention' : (n.status === 'active' && !n.online) || n.status === 'revoked' ? 'danger' : '' },
+            { text: ui.cap(statusKey(n) === 'active' ? (n.style?.label || n.status) : (n.style?.label || statusKey(n))), tone: n.status === 'pending' ? 'attention' : statusKey(n) === 'offline' || n.status === 'revoked' ? 'danger' : '' },
+            busyRunning(n) ? { text: 'working', href: `#/run/${encodeURIComponent(n.busy.run_id)}` } : null,
             n.canary ? { text: 'canary' } : null, n.kind ? { text: n.kind } : null,
             { text: Object.keys(n.labels || {}).length ? ui.formatLabels(n.labels) : 'no labels' },
             n.last_seen ? { text: `seen ${ui.ago(n.last_seen)}` } : null,
         ].filter(Boolean));
         const done = () => Orch.refresh();
         ui.bindActions(el, n.actions, { args: { node_id: n.id }, subject: n.name, done, dialogs: { labels: () => labelsDialog(n, done) } });
-        el.querySelector('[data-update-agent]')?.addEventListener('click', e => updateAgents([n.id], e.currentTarget));
+        el.querySelector('[data-update-agent]')?.addEventListener('click', e => updateAgents([n.id], e.currentTarget, { stay: true }));
+        renderMaintenance(el.querySelector('[data-maint]'), n);
+        el.querySelector('[data-edit-policy]')?.addEventListener('click', () => policyDialog(n, done));
+        el.querySelector('[data-cancel-policy]')?.addEventListener('click', async e => {
+            try { await ui.command('cancelNodePolicy', { node_id: n.id }, { ok: 'Policy edit cancelled', button: e.currentTarget }); done(); } catch (_) { /* toasted */ }
+        });
         el.querySelector('[data-stop-test]')?.addEventListener('click', async e => {
             if (!await ui.confirm({ title: 'Stop this test node?', message: 'The container is removed and the node is revoked.', confirmLabel: 'Stop test node', tone: 'danger' })) return;
             try { await ui.command('stopTestNode', { node_id: n.id }, { ok: 'Test node stopped', button: e.currentTarget }); done(); } catch (_) { /* toasted */ }
@@ -433,7 +539,100 @@
         return null;
     }
 
-    Orch.nodes = { enrol, endpointCard, endpointLine, nodeName, labelsDialog, updateAgents, renderInventory, nodeRow, meter, meters };
-    Orch.routes.nodes = { nav: 'nodes', title: 'Nodes', scopes: ['node'], render: renderFleet, crumbs: () => [{ label: 'Nodes' }] };
+    /* ------------------------------------------------------------ maintenance (the control panel)
+     * Built-in tools (mu/orchestration/maintenance.py) one click away: each button proposes an
+     * ordinary run for this node (nodeMaintenance) and opens it; the run page asks for approval
+     * as the access policy says, and the node's own policy still decides. Dry run = check mode. */
+    const MAINT_DONE = { check_updates: 'Update check', security_updates: 'Security updates', full_upgrade: 'Upgrade',
+        reboot: 'Reboot', service: 'Service action' };
+    async function startMaintenance(n, action, { check = false, params = {}, button = null } = {}) {
+        try {
+            const res = await ui.command('nodeMaintenance', { node_id: n.id, action, params, check_mode: check }, { quiet: true, button });
+            const waiting = res.data.run.state === 'proposed';
+            ui.toast(waiting ? `${check ? 'Dry run' : (MAINT_DONE[action] || 'Run')} proposed: approve it below` : (check ? 'Dry run started' : 'Started'), 'ok');
+            /* Stay on the node: the run appears under "Open runs here" with its decision. */
+            Orch.refresh();
+        } catch (_) { /* toasted */ }
+    }
+    async function renderMaintenance(box, n) {
+        if (!box) return;
+        let m;
+        try { m = await api.get(`nodes/${encodeURIComponent(n.id)}/maintenance`); }
+        catch (err) { box.innerHTML = ui.errorState(err, { retry: false }); return; }
+        const r = m.reboot || {};
+        const pend = m.pending_updates;
+        const status = [];
+        if (r.required === null) status.push('<span class="orch-muted">Reboot status needs agent 1.2.0 or newer</span>');
+        else if (r.required) status.push(`<span data-tone="attention"><strong>Needs a reboot</strong>${r.reasons?.length ? `: ${esc(r.reasons.join('; '))}` : ''}</span>`);
+        else status.push('No reboot needed');
+        if (m.uptime_days != null) status.push(`up ${esc(m.uptime_days)} days`);
+        if (pend) status.push(pend.count ? `<span data-tone="attention">${esc(ui.plural(pend.count, 'pending update'))}</span> <span class="orch-muted">checked ${esc(ui.ago(pend.at))}</span>` : `no pending updates <span class="orch-muted">checked ${esc(ui.ago(pend.at))}</span>`);
+        else status.push('<span class="orch-muted">updates not checked yet</span>');
+        const row = a => {
+            const blocked = !a.available;
+            const primary = blocked ? '' : `<button type="button" class="w-textbtn" data-maint-run="${esc(a.key)}"${a.danger ? ' data-tone="danger"' : ''} title="${esc(a.help)}">${esc(a.key === 'check_updates' ? 'Check now' : a.label)}</button>`;
+            const dry = a.check_available ? `<button type="button" class="w-textbtn" data-tone="quiet" data-maint-check="${esc(a.key)}" title="Check mode: report what would change, change nothing">Dry run</button>` : '';
+            const svc = a.key === 'service' ? `<span class="orch-maint__svc">
+                    <input class="w-input" list="orch-maint-units-${esc(n.id)}" data-maint-unit placeholder="unit, e.g. nginx" aria-label="Service" maxlength="128">
+                    <datalist id="orch-maint-units-${esc(n.id)}">${(m.services || []).map(u => `<option value="${esc(u)}"></option>`).join('')}</datalist>
+                    <span class="w-select" data-size="sm"><select class="w-select__control" data-maint-svcaction aria-label="Service action">
+                        ${['restart', 'reload', 'start', 'stop'].map(x => `<option value="${x}">${x}</option>`).join('')}</select></span></span>` : '';
+            const opt = a.key === 'full_upgrade' && !blocked ? '<label class="w-check orch-maint__opt"><input type="checkbox" class="w-check__input" data-maint-removals><span>Allow removals</span></label>'
+                : a.key === 'reboot' && !blocked ? '<label class="w-check orch-maint__opt"><input type="checkbox" class="w-check__input" data-maint-onlyif><span>Only if needed</span></label>' : '';
+            return `<li class="orch-maint__row" data-key="${esc(a.key)}"${blocked ? ' data-blocked' : ''}>
+                <div class="orch-maint__what"><span class="orch-maint__label">${esc(a.label)}</span><span class="orch-sub">${esc(blocked ? a.reason : a.help)}${blocked && (n.remote_policy || {}).allowed && /max_effect|allowed_tools|denied_tools|accept_categories/.test(a.reason) ? ' <button type="button" class="w-textbtn" data-edit-policy-inline>Edit policy</button>' : ''}</span></div>
+                <div class="orch-maint__do">${blocked && a.key === 'service' ? '' : svc}${opt}${primary}${dry}</div></li>`;
+        };
+        const installed = (m.actions || []).every(a => a.installed);
+        box.innerHTML = `
+            <div class="w-group__head"><h2 class="w-group__title" id="orch-maint-h">Maintenance</h2><span class="orch-sub">updates, reboots and services, as reviewed runs</span></div>
+            <p class="w-state orch-maint__status">${status.map(x => `<span class="w-state__part">${x}</span>`).join('')}</p>
+            ${(m.open_runs || []).length ? `<div class="orch-maint__open" aria-label="Open runs on this node">
+                <h3 class="orch-maint__subhead">Open runs here</h3>
+                ${ui.rows(m.open_runs.map((r, i) => ui.row({
+                    status: ui.statusKey(r.style), title: r.title, href: `#/run/${encodeURIComponent(r.id)}`,
+                    sub: ui.subline([esc(ui.cap(r.style?.label || r.state)), r.state === 'proposed' ? esc(r.decision?.summary || '') : `here: ${esc(String(r.here).replace(/_/g, ' '))}`,
+                        r.progress && r.nodes > 1 ? esc(r.progress) : '', r.check_mode ? 'dry run' : '', r.paused_reason ? esc(r.paused_reason) : '']),
+                    when: ui.time(r.created_at), pinned: true, attrs: ` data-open-run="${i}"`,
+                    actions: ui.rowActions(r.actions, { only: ['approveRun', 'rejectRun', 'continueRun', 'cancelRun'] }) + `<a class="w-textbtn" data-tone="quiet" href="#/run/${encodeURIComponent(r.id)}">Open run</a>`,
+                })))}</div>` : ''}
+            ${installed ? '' : `<div class="w-decision orch-maint__install" data-tone="attention"><p class="w-decision__q">The built-in maintenance tools aren’t installed yet.</p>
+                <p class="w-decision__r">They’re signed and published like any tool: reboot, security updates, full upgrade and service control, each with a dry run.</p>
+                <div class="w-decision__acts"><button type="button" class="w-btn" data-variant="primary" data-maint-install>Install built-in tools</button></div></div>`}
+            <ul class="orch-maint__list">${(m.actions || []).map(row).join('')}</ul>
+            ${(m.recent || []).length ? `<details class="w-disclose"><summary>Recent maintenance (${esc(m.recent.length)})</summary>${ui.rows(m.recent.map(x => ui.row({
+                status: ui.statusKey(x.style), title: x.tool, titleHtml: `<span class="w-mono">${esc(x.tool)}</span>`, href: `#/run/${encodeURIComponent(x.run_id)}`,
+                sub: ui.subline([esc(ui.cap(x.style?.label || x.state)), x.check_mode ? 'dry run' : '']), when: ui.time(x.finished_at || x.created_at),
+            })))}</details>` : ''}`;
+        (m.open_runs || []).forEach((r, i) => {
+            const rowEl = box.querySelector(`[data-open-run="${i}"]`);
+            if (rowEl) ui.bindActions(rowEl, r.actions, { args: { run_id: r.id }, subject: r.title, done: () => Orch.refresh() });
+        });
+        box.querySelector('[data-maint-install]')?.addEventListener('click', async e => {
+            try { await ui.command('installStarterPack', {}, { ok: 'Built-in tools installed', button: e.currentTarget }); renderMaintenance(box, n); } catch (_) { /* toasted */ }
+        });
+        const paramsFor = key => {
+            const li = box.querySelector(`.orch-maint__row[data-key="${key}"]`);
+            if (key === 'service') return { unit: (li.querySelector('[data-maint-unit]')?.value || '').trim(), action: li.querySelector('[data-maint-svcaction]')?.value || 'restart' };
+            if (key === 'full_upgrade') return { allow_removals: !!li.querySelector('[data-maint-removals]')?.checked };
+            if (key === 'reboot') return { only_if_required: !!li.querySelector('[data-maint-onlyif]')?.checked };
+            return {};
+        };
+        const go = async (key, check, button) => {
+            const params = paramsFor(key);
+            if (key === 'service' && !params.unit) { ui.toast('Choose a service first.', 'danger'); box.querySelector('[data-maint-unit]')?.focus(); return; }
+            if (key === 'reboot' && !check) {
+                const ok = await ui.confirm({ title: `Reboot ${n.name}?`, message: `${n.name} reboots 30 seconds after the run is approved and is unreachable for a minute or two.${params.only_if_required ? ' It only reboots if it still needs one.' : ''}`, confirmLabel: 'Propose reboot', tone: 'danger' });
+                if (!ok) return;
+            }
+            startMaintenance(n, key, { check, params, button });
+        };
+        box.querySelectorAll('[data-edit-policy-inline]').forEach(b => b.addEventListener('click', () => policyDialog(n, () => Orch.refresh())));
+        box.querySelectorAll('[data-maint-run]').forEach(b => b.addEventListener('click', e => go(b.dataset.maintRun, false, e.currentTarget)));
+        box.querySelectorAll('[data-maint-check]').forEach(b => b.addEventListener('click', e => go(b.dataset.maintCheck, true, e.currentTarget)));
+    }
+
+    Orch.nodes = { enrol, startMaintenance, policyDialog, endpointCard, endpointLine, nodeName, labelsDialog, updateAgents, renderInventory, nodeRow, meter, meters };
+    Orch.routes.nodes = { nav: 'nodes', title: 'Nodes', scopes: ['node', 'run'], render: renderFleet, crumbs: () => [{ label: 'Nodes' }] };
     Orch.routes.node = { nav: 'nodes', title: 'Node', scopes: ['node', 'run'], render: renderDetail, crumbs: r => [{ label: 'Nodes', to: '#/nodes' }, { label: r.parts[0] || 'Node' }] };
 })();

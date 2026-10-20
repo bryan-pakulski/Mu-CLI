@@ -21,7 +21,7 @@ Backoff with the defaults (base=0.4, max=30, budget=120):
     attempt 8+: 30s capped
     stops once cumulative >= 120s.
 
-Tests: `tests/test_provider_retry.py` (5 regression pins).
+Tests: `tests/agent/test_provider_retry.py` (5 regression pins).
 """
 
 from __future__ import annotations

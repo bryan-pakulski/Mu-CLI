@@ -263,7 +263,10 @@
         const next = parseHash();
         if (!next) return;
         const changed = !route || route.name !== next.name;
+        // Another job from the list: the open one fades out and the next fades in (Mu §4.3).
+        const jobSwitch = !changed && next.name === 'job' && route.id !== next.id;
         route = next;
+        if (!jobSwitch) [detailEl, asideEl].forEach(el => el?.removeAttribute('data-leaving'));
         const swap = () => { root.querySelectorAll('[data-route]').forEach(s => { s.hidden = s.dataset.route !== route.name; }); };
         // Fade between sections like a page navigation (base.css names the stage w-stage);
         // tab and job changes within a section swap in place.
@@ -295,6 +298,10 @@
         // Now / Jobs share the dock's job preview (Mu §7.2); other routes close it.
         view.listMode(route.name);
         if (route.name === 'job') {
+            if (jobSwitch && window.WashMotion) {
+                await window.WashMotion.leave([detailEl, asideEl]);
+                if (route !== next) return;                 // a newer route took over
+            }
             try { await view.select(route.id, { tab: route.tab }); } catch (e) {
                 const missing = /not found|404/i.test(e.message);
                 asideEl?.querySelector('.work-job-side')?.remove();
@@ -302,6 +309,7 @@
                     <h3 class="w-empty__title">${missing ? 'Job not found' : 'Couldn’t open this job'}</h3><p class="w-empty__body">${esc(missing ? `Job ${route.id} not found.` : e.message)}</p>
                     <div class="w-empty__actions"><a class="w-btn" data-variant="secondary" href="#/jobs">All jobs</a></div></div>`;
             }
+            if (jobSwitch) [detailEl, asideEl].forEach(el => (window.WashMotion ? window.WashMotion.enter(el) : el?.removeAttribute('data-leaving')));
             setHead();
         }
     }

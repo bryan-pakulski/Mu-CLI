@@ -117,6 +117,17 @@ def list_nodes(request: Request):
             "test_node_ids": list((orch.store.get_setting("test_nodes", {}) or {}).keys())}
 
 
+@router.get("/api/orchestration/nodes/{node_id}/maintenance")
+def node_maintenance(node_id: str, request: Request):
+    """The node page's Maintenance panel (mu/orchestration/maintenance.py)."""
+    from mu.orchestration import maintenance
+    orch = orch_for(request)
+    node = orch.store.get_node(node_id)
+    if node is None:
+        raise HTTPException(404, "unknown node")
+    return maintenance.node_panel(orch.store, node)
+
+
 @router.get("/api/orchestration/nodes/{node_id}")
 def node_detail(node_id: str, request: Request):
     orch = orch_for(request)
@@ -165,6 +176,29 @@ def network_interfaces(request: Request):
     return {"interfaces": overlay.interfaces(), "network": orch.network(), "endpoint": _endpoint_status(request)}
 
 
+# Registered before /tools/{tool_id}/{version}, which would otherwise claim "results".
+@router.get("/api/orchestration/tools/{tool_id}/results")
+def tool_results(tool_id: str, request: Request):
+    """Fleet results for a tool: each node's latest successful output."""
+    from mu.orchestration import results
+    orch = orch_for(request)
+    if orch.store.latest_version(tool_id) is None:
+        raise HTTPException(404, "unknown tool")
+    return results.latest_results(orch.store, tool_id)
+
+
+@router.get("/api/orchestration/tools/{tool_id}/results.csv")
+def tool_results_csv(tool_id: str, request: Request, view: str = "summary"):
+    from mu.orchestration import results
+    orch = orch_for(request)
+    if orch.store.latest_version(tool_id) is None:
+        raise HTTPException(404, "unknown tool")
+    table = _pick_table(results.latest_results(orch.store, tool_id)["tables"], view)
+    name = _csv_name(f"{tool_id}-latest-{table['key']}") + ".csv"
+    return Response(results.to_csv(table), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename={name}"})
+
+
 @router.get("/api/orchestration/tools/{tool_id}/{version}")
 def tool_detail(tool_id: str, version: int, request: Request):
     orch = orch_for(request)
@@ -198,6 +232,44 @@ def run_detail(run_id: str, request: Request):
     if run is None:
         raise HTTPException(404, "unknown run")
     return vm.run_detail(orch.store, run)
+
+
+def _csv_name(text: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in text)[:80] or "results"
+
+
+def _pick_table(tables, view: str):
+    for table in tables:
+        if table["key"] == (view or "summary"):
+            return table
+    raise HTTPException(404, "unknown results view")
+
+
+@router.get("/api/orchestration/runs/{run_id}/results")
+def run_results(run_id: str, request: Request):
+    """Fleet results (mu/orchestration/results.py): the run's outputs as tables across nodes."""
+    from mu.orchestration import results
+    orch = orch_for(request)
+    run = orch.store.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, "unknown run")
+    return results.run_results(orch.store, run)
+
+
+@router.get("/api/orchestration/runs/{run_id}/results.csv")
+def run_results_csv(run_id: str, request: Request, step: int = 0, view: str = "summary"):
+    from mu.orchestration import results
+    orch = orch_for(request)
+    run = orch.store.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, "unknown run")
+    entry = next((s for s in results.run_results(orch.store, run)["steps"] if s["step"] == step), None)
+    if entry is None:
+        raise HTTPException(404, "unknown step")
+    table = _pick_table(entry["tables"], view)
+    name = _csv_name(f"{run.id}-{entry['tool']}-{table['key']}") + ".csv"
+    return Response(results.to_csv(table), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename={name}"})
 
 
 @router.get("/api/orchestration/executions/{exec_id}")
@@ -375,6 +447,45 @@ async def import_bundle(request: Request, file: UploadFile = File(...), apply: b
     return result
 
 
+def _chat_model(request: Request, orch, payload: Dict[str, Any]):
+    """(provider, model) for an orchestration chat, first found: the request, the focused chat
+    session, the GUI's --provider/--model, the fleet chat's last choice, then the most recently
+    used saved session. ("", "") when there is none; the page then asks."""
+    provider = str(payload.get("provider") or "").strip()
+    model = str(payload.get("model") or "").strip()
+    if provider and model:
+        return provider, model
+    current = request.app.state.session_by_name(None)
+    if current is not None and getattr(current, "provider", None) is not None:
+        return current.provider.name, current.provider.model_name
+    args = getattr(request.app.state, "args", None)
+    if getattr(args, "provider", None) and getattr(args, "model", None):
+        return str(args.provider), str(args.model)
+    last = orch.store.get_setting("chat_model", None)
+    if isinstance(last, dict) and last.get("provider") and last.get("model"):
+        return str(last["provider"]), str(last["model"])
+    return _recent_session_model()
+
+
+def _recent_session_model():
+    import glob
+    from utils import config as _config
+    root = os.path.join(os.path.expanduser(_config.HISTORY_DIR), "sessions")
+    try:
+        paths = sorted(glob.glob(os.path.join(root, "*", "session.json")), key=os.path.getmtime, reverse=True)[:50]
+    except OSError:
+        return "", ""
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                pc = (json.load(fh) or {}).get("provider_config") or {}
+        except (OSError, ValueError):
+            continue
+        if pc.get("provider") and pc.get("model"):
+            return str(pc["provider"]), str(pc["model"])
+    return "", ""
+
+
 @router.post("/api/orchestration/studio/session", dependencies=[Depends(csrf.check_request)])
 async def studio_session(request: Request, payload: Dict[str, Any]):
     """Open (creating if needed) the discovery chat for a draft: an ``orchestration`` session."""
@@ -390,17 +501,7 @@ async def studio_session(request: Request, payload: Dict[str, Any]):
     if not name:
         base = (tv.tool_id if tv else "tool-studio").replace(".", "-")
         name = f"orch-{base}-{int(time.time()) % 100000}"
-    provider = str(payload.get("provider") or "").strip()
-    model = str(payload.get("model") or "").strip()
-    if not provider or not model:
-        current = request.app.state.session_by_name(None)
-        if current is not None and current.provider is not None:
-            provider = provider or current.provider.name
-            model = model or current.provider.model_name
-        else:
-            args = request.app.state.args
-            provider = provider or str(getattr(args, "provider", "") or "")
-            model = model or str(getattr(args, "model", "") or "")
+    provider, model = _chat_model(request, orch, payload)
     if sessions_router._read_session_data(name) is None:
         if not provider or not model:
             raise HTTPException(400, "choose a provider and model for the discovery chat")
@@ -412,6 +513,38 @@ async def studio_session(request: Request, payload: Dict[str, Any]):
         await asyncio.to_thread(dispatch, orch, {"type": "updateDraft",
                                                  "args": {"ref": tv.ref, "session_name": name}}, actor="operator")
     return {"session_name": name, "url": "/"}
+
+
+@router.post("/api/orchestration/chat/session", dependencies=[Depends(csrf.check_request)])
+async def fleet_chat_session(request: Request, payload: Dict[str, Any]):
+    """The fleet chat docked on the orchestration page: an ``orchestration`` session (orch_*
+    tools: it can look things up, draft tools and *propose* runs; approving stays with the
+    operator, AI_COMMANDS unchanged). Loaded without focusing it, so the main chat's current
+    session is untouched. ``fresh: true`` starts a new conversation."""
+    from mu.gui.routers import sessions as sessions_router
+    orch = orch_for(request)
+    name = "" if payload.get("fresh") else str(orch.store.get_setting("chat_session", "") or "")
+    if name and sessions_router._read_session_data(name) is None:
+        name = ""
+    provider, model = _chat_model(request, orch, payload)
+    if payload.get("provider") and payload.get("model"):
+        orch.store.set_setting("chat_model", {"provider": provider, "model": model})
+    if not name:
+        if not provider or not model:
+            raise HTTPException(400, "choose a provider and model for the fleet chat")
+        base = f"fleet-chat-{time.strftime('%Y%m%d-%H%M%S')}"
+        name, n = base, 1
+        while sessions_router._read_session_data(name) is not None:
+            n += 1
+            name = f"{base}-{n}"
+        await sessions_router.create_session(request, {"name": name, "provider": provider, "model": model,
+                                                       "session_type": "orchestration", "activate": False})
+        orch.store.set_setting("chat_session", name)
+    session = await asyncio.to_thread(request.app.state.load_session, name=name, focus=False)
+    busy_for = getattr(request.app.state, "session_busy_for", None)
+    return {"session_name": name, "provider": getattr(session.provider, "name", provider) if session else provider,
+            "model": getattr(session.provider, "model_name", model) if session else model,
+            "busy": bool(busy_for and busy_for(name).is_set())}
 
 
 # --------------------------------------------------------------------- node setup wizard

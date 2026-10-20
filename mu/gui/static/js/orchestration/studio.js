@@ -49,19 +49,19 @@
      * reach (GET /api/providers, /api/providers/<name>/models). Free text stays possible when a
      * provider can't list its models. The last choice is remembered. */
     const LAST_MODEL = 'orch.chat.model';
-    async function chooseModel(attempt) {
+    async function chooseModel(attempt, { title = 'Open the discovery chat', lede = 'No chat session is active, so choose the model for the discovery chat.', ok = 'Open chat', onCancel = null } = {}) {
         const form = document.createElement('form');
         form.className = 'orch-stack';
         form.noValidate = true;
         const id = ui.uid('chat');
-        form.innerHTML = `<p>No chat session is active, so choose the model for the discovery chat.</p>
+        form.innerHTML = `<p>${esc(lede)}</p>
             <div class="w-field"><label class="w-field__label" for="${id}-p">Provider</label><span class="w-select"><select class="w-select__control" id="${id}-p" data-autofocus><option value="">Loading…</option></select></span><p class="w-field__hint" data-p-hint></p></div>
             <div class="w-field"><label class="w-field__label" for="${id}-m">Model</label><span class="w-select" data-m-select><select class="w-select__control" id="${id}-m" disabled><option value="">Choose a provider first</option></select></span>
                 <input class="w-input" data-mono id="${id}-mt" autocomplete="off" spellcheck="false" placeholder="model name" hidden aria-label="Model name">
                 <p class="w-field__hint" data-m-hint aria-live="polite"></p></div>
             <p class="w-field__error" data-error role="alert"></p>
-            <div class="w-btn-row orch-dialog__actions"><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="submit" class="w-btn" data-variant="primary">Open chat</button></div>`;
-        const d = ui.dialog({ title: 'Open the discovery chat', body: form });
+            <div class="w-btn-row orch-dialog__actions"><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="submit" class="w-btn" data-variant="primary">${esc(ok)}</button></div>`;
+        const d = ui.dialog({ title, body: form });
         const psel = form.querySelector(`#${id}-p`);
         const msel = form.querySelector(`#${id}-m`);
         const mtext = form.querySelector(`#${id}-mt`);
@@ -113,7 +113,7 @@
             psel.value = last.provider || 'anthropic';
         }
         loadModels();
-        form.querySelector('[data-cancel]').onclick = () => d.close();
+        form.querySelector('[data-cancel]').onclick = () => { d.close(); onCancel?.(); };
         form.onsubmit = async e => {
             e.preventDefault();
             const provider = psel.value;
@@ -445,7 +445,7 @@
         return route.parts.length >= 2 ? renderEditor(el, route, opts) : renderList(el, route, opts);
     }
 
-    Orch.studio = { newTool, openChat, testDialog, submitDialog, stepper };
+    Orch.studio = { newTool, openChat, chooseModel, testDialog, submitDialog, stepper };
     Orch.routes.studio = { nav: 'studio', title: 'Studio', scopes: ['tool'], render, crumbs: r => (r.parts[0] === 'runbook'
         ? [{ label: 'Studio', to: '#/studio' }, { label: r.parts[1] === 'new' ? 'New runbook' : `${r.parts[1] || ''}@${r.parts[2] || ''}` }]
         : r.parts.length >= 2 ? [{ label: 'Studio', to: '#/studio' }, { label: `${r.parts[0]}@${r.parts[1]}` }] : [{ label: 'Studio' }]) };

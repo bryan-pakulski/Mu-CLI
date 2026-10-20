@@ -132,7 +132,7 @@ _HELP_GROUPS = [
                 "Manage teacher-mode courses",
             ),
             (
-                "/orch [runs|run|nodes|approve|reject|accept|pause|resume|update-agents]",
+                "/orch [runs|run|nodes|results|approve|reject|accept|pause|resume|update-agents]",
                 "/orchestration",
                 "Orchestration: what needs you, and decide it",
             ),

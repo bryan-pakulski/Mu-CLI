@@ -21,8 +21,9 @@ NODE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "node")
 _EPOCH = (2020, 1, 1, 0, 0, 0)
 
 DEFAULT_POLICY = """\
-# mucli-node local policy: the node owner's final veto. Edited on this node only (root-owned).
-# The master cannot change it. Anything outside it is refused before it runs.
+# mucli-node local policy: the node owner's final veto (root-owned). Anything outside it is
+# refused before it runs. Edit it here, or on the master's node page when allow_remote_policy
+# is true (signed by the master, operator only, checked again by the root helper).
 accept_categories: ["*"]          # e.g. [inventory, diagnostics, maintenance]
 max_effect: read_only             # read_only | mutating | destructive
 max_privilege: root               # root | unprivileged
@@ -34,6 +35,8 @@ quiet_hours: []                   # e.g. ["Mon-Fri 09:00-17:00 Australia/Sydney"
 canary: false                     # true accepts test-signed drafts (canary nodes only)
 allow_agent_updates: true         # the master may replace this agent with a signed, digest-checked
                                   # release (an update job); false: update it by hand
+allow_remote_policy: true         # the operator may edit this file from the master's node page;
+                                  # false: edits happen here only
 """
 
 

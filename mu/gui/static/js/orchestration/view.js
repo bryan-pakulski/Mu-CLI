@@ -29,6 +29,10 @@
     let live = true;
     let renderToken = 0;
     let firstRender = true;
+    /* Crossing from one item to an item in another group (a node → its update run) leaves a
+     * "Back to web-1" link, so the operator returns to where they were without re-finding it. */
+    let shownItem = null;      // {href, label, group} of the item on screen
+    let backTo = null;         // the item to offer a way back to
 
     /* ------------------------------------------------------------ routing */
     function parse() {
@@ -220,12 +224,21 @@
     let navTab = 'now';
     let detail = null;         // {back: {label, href}} on detail routes
 
+    /* "Ask": the fleet chat (chat.js), on every route. */
+    const askButton = () => `<button type="button" class="w-textbtn" data-orch-ask aria-controls="orch-chat" aria-expanded="${Orch.chat?.isOpen() ? 'true' : 'false'}" title="Ask about your nodes and runs (.)">${icon('message-circle')}<span>Ask</span></button>`;
+    function bindAsk(wrap) { wrap.querySelector('[data-orch-ask]')?.addEventListener('click', () => Orch.chat?.toggle()); }
     function headActions() {
-        if (detail) return null;
+        if (detail) {
+            const only = document.createElement('div');
+            only.className = 'orch-head-actions';
+            only.innerHTML = askButton();
+            bindAsk(only);
+            return only;
+        }
         const paused = !!attention.dispatch_paused;
         const wrap = document.createElement('div');
         wrap.className = 'orch-head-actions';
-        wrap.innerHTML = `<a class="w-textbtn" href="#/setup">Set up a node</a>
+        wrap.innerHTML = `${askButton()}<a class="w-textbtn" href="#/setup">Set up a node</a>
             <a class="w-btn" data-variant="primary" href="#/new-run">${icon('play')}<span>New run</span></a>
             <details class="orch-pop" data-orch-page-menu>
                 <summary class="w-btn" data-variant="icon" aria-label="More actions" title="More actions">${icon('more-horizontal')}</summary>
@@ -238,6 +251,7 @@
                         : '<button type="button" class="w-menu__item" role="menuitem" data-tone="danger" data-orch-dispatch="pause"><span class="w-menu__label">Pause all dispatch</span></button>'}
                 </div>
             </details>`;
+        bindAsk(wrap);
         wrap.querySelector('[data-orch-enrol]').addEventListener('click', () => { closePops(); Orch.nodes?.enrol(); });
         wrap.querySelector('[data-orch-new-tool]').addEventListener('click', () => { closePops(); Orch.studio?.newTool(); });
         wrap.querySelector('[data-orch-dispatch]').addEventListener('click', e => { closePops(); setDispatch(e.currentTarget.dataset.orchDispatch === 'pause', e.currentTarget); });
@@ -262,6 +276,7 @@
             else {
                 parts.push({ text: ui.plural(n.total, 'node') });
                 if (offline) parts.push({ text: `${offline} offline`, tone: 'danger', href: '#/nodes?status=offline' });
+                if (by.connecting) parts.push({ text: `${by.connecting} connecting`, tone: 'quiet', href: '#/nodes?status=connecting' });
             }
             const c = fleet.catalog || {};
             if (c.published) parts.push({ text: ui.plural(c.published, 'tool') });
@@ -347,6 +362,33 @@
     Orch.markSelected = () => markSelected();
     /* Route modules render their own heading (<h1> in .orch-head): the page header takes its
      * text on detail pages, and the in-view heading and its lede are hidden (said once). */
+    /* Tab and item changes fade (Mu §4.3): applyRoute fades motionTargets out, then in here. */
+    let routeSeq = 0;
+    let fading = false;
+    let motionTargets = [];
+    let slowTimer = 0;
+    let loadingShown = false;  // a slow page already faded its loading state in: fade the result in too
+    function arrive({ loading = false } = {}) {
+        fading = false;
+        clearTimeout(slowTimer);
+        const els = [listPane, mainPane, asidePane].filter(el => el.hasAttribute('data-leaving')
+            || (loadingShown && (el === mainPane || el === asidePane)));
+        loadingShown = loading;
+        els.forEach(el => (window.WashMotion ? window.WashMotion.enter(el) : el.removeAttribute('data-leaving')));
+    }
+    function placeBack(route, g) {
+        if (!isItem(route)) return;
+        const title = viewEl.querySelector('.orch-item__title');
+        shownItem = { href: location.hash || '#/', label: (title?.textContent || '').trim() || 'previous', group: g };
+        if (!backTo || viewEl.querySelector('[data-orch-back]')) return;
+        const a = document.createElement('a');
+        a.className = 'w-textbtn orch-back';
+        a.dataset.orchBack = '';
+        a.dataset.tone = 'quiet';
+        a.href = backTo.href;
+        a.textContent = `\u2190 Back to ${backTo.label}`;
+        viewEl.prepend(a);
+    }
     function liftHeading() {
         const head = viewEl.querySelector('.orch-head');
         const h1 = (head || viewEl).querySelector('h1');
@@ -370,11 +412,30 @@
     }
 
     async function applyRoute({ soft = false } = {}) {
+        /* A live refresh waits for a route change that is still fading the old content out. */
+        if (soft && fading) return;
         let route = parse();
         const def = Orch.routes[route.name] || Orch.routes.overview;
         const g = groupOf(route.name);
         const key = `${route.name}/${route.parts.join('/')}`;
         if (!soft) {
+            /* Fade the old content out first (another row, tab or page); a newer route wins. */
+            const seq = ++routeSeq;
+            motionTargets = g && g === listGroup ? [mainPane, asidePane] : [listPane, mainPane, asidePane];
+            if (!firstRender && window.WashMotion) {
+                fading = true;
+                await window.WashMotion.leave(motionTargets);
+                if (seq !== routeSeq) return;
+                fading = false;
+                /* A slow page shows its loading state instead of staying blank. */
+                clearTimeout(slowTimer);
+                slowTimer = setTimeout(() => { if (seq === routeSeq) arrive({ loading: true }); }, 400);
+            }
+            const here = location.hash || '#/';
+            if (!isItem(route)) backTo = null;
+            else if (backTo && backTo.href === here) backTo = null;
+            else if (shownItem && shownItem.href !== here && shownItem.group !== g) backTo = shownItem;
+            shownItem = null;
             current.controller?.dispose?.();
             current = { key, route, def, controller: null };
             setNav(def.nav || route.name);
@@ -405,6 +466,8 @@
             const controller = await def.render(viewEl, route, { soft, isCurrent: () => token === renderToken && current.key === key, setCrumbs: crumbs, go, setQuery });
             if (token !== renderToken) return;
             liftHeading();
+            placeBack(route, g);
+            if (!soft) arrive();
             const hasAside = g ? placeAside() : false;
             const hasList = !!g || (route.name === 'settings' && placeSettingsNav());
             if (!soft) layout(route, { hasList, hasAside });
@@ -418,6 +481,7 @@
         } catch (err) {
             if (token !== renderToken) return;
             if (soft) { ui.toast(`Couldn’t refresh: ${err.message}`, 'danger'); return; }
+            arrive();
             viewEl.innerHTML = ui.errorState(err);
             layout(route, { hasList: !!g, hasAside: false });
             viewEl.querySelector('[data-orch-retry]')?.addEventListener('click', () => applyRoute());
@@ -442,6 +506,15 @@
     }
     const softRender = ui.debounce(() => applyRoute({ soft: true }), 350);
     const softList = ui.debounce(() => { if (listGroup) renderList(listGroup, { soft: true }); }, 350);
+    /* What the operator is looking at, for the fleet chat's "about this" context. */
+    Orch.context = () => {
+        const route = parse();
+        const kind = { node: 'node', run: 'run', tool: 'tool', runbook: 'runbook' }[route.name];
+        if (!kind || !route.parts[0]) return null;
+        const label = shownItem && shownItem.href === (location.hash || '#/') ? shownItem.label : route.parts[0];
+        return { kind, id: route.parts[0], label };
+    };
+    Orch.repaintHead = () => paintHead();
     Orch.refresh = () => applyRoute({ soft: true });
     Orch.go = go;
     Orch.setQuery = setQuery;
@@ -581,6 +654,28 @@
             status: 'failed', title: `${ui.plural(att.offline_nodes, 'node is', 'nodes are')} offline`, href: '#/nodes?status=offline',
             sub: 'Not seen for over 90 seconds.',
         }));
+        const reboot = o.reboot || { count: 0, nodes: [] };
+        if (reboot.count) {
+            out.push(ui.row({
+                status: 'waiting', title: `${ui.plural(reboot.count, 'node needs', 'nodes need')} a reboot`, href: '#/nodes',
+                sub: esc(reboot.nodes.slice(0, 6).map(x => x.name).join(', ') + (reboot.count > 6 ? ` and ${reboot.count - 6} more` : '')
+                    + (reboot.nodes[0]?.reasons?.[0] ? ` · ${reboot.nodes[0].reasons[0]}` : '')),
+                pinned: true, attrs: ' data-now-reboot',
+                actions: '<button type="button" class="w-textbtn" data-reboot-needed>Reboot one at a time…</button>',
+            }));
+            bind.push(['[data-now-reboot]', null, { custom: node => node.querySelector('[data-reboot-needed]')?.addEventListener('click', async e => {
+                const button = e.currentTarget;
+                const ok = await ui.confirm({ title: `Reboot ${ui.plural(reboot.count, 'node')}?`,
+                    message: `${reboot.nodes.map(x => x.name).join(', ')} reboot one at a time, each only if it still needs one. The run waits for your approval as usual.`,
+                    confirmLabel: 'Propose reboots', tone: 'danger' });
+                if (!ok) return;
+                try {
+                    const res = await ui.command('nodeMaintenance', { node_ids: reboot.nodes.map(x => x.node_id), action: 'reboot', params: { only_if_required: true } },
+                        { ok: 'Reboots proposed', button });
+                    Orch.go(`#/run/${encodeURIComponent(res.data.run.id)}`);
+                } catch (_) { /* toasted */ }
+            }) }]);
+        }
         if (!(o.network || {}).bind) out.push(ui.row({
             status: 'waiting', title: 'Choose a network for nodes', href: '#/settings?section=network',
             sub: 'The node endpoint isn’t configured yet, so nodes can’t enrol.', pinned: true,
@@ -612,7 +707,7 @@
         const recent = o.recent_runs || [];
         const firstRun = !o.nodes.total && !recent.length;
         const fleetNodes = (nodes.nodes || []).slice().sort((x, y) => {
-            const rank = n => (n.status === 'pending' ? 0 : (!n.online && n.status === 'active' ? 1 : 2));
+            const rank = n => (n.status === 'pending' ? 0 : (n.status === 'active' && (n.presence || (n.online ? 'online' : 'offline')) === 'offline' ? 1 : 2));
             const load = n => Math.max(n.summary?.max_disk_used_pct ?? 0, n.summary?.memory_used_pct ?? 0);
             return rank(x) - rank(y) || load(y) - load(x);
         });
@@ -649,7 +744,12 @@
                     ${ui.rows(entries.map(auditRow), { label: 'Activity', empty: 'Nothing recorded yet.' })}</section>`}
             </div>`;
         const done = () => { Orch.refresh(); Orch.refreshAttention?.(); };
-        bind.forEach(([sel, actions, ctx]) => { const node = el.querySelector(sel); if (node && actions) ui.bindActions(node, actions, { ...ctx, done }); });
+        bind.forEach(([sel, actions, ctx]) => {
+            const node = el.querySelector(sel);
+            if (!node) return;
+            if (ctx && typeof ctx.custom === 'function') ctx.custom(node);
+            else if (actions) ui.bindActions(node, actions, { ...ctx, done });
+        });
         el.querySelectorAll('[data-orch-enrol]').forEach(b => b.addEventListener('click', () => Orch.nodes?.enrol()));
         el.querySelector('[data-board-pause]')?.addEventListener('click', e => setDispatch(true, e.currentTarget));
         return null;

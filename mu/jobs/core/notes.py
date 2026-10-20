@@ -395,29 +395,6 @@ def fold(notes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
-# Headlines written after the fact for jobs that predate the contract (notes_backfill.py):
-# ``notes.json`` in the job's artifacts, ``{"e<event id>": {"headline", "notes"}}``.
-WRITTEN_NOTES = "notes.json"
-
-
-def written_notes(job) -> Dict[str, Dict[str, Any]]:
-    try:
-        from .artifacts import artifacts_for
-        art = artifacts_for(job)
-        value = art.read_json(WRITTEN_NOTES, {}) if art.exists() else {}
-    except (OSError, ValueError):
-        value = {}
-    return value if isinstance(value, dict) else {}
-
-
-def apply_written(note: Dict[str, Any], overrides: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    written = overrides.get(note["id"])
-    if isinstance(written, dict) and clean(written.get("headline")):
-        note["headline"] = clean(written["headline"])
-        note["bullets"] = bullets(written.get("notes")) or note["bullets"]
-    return note
-
-
 def repeat_less(notes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """A note that repeats an earlier one word for word (the same checks failing for the same
     reasons after a resume) keeps its title but drops the repeated detail."""
@@ -441,8 +418,7 @@ def job_notes(service, job) -> List[Dict[str, Any]]:
         attempts = {a.id: a for a in service.attempts(job.id)}
     except Exception:  # noqa: BLE001 - notes degrade to event text without attempt detail
         attempts = {}
-    overrides = written_notes(job)
-    notes = [apply_written(n, overrides) for n in (_event_note(e, attempts) for e in events) if n]
+    notes = [n for n in (_event_note(e, attempts) for e in events) if n]
     out = repeat_less(fold(notes))
     for note in out:
         note.pop("fold", None)

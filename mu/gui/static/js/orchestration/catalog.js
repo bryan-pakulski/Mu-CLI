@@ -170,7 +170,7 @@
     }
 
     /* ------------------------------------------------------------ tool detail */
-    const TABS = ['overview', 'manifest', 'files', 'diff', 'lint', 'tests', 'versions', 'notes', 'usage'];
+    const TABS = ['overview', 'results', 'manifest', 'files', 'diff', 'lint', 'tests', 'versions', 'notes', 'usage'];
 
     function toolDone(t) {
         return (result, action) => {
@@ -248,7 +248,7 @@
         let tab = TABS.includes(route.query.get('tab')) ? route.query.get('tab') : 'overview';
         const findings = ((t.lint_result || {}).findings || []).length;
         const tabList = [
-            { id: 'overview', label: 'Overview' }, { id: 'manifest', label: 'Manifest' }, { id: 'files', label: 'Files', count: Object.keys(t.files || {}).length },
+            { id: 'overview', label: 'Overview' }, { id: 'results', label: 'Results' }, { id: 'manifest', label: 'Manifest' }, { id: 'files', label: 'Files', count: Object.keys(t.files || {}).length },
             { id: 'diff', label: 'Diff' }, { id: 'lint', label: 'Lint', count: findings || '', tone: t.lint?.ok ? '' : 'attention' },
             { id: 'tests', label: 'Tests', count: t.tests?.count || '' }, { id: 'versions', label: 'Versions', count: (t.versions || []).length },
             { id: 'notes', label: 'Notes' }, { id: 'usage', label: 'Usage', count: (t.usage || []).length || '' },
@@ -275,6 +275,18 @@
         const paint = () => {
             panel.setAttribute('aria-labelledby', `orch-tab-${tab}`);
             el.querySelectorAll('[role="tab"]').forEach(b => { const on = b.dataset.tab === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+            if (tab === 'results') {
+                /* Fleet results: each node's latest successful output of this tool, any version. */
+                panel.innerHTML = '<div data-results></div>';
+                Orch.results?.mount(panel.querySelector('[data-results]'), {
+                    url: `tools/${encodeURIComponent(t.tool_id)}/results`,
+                    csv: (_step, view) => `/api/orchestration/tools/${encodeURIComponent(t.tool_id)}/results.csv?view=${encodeURIComponent(view)}`,
+                    empty: 'No node has returned results for this tool yet. Run it to see them here.',
+                    onRow: row => { location.hash = `#/run/${encodeURIComponent(row.run_id)}?exec=${encodeURIComponent(row.exec_id)}`; },
+                    ask: v => `Look at the latest ${t.tool_id} results across the fleet (${v.label} view${v.filter ? `, filtered by "${v.filter}"` : ''}) with fleet_results and tell me what needs attention.`,
+                });
+                return;
+            }
             panel.innerHTML = tab === 'overview' ? overviewPanel(t)
                 : tab === 'manifest' ? ui.code(t.manifest_yaml, { lang: 'yaml', title: 'tool.yaml' })
                 : tab === 'files' ? filesPanel(t)

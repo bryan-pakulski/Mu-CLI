@@ -230,15 +230,26 @@
     else state.selected = null;
   }
   // `pick`: the user chose it (URL + narrow screens show the main pane).
-  function select(kind, name, {pick = false, show = true} = {}) {
+  let selectSeq = 0;
+  async function select(kind, name, {pick = false, show = true, animate = true} = {}) {
+    const prev = state.selected;
+    const switching = animate && pick && !!prev && (prev.kind !== kind || prev.name !== name);
     state.selected = {kind, name};
     if (pick) {
       setOpenParam(kind === 'template' ? `template:${name}` : name);
       if (show) panes().setAttribute('data-show', 'main');
     }
+    markSelected();
+    // Another environment: the open one fades out and the chosen one fades in (Mu §4.3).
+    const seq = ++selectSeq;
+    const fade = [$('env-main'), $('env-aside')];
+    if (switching && window.WashMotion) {
+      await window.WashMotion.leave(fade);
+      if (seq !== selectSeq) return;
+    }
     renderMain();
     renderAside();
-    markSelected();
+    if (switching) fade.forEach(el => (window.WashMotion ? window.WashMotion.enter(el) : el?.removeAttribute('data-leaving')));
   }
 
   // The state sentence under the page title (Mu §4.2): "2 running · 1 stopped ·
@@ -998,7 +1009,7 @@
     state.shellInline = inlineShell();
     placeShellBody(state.shellInline);
     if (state.shellInline) {
-      if (!state.selected || state.selected.kind !== 'env' || state.selected.name !== name) select('env', name, {pick: true});
+      if (!state.selected || state.selected.kind !== 'env' || state.selected.name !== name) select('env', name, {pick: true, animate: false});
       syncTerminal();
       $('env-terminal-host').scrollIntoView({block: 'nearest', behavior: 'smooth'});
     } else {

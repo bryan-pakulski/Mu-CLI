@@ -84,7 +84,7 @@ standard-library zipapp; nothing is installed with pip.
 ### Node policy
 
 `/etc/mucli-node/policy.yaml` is the node owner's veto; a compromised master can only run what it
-allows. Edit it on the node; changes apply on the next poll.
+allows. Edit it on the node, or from the master (below); changes apply on the next poll.
 
 ```yaml
 accept_categories: [inventory, diagnostics, maintenance]
@@ -97,9 +97,25 @@ require_check_mode_first: true  # a changing tool must succeed in check mode her
 quiet_hours: ["Mon-Fri 09:00-17:00 Australia/Sydney"]
 canary: false                   # true accepts test-signed drafts
 allow_agent_updates: true       # the master may update this agent (see "Keeping agents up to date")
+allow_remote_policy: true       # the operator may edit this file from the master
 ```
 
 A policy that does not parse refuses everything. Refused executions show the reason.
+
+**Editing from the master.** The node page's *Node-local policy* section has **Edit policy**: the
+current file in an editor with a live check (errors, what changes, and warnings such as raising
+`max_effect` or turning remote edits off). **Send** signs the new text; the node's next poll
+carries it, and the node checks it again (in the root helper on systemd nodes) before
+installing it, keeping the previous file as `policy.yaml.prev`. The section shows the edit as
+waiting, in force or refused (with the node's reason); a waiting edit can be cancelled.
+
+- Operator only: `setNodePolicy` is never available to the AI. There is no approval step; the
+  edit is audited (`node.policy.set`, then `node.policy.applied` or `node.policy.refused`).
+- The node decides with the policy in force: `allow_remote_policy: true` allows it; `false`
+  keeps the file local; unset follows `allow_agent_updates` (a node that accepts master-signed
+  agents already trusts the master that far). An invalid local policy is only fixed on the node.
+- Needs agent 1.2.0 (older agents don't report their policy text); new installs write
+  `allow_remote_policy: true`.
 
 ### Keeping agents up to date
 
@@ -145,6 +161,43 @@ drafts under test. **Nodes → Start test node** (needs Docker on the master) st
 container node (`python:3.12-slim` by default) that enrols itself as an accepted canary; remove it
 when done.
 
+### Node maintenance
+
+Every node (agent 1.2.0 or newer) reports whether it **needs a reboot** with its facts:
+Debian/Ubuntu's `reboot-required` flag (and the packages behind it), RHEL's
+`needs-restarting -r`, or a newer kernel installed than the one running. It shows on the node
+row ("needs reboot"), the node page, the fleet board and **Now** ("N nodes need a reboot ·
+Reboot one at a time…"), and the AI's `fleet_overview`. Update older agents with
+**Update this node** (or the agent update job).
+
+The node page's **Maintenance** panel does routine work without writing tools:
+
+| Action | Built-in tool | Notes |
+|---|---|---|
+| Check for updates | `sys.pending-updates` | read-only |
+| Install security updates | `os.security-updates` | apt (`*-security`), dnf/yum `--security`, zypper patches; refused packages are skipped and reported |
+| Upgrade all packages | `os.full-upgrade` | apt, dnf/yum, zypper, pacman, apk; no removals unless allowed |
+| Reboot | `os.reboot` | scheduled 30 s out so the run reports first; optionally only if needed; fleet reboots go one node at a time |
+| Restart a service | `os.service` | restart, reload, start or stop one systemd unit |
+
+Each button proposes an ordinary run (operator only; the AI can propose the same tools through
+`proposeRun`). The access policy decides the confirmation as for any mutating tool, the node's
+own `policy.yaml` still refuses what it doesn't allow (the panel says so up front, e.g. "allow it
+in /etc/mucli-node/policy.yaml (max_effect: mutating)"), and every change has a **Dry run**
+(check mode). The tools are part of the starter pack; **Install built-in tools** (or
+`installStarterPack`) adds any that a master is missing without touching the rest.
+
+Proposing from the node page keeps you on the node. **Open runs here** lists every unfinished
+run that includes it, with its decision buttons (Approve and start, Reject, Continue, Cancel;
+typed confirmation still applies), its state on this node and an **Open run** link. Following a
+link from one item to another kind of item (a node to its run) leaves a **← Back to web-1**
+link above the heading.
+
+**Connecting.** For two minutes after the master starts, an active node it hasn't heard from
+since then shows as *connecting* (○) rather than offline: agents back off for up to a minute
+before they reconnect. Connecting nodes don't count as needing you; a node that's still silent
+after the grace period is offline as before.
+
 ## 3. The catalog
 
 The **starter pack** installs read-only tools: disk usage, memory, services, failed units,
@@ -161,6 +214,19 @@ Lifecycle: `draft → testing → in_review → published → deprecated → ret
 validation, banned patterns, secret scan, shellcheck/ruff when installed) must pass before review.
 Only you publish; destructive tools are published by typing their id. Published versions are
 signed and immutable; change a tool by creating a new version.
+
+### Fleet chat
+
+**Ask** in the orchestration header (or `.`) docks a chat beside the panes on every route: ask
+about your nodes and runs, or ask for something to be done. It is an *orchestration* session
+(`POST /api/orchestration/chat/session`; one conversation, kept across reloads, **New** starts
+another) with the same `orch_*` tools as Studio, so it can look up facts and results, draft tools
+and **propose** runs. A run it proposes appears in the chat as a card with **Approve and start /
+Reject** (or Continue / Cancel): those are your own commands, exactly as on the run page,
+typed confirmation included. The AI still can't approve, dispatch, publish or touch policy
+(`AI_COMMANDS` is unchanged). Tool approvals and questions it asks are answered inline. On a
+node, run, tool or runbook page the message carries that item as context ("About node web-1",
+removable). The fleet chat never changes the main chat's current session.
 
 ## 4. Designing tools with the AI (Studio)
 
@@ -231,6 +297,34 @@ made it.
   *unreachable* and wait for your decision (**Retry node**).
 - **Pause all dispatch** (Overview, Android, `mucli orch pause`) is the kill switch. Quarantine
   stops one node receiving work.
+
+### Fleet results
+
+A tool's declared `outputs` schema turns what every node returned into tables across the fleet
+(`mu/orchestration/results.py`):
+
+- **Per node**: one row per node with the tool's top-level values (counts for lists). Nodes
+  that failed stay in the table with their state.
+- **One view per list of objects**: e.g. every disk on every node, or every certificate.
+- Each view sorts and charts by its key metric: percentages highest first, `days` soonest
+  first, otherwise the first number. Click a header to sort; Chart shows bars of the sorted
+  column, coloured where they cross a warning line (≥75% / ≥90%, ≤30 / ≤14 days).
+- **Where:** the run page (first, once the run finishes) and a tool's **Results** tab, which
+  shows each node's latest successful result across runs.
+- **CSV:** `GET /api/orchestration/runs/<id>/results.csv?step=&view=` and
+  `/api/orchestration/tools/<id>/results.csv?view=`. Raw values; cells that would start a
+  spreadsheet formula are prefixed with `'` because node output is untrusted.
+- Tools without an `outputs` schema get columns inferred from what they returned. Declare one
+  for labelled, typed columns (`*_bytes` shows sizes, `*_pct` percentages, `days*` days).
+- **Everywhere else:** the same tables are available to
+  - **the AI in any chat** (chat, workspace, container and orchestration sessions) through the
+    read-only `fleet_overview` and `fleet_results` tools: "which nodes are over 80% disk?",
+    "which certificates expire this month?". They read only stored, redacted outputs, never
+    mutate, and report "not set up" on a machine that hasn't used orchestration (including
+    job containers);
+  - **the terminal** as `/orch results <tool|run id> [view] [sort column]`;
+  - **Chat from the web**: *Ask about this* on any results table opens Chat with a question
+    about that view in the composer, unsent.
 
 ### Access policy
 
@@ -313,7 +407,7 @@ Never exported: secret values, node credentials and identities, keys, the audit 
 ### What needs you, everywhere
 
 Runs awaiting approval, paused runs, tools and runbooks in review, nodes awaiting acceptance and
-offline nodes count as needing you. The same counts appear on every surface:
+offline nodes (not connecting ones, just after the master starts) count as needing you. The same counts appear on every surface:
 
 - **Web:** a count on the Orchestration item in the sidebar, on every page (a bubble on the icon
   when the sidebar is collapsed). It reads `GET /api/orchestration/badge`, which never starts

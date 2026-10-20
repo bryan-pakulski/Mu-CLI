@@ -9,7 +9,8 @@
     Catalog the list stays while a row's hash route fills main (the item itself)
     and aside (its context: a run's execution log, a node's executions, a tool's
     actions and runs). Every mutation posts to /api/orchestration/cmd with the
-    CSRF token carried on #orch-app. -#}
+    CSRF token carried on #orch-app. #orch-chat is the fleet chat (chat.js), a
+    column of #orch-app while open. -#}
 {% extends "_layout.html" %}
 {% import "macros/wash.html" as w %}
 {% block title %}Orchestration · μcli{% endblock %}
@@ -42,6 +43,7 @@
         </div>
     </section>
     <aside class="w-pane orch-aside" data-pane="aside" id="orch-aside" aria-label="Context"></aside>
+    <aside class="orch-chat" id="orch-chat" aria-label="Fleet chat" hidden></aside>
 </div>
 <noscript><div class="w-page"><p>Orchestration needs JavaScript.</p></div></noscript>
 {% endblock %}
@@ -54,6 +56,7 @@
 <script src="/static/js/orchestration/ui.js"></script>
 <script src="/static/js/orchestration/schema.js"></script>
 <script src="/static/js/orchestration/pickers.js"></script>
+<script src="/static/js/orchestration/results.js"></script>
 <script src="/static/js/orchestration/nodes.js"></script>
 <script src="/static/js/orchestration/setup.js"></script>
 <script src="/static/js/orchestration/catalog.js"></script>
@@ -62,4 +65,7 @@
 <script src="/static/js/orchestration/runs.js"></script>
 <script src="/static/js/orchestration/settings.js"></script>
 <script src="/static/js/orchestration/view.js"></script>
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
+<script src="/static/js/orchestration/chat.js"></script>
 {% endblock %}

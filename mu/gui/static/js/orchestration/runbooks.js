@@ -14,8 +14,7 @@
  * stale banner offers Reload or Keep mine.
  *
  * The model functions (specToModel, modelToSpec, inputsToRows, rowsToInputs)
- * are pure and run under node in tests/test_orch_web_runbooks.py: a spec
- * survives form → spec unchanged.
+ * are pure: a spec survives form → spec unchanged.
  */
 (() => {
     'use strict';

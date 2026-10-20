@@ -7,7 +7,7 @@ by the terminal, web and Android surfaces.
 
 Python surfaces read these files directly through this module. Web and
 Android consume generated copies (``scripts/design/build_tokens.py``);
-``tests/test_wash_tokens.py`` fails when the generated copies are stale.
+``tests/design/test_wash_tokens.py`` fails when the generated copies are stale.
 
 See ``documentation/design/wash_design_guide.md``.
 """

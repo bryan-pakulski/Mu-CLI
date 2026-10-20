@@ -1,0 +1,27 @@
+id: os.reboot
+title: Reboot
+summary: Schedule a reboot a few seconds out (so the run reports back first), optionally only when the node needs one. The node goes offline briefly and reports its new uptime when it returns. Check mode says whether it would reboot and why.
+category: maintenance
+effect: mutating
+idempotent: false
+targets: {requires: [systemd]}
+privilege: {run_as: root}
+inputs:
+  type: object
+  properties:
+    only_if_required: {type: boolean, default: false, description: Reboot only when the node reports that it needs one}
+    delay_s: {type: integer, minimum: 10, maximum: 3600, default: 30, description: Seconds before the reboot}
+    message: {type: string, maxLength: 200, default: "μcli maintenance reboot"}
+  additionalProperties: false
+outputs:
+  type: object
+  properties:
+    scheduled: {type: boolean}
+    required: {type: boolean}
+    reasons: {type: array, items: {type: string}}
+    delay_s: {type: integer}
+    at: {type: [number, "null"]}
+    check_mode: {type: boolean}
+  required: [scheduled, required, reasons, delay_s, check_mode]
+implementation: {runtime: python3, entry: reboot.py, check_mode: true}
+limits: {timeout_s: 120, max_output_kb: 64}

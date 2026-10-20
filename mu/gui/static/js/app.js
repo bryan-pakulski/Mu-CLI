@@ -3079,7 +3079,24 @@ ${problem.text}`, "error", 16000);
             this.announcement = "";
             requestAnimationFrame(() => { this.announcement = String(text || ""); });
         },
-        push(payload) { this.queue.push(payload); },
+        push(payload) {
+            if (!this.queue.some(x => x.id === payload.id)) this.queue.push(payload);
+        },
+        // Questions wait indefinitely on the server, so a reload or a dropped connection must
+        // bring them back: rebuild the queue from /api/prompts (new ones added, ended ones dropped).
+        async resync() {
+            try {
+                const r = await fetch("/api/prompts", { cache: "no-store" });
+                if (!r.ok) return;
+                const pending = (await r.json()).pending || [];
+                const ids = new Set(pending.map(p => p.id));
+                this.queue = this.queue.filter(x => ids.has(x.id));
+                for (const p of pending) {
+                    const { id, ...prompt } = p;
+                    this.push({ id, prompt, session_name: prompt.session_name || null });
+                }
+            } catch (_) { /* next reconnect retries */ }
+        },
         // Remove a specific id from the queue (used after answer/cancel
         // since the head isn't always the right one with cross-session
         // prompts in flight).
@@ -6874,6 +6891,8 @@ function bootSSE() {
                 reconnectAttempt = 0;
             }, RECONNECT_STABLE_MS);
             bumpWatchdog();
+            // Pending questions survive reloads and outages (they never time out).
+            Alpine.store("prompts").resync();
             // On reconnect (not initial boot), re-sync state in case we
             // missed events while the connection was down.
             if (hasConnectedBefore) {
@@ -7127,6 +7146,8 @@ function routeEvent(ev) {
             prompts.push({ id: ev.id, prompt: ev.prompt, session_name: name });
             break;
         case "prompt_resolved":
+            // Answered — here, in another tab, on the phone or in the terminal: drop its card.
+            prompts._remove(ev.id);
             // Server-side YOLO auto-approvals carry the additive `auto: true`
             // flag (mu/gui/web_ui.py notify_auto_approved). Prompts a person
             // answered are recorded by the card itself on submit.
@@ -7142,7 +7163,11 @@ function routeEvent(ev) {
                 }, name);
             }
             break;
-        case "prompt_cancelled": break;
+        case "prompt_cancelled":
+            // Stop, another tab, the phone or the server ended this question: its card goes,
+            // so a stale card never locks the composer or sits beside the next question.
+            prompts._remove(ev.id);
+            break;
         case "turn_complete":
             // A terminal error is carried on turn_complete as well as the
             // immediate error event so reconnecting clients cannot remain
@@ -7903,14 +7928,37 @@ document.addEventListener("DOMContentLoaded", () => {
             Alpine.store("inspector").openDrawer();
         }
     } catch (e) { console.error("settings=open", e); }
-    // Inside the persistent shell the same link arrives as a route change: open the
-    // drawer in place instead of reloading the chat view (wash_shell.js `mu:route`).
+    // /?ask=<text> (other surfaces' "Ask about this", e.g. Orchestration's fleet results):
+    // the text lands in the composer, focused and unsent, so the operator reviews it first.
+    const prefillAsk = (text) => {
+        const box = document.querySelector(".w-chat .w-composer__textarea");
+        if (!box || !text) return false;
+        box.value = String(text).slice(0, 4000);
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+        box.focus();
+        box.setSelectionRange(box.value.length, box.value.length);
+        return true;
+    };
+    try {
+        const url = new URL(location.href);
+        const ask = url.searchParams.get("ask");
+        if (ask) {
+            url.searchParams.delete("ask");
+            history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+            setTimeout(() => prefillAsk(ask), 0);
+        }
+    } catch (e) { console.error("ask", e); }
+    // Inside the persistent shell the same links arrive as route changes: open the drawer
+    // or fill the composer in place instead of reloading the chat view (wash_shell.js `mu:route`).
     window.addEventListener("mu:route", (event) => {
         try {
             const target = new URL(event.detail.href, location.href);
-            if (target.pathname === "/" && target.searchParams.get("settings") === "open" && document.querySelector(".w-chat")) {
+            if (target.pathname !== "/" || !document.querySelector(".w-chat")) return;
+            if (target.searchParams.get("settings") === "open") {
                 event.preventDefault();
                 Alpine.store("inspector").openDrawer();
+            } else if (target.searchParams.get("ask") && prefillAsk(target.searchParams.get("ask"))) {
+                event.preventDefault();
             }
         } catch (e) { /* let the view reload */ }
     });
@@ -8112,6 +8160,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const pane = document.createElement('section');
         pane.id = 'pricing-settings-pane';
         pane.className = 'settings-pane pricing-settings-pane';
+        pane.setAttribute('role', 'tabpanel');
         pane.setAttribute('x-show', "$store.inspector.tab === 'pricing'");
         pane.innerHTML = `
             <div class="pricing-settings-head">

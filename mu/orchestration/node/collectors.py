@@ -118,11 +118,64 @@ def has_systemd() -> bool:
     return os.path.isdir("/run/systemd/system")
 
 
+def _version_key(text: str) -> List[Any]:
+    """Natural sort key for kernel versions (``6.8.0-45-generic`` < ``6.8.0-110-generic``)."""
+    import re
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", text)]
+
+
+def reboot_status() -> Dict[str, Any]:
+    """Whether this machine needs a reboot, and why (read-only; best effort).
+
+    * Debian/Ubuntu: ``/var/run/reboot-required`` (and ``.pkgs`` for the packages behind it).
+    * RHEL/Fedora: ``needs-restarting -r`` exits 1 when a reboot is needed.
+    * Any distro: a newer kernel is installed (``/lib/modules``) than the one running, or the
+      running kernel's modules are gone (Arch removes them on upgrade).
+    """
+    reasons: List[str] = []
+    packages: List[str] = []
+    since = None
+    flag = "/var/run/reboot-required"
+    if os.path.exists(flag):
+        reasons.append("the package manager requested a reboot")
+        try:
+            since = os.path.getmtime(flag)
+        except OSError:
+            pass
+        packages = sorted({line.strip() for line in _read(flag + ".pkgs").splitlines() if line.strip()})[:100]
+    if shutil.which("needs-restarting"):
+        try:
+            proc = subprocess.run(["needs-restarting", "-r"], capture_output=True, text=True, timeout=20,
+                                  env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"})
+            if proc.returncode == 1:
+                reasons.append("needs-restarting reports core libraries or the kernel were updated")
+        except (OSError, subprocess.SubprocessError):
+            pass
+    running = platform.release()
+    modules = "/lib/modules" if os.path.isdir("/lib/modules") else "/usr/lib/modules"
+    try:
+        installed = [d for d in os.listdir(modules) if os.path.isdir(os.path.join(modules, d))]
+    except OSError:
+        installed = []
+    if installed and running:
+        flavour = running.split("-")[-1] if "-" in running else ""
+        if "." in flavour:                     # RHEL: 5.14.0-427.13.1.el9_4.x86_64 → match the arch
+            flavour = flavour.rsplit(".", 1)[-1]
+        same_flavour = [k for k in installed if not flavour or k.endswith(flavour)] or installed
+        newest = max(same_flavour, key=_version_key)
+        if running not in installed:
+            reasons.append(f"the running kernel {running} was removed; {newest} is installed")
+        elif _version_key(newest) > _version_key(running):
+            reasons.append(f"kernel {newest} is installed; {running} is running")
+    return {"required": bool(reasons), "reasons": reasons, "packages": packages, "since": since,
+            "running_kernel": running}
+
+
 def collect_facts() -> Dict[str, Any]:
     facts: Dict[str, Any] = {}
     collectors: Dict[str, Callable[[], Any]] = {
         "os": os_release, "memory": memory, "disks": disks, "uptime": uptime,
-        "services": services, "binaries": binaries,
+        "services": services, "binaries": binaries, "reboot": reboot_status,
     }
     for key, fn in collectors.items():
         try:

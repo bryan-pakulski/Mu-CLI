@@ -450,14 +450,15 @@ class WorkerBridgeUI(BaseUI):
             )
         return {"approved": True, "remember": True}
 
-    def _ask_prompt(self, prompt: dict[str, Any], timeout: float = 600.0) -> Any:
+    def _ask_prompt(self, prompt: dict[str, Any]) -> Any:
+        """Relay a question to the host GUI and wait — no time limit — for the answer.
+        The host ends the wait on answer, cancel or Stop (which cancels the session's prompts)."""
         if not self.supervisor_url:
             return {"cancelled": True}
         payload = {
             "container_name": self.container_name,
             "session_name": self.session_name,
             "prompt": prompt,
-            "timeout": timeout,
         }
         try:
             response = self._request(
@@ -465,7 +466,7 @@ class WorkerBridgeUI(BaseUI):
                 f"/api/container-worker/prompt",
                 json=payload,
                 headers={"X-MuCLI-Worker-Token": self.token},
-                timeout=timeout + 15.0,
+                timeout=None,
             )
             response.raise_for_status()
             value = response.json()

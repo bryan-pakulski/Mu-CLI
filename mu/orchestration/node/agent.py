@@ -99,6 +99,8 @@ class NodeAgent:
         self._facts_at = 0.0
         self._sender: Optional[threading.Thread] = None
         self._pending_update: Optional[Dict[str, Any]] = None
+        self._policy_result: Optional[Dict[str, Any]] = None
+        self._policy_nonce = ""
         self.updated = False          # set when this process exits so systemd starts the new agent
         self._report_update()
 
@@ -117,6 +119,13 @@ class NodeAgent:
     def policy_summary(self) -> Dict[str, Any]:
         summary = self.policy().summary()
         summary["sandbox"] = self.sandbox
+        # The file itself, so the operator can edit it on the master (it is not secret).
+        from .remote_policy import current_text, text_digest
+        text = current_text(self.etc_dir)
+        summary["text"] = text[:16384]
+        summary["sha256"] = text_digest(text)
+        from .policy import remote_policy_allowed
+        summary["remote_policy"] = remote_policy_allowed(self.policy())
         return summary
 
     # ------------------------------------------------------------ main loop
@@ -146,7 +155,10 @@ class NodeAgent:
         if time.time() - self._facts_at > FACTS_INTERVAL_S:
             body["facts"] = self.facts_fn()
             self._facts_at = time.time()
+        if self._policy_result is not None:
+            body["policy_result"] = self._policy_result
         reply = self.client.post("/api/orchestration/node/poll", body, timeout=wait + 15)
+        self._policy_result = None
         if reply.get("rotate_credential"):
             self.identity["credential"] = reply["rotate_credential"]
             self.store.save_identity(self.identity)
@@ -159,10 +171,44 @@ class NodeAgent:
                 self.executor.cancel(str(cancel.get("exec_id")))
             else:
                 self.log(f"mucli-node: ignored cancel: {check.reason}")
+        if isinstance(reply.get("policy_update"), dict):
+            self.handle_policy(reply["policy_update"])
         for envelope in reply.get("dispatches") or []:
             self.handle_dispatch(envelope)
         self._maybe_update()
         return reply
+
+    # ------------------------------------------------------------ policy from the master
+    def handle_policy(self, order: Dict[str, Any]) -> None:
+        """Install a policy the operator edited on the master (checked here, then again by the
+        root helper, which writes the root-owned file). The outcome rides on the next poll."""
+        from .remote_policy import apply as apply_policy, check as check_policy
+        nonce = str(order.get("nonce") or "")
+        if not nonce or nonce == self._policy_nonce:
+            return                      # already tried this order; the master is told once
+        self._policy_nonce = nonce
+        ok, reason = check_policy(order, etc_dir=self.etc_dir, node_id=self.node_id,
+                                  signing_key=self.keys.signing, replay=None)
+        if ok and self.sandbox == "systemd":
+            folder = os.path.join(self.store.root, "policy")
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+            spec = os.path.join(folder, "spec.json")
+            with open(spec, "w", encoding="utf-8") as fh:
+                json.dump({"policy": dict(order)}, fh)
+            try:
+                out = subprocess.run(self.executor.helper + [spec], capture_output=True, text=True, timeout=60)
+                ok = out.returncode == 0
+                lines = [ln for ln in (out.stdout + out.stderr).strip().splitlines() if ln.strip()]
+                reason = "" if ok else (lines[-1] if lines else f"root helper exit {out.returncode}")[:500]
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                ok, reason = False, f"the root helper didn't run: {exc}"
+        elif ok:                        # no root helper (sandbox none): the agent owns its etc dir
+            ok, reason = apply_policy(order, etc_dir=self.etc_dir, node_id=self.node_id,
+                                      signing_key=self.keys.signing, replay=self.replay)
+            self.store.save_replay_cache(self.replay)
+            reason = "" if ok else reason
+        self._policy_result = {"nonce": nonce, "sha256": str(order.get("sha256") or ""), "ok": ok, "reason": reason}
+        self.log(f"mucli-node: policy from the master {'installed' if ok else 'refused: ' + reason}")
 
     # ------------------------------------------------------------ dispatch
     def handle_dispatch(self, envelope: Dict[str, Any]) -> None:

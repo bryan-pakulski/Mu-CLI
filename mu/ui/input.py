@@ -413,7 +413,7 @@ class InputHandler:
         _job_rule_paths = {path: None for path in _JOB_RULE_PATHS}
 
         _ORCH_SUBCOMMAND_COMPLETER = NestedCompleter.from_nested_dict(
-            {sub: None for sub in ("status", "runs", "run", "nodes", "approve", "reject", "continue", "pause-run",
+            {sub: None for sub in ("status", "runs", "run", "nodes", "results", "approve", "reject", "continue", "pause-run",
                                    "cancel", "rollback", "accept", "quarantine", "release", "pause", "resume",
                                    "update-agents")}
         )

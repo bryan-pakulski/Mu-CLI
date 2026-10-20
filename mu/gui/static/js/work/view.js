@@ -669,6 +669,34 @@
                 if (n < 0) return; e.preventDefault(); selectTab(tabs[n]); list.querySelector(`[data-tab="${tabs[n]}"]`)?.focus();
             });
         }
+        /* "Open a shell" (manual edits): the job's worktree is on this machine, so the command
+         * is a cd you paste into your own terminal. Nothing runs from the browser. */
+        let shellOpen = false;
+        const shq = v => `'${String(v).replace(/'/g, `'\\''`)}'`;
+        const shellCommand = j => `cd ${shq(j.worktree)}`;
+        function shortPath(path) {
+            const p = String(path || '');
+            return p.length > 42 ? `…${p.slice(-41)}` : p;
+        }
+        function shellBox(j) {
+            const running = stateStatus(j.state) === 'active';
+            return `<div class="work-shellbox" role="group" aria-label="Open a shell in the job's working directory">
+                <p class="work-shellbox__lede">Paste this into a terminal on this machine:</p>
+                <div class="work-shellbox__cmd"><code class="work-mono">${esc(shellCommand(j))}</code>
+                    <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-shell-copy>${icon('copy')}<span>Copy</span></button></div>
+                <p class="work-shellbox__note">${running ? '<strong>The job is running.</strong> Pause it first so your edits and the agent’s don’t collide. ' : ''}`
+                + `Commit your edits on <code class="work-mono">${esc(j.branch || 'the job branch')}</code> before you resume: the checks fail on uncommitted changes.</p></div>`;
+        }
+        async function copyShell(j, button) {
+            const text = shellCommand(j);
+            try { await navigator.clipboard.writeText(text); toast('Shell command copied', 'ok'); }
+            catch (_) {
+                const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+                const ok = document.execCommand('copy'); ta.remove();
+                toast(ok ? 'Shell command copied' : 'Couldn’t copy: select the command and copy it', ok ? 'ok' : 'attention');
+            }
+            if (button) { const label = button.querySelector('span'); if (label) { label.textContent = 'Copied'; setTimeout(() => { label.textContent = 'Copy'; }, 1500); } }
+        }
         function renderState() {
             const steps = stepsOf(job);
             const models = Object.entries(job.stage_models || {}).filter(([, m]) => m?.model);
@@ -697,10 +725,12 @@
                 ['Budget', budgetText(job)],
                 prLabel ? ['Pull request', `<a href="${esc(job.pr.url)}" target="_blank" rel="noopener" data-pr-link>${icon('git-pull-request')} ${esc(prLabel)}</a>`] : null,
                 ENV ? ['Environment', ENV.headerPill(job.environments || job.build_environments, envOpen)] : null,
+                job.worktree ? ['Working directory', `<span class="work-mono work-detail-path" title="${esc(job.worktree)}">${esc(shortPath(job.worktree))}</span> <button type="button" class="w-textbtn" data-open-shell aria-expanded="${shellOpen}">${icon('terminal')}<span>Open a shell</span></button>`] : null,
                 ['Agents', `<span class="work-detail-agents">${window.MuJobAgents ? window.MuJobAgents.stageText(job) : (models.length ? models.map(([s, m]) => `${esc(s)} <code>${esc(m.model)}</code>`).join(' · ') : 'unset')}</span>`],
             ].filter(Boolean);
             q('[data-job-header]').innerHTML = `
                 <dl class="w-facts work-detail-facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>
+                ${shellOpen && job.worktree ? shellBox(job) : ''}
                 <button type="button" class="w-textbtn" data-tone="quiet" data-stage-models>${icon('sliders-horizontal')}<span>Job settings</span></button>`;
             // The Review tab opens with the review summary, which is where a finished review's
             // attention text comes from: don't say it twice there (work.css hides the banner).
@@ -713,6 +743,10 @@
                 <a class="w-textbtn" data-tone="quiet" href="/jobs/trace?job=${encodeURIComponent(job.id)}">Job analysis</a>`;
             qa('[data-receipt-tab]').forEach(a => { a.onclick = e => { e.preventDefault(); selectTab(a.dataset.receiptTab); q('.work-detail-tabs')?.scrollIntoView({block: 'start', behavior: 'smooth'}); }; });
             q('[data-stage-models]').onclick = () => window.muOpenStageModels?.();
+            const shellBtn = q('[data-open-shell]');
+            if (shellBtn) shellBtn.onclick = () => { shellOpen = !shellOpen; renderState(); if (shellOpen) q('[data-shell-copy]')?.focus(); };
+            const copyBtn = q('[data-shell-copy]');
+            if (copyBtn) copyBtn.onclick = () => copyShell(job, copyBtn);
             const envPill = q('[data-env-pill]');
             if (envPill) envPill.onclick = () => { envOpen = !envOpen; renderState(); };
             q('[data-pipeline]').innerHTML = `<h2 class="w-group__title" id="work-pipeline-h">Stages</h2>${pipelineStepper(steps)}`;
@@ -875,6 +909,7 @@
         function registerCommands() {
             ui.register('page:job', [
                 ...job.actions.filter(a => !hiddenOf(a) || ENV_ACTIONS.has(a.id)).map(a => ({id:`act:${a.id}`, label:LABEL[a.id] || a.label, group:'Job', key:a.shortcut || undefined, enabled:a.enabled, reason:a.reason, run:() => invoke(a.id)})),
+                ...(job.worktree ? [{id:'job:shell', label:'Copy a shell command for the working directory', group:'Job', run:() => copyShell(job)}] : []),
                 ...(ENV ? [{id:'env:panel', label:envOpen ? 'Hide build environments' : 'Show build environments', group:'Job', run:() => { envOpen = !envOpen; renderState(); }}] : []),
                 ...tabs.map(t => ({id:`tab:${t}`, label:`Show ${labels[t].toLowerCase()}`, group:'Tab', run:() => selectTab(t)})),
             ], 10);
@@ -966,6 +1001,22 @@
         }
 
         /* ------------------------------------------------------------ diff (G§9.11, wash/work_diff.js) */
+        /* Review mode: the diff panel on its own over the whole view (work.css [data-zen]);
+         * Esc, the ⤡ button, another tab or another job leave it. */
+        function setDiffZen(panel, on) {
+            if (!panel) return;
+            panel.toggleAttribute('data-zen', on);
+            document.documentElement.toggleAttribute('data-diff-zen', on);
+            renderPart('diff', true);
+            if (on) { panel.scrollTop = 0; window.WashMotion?.enter(panel); }
+            panel.querySelector('[data-diff-zen]')?.focus();
+        }
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape' || !document.documentElement.hasAttribute('data-diff-zen')) return;
+            if (e.target?.closest?.('input, textarea, select, [contenteditable], .w-menu, .w-modal')) return;
+            e.preventDefault();
+            setDiffZen(q('[data-panel="diff"]'), false);
+        });
         function renderDiff(panel) {
             const live = job.diff?.live || null;
             const files = parsePatch(diffPatch(job));
@@ -984,7 +1035,10 @@
                 : DIFF.renderFile(f, {mode: splitDiff ? 'split' : 'unified', lineKeys: true,
                     findings: findings.map(x => ({file: x.file, line: Number(x.line_start || 0), html: comment(x)}))}));
             const statusLetter = f => DIFF.statusBadge(f);
-            panel.innerHTML = `${liveNote}<div class="work-diff-layout">
+            const zen = panel.hasAttribute('data-zen');
+            const zenBar = `<div class="work-diff-bar">${zen ? `<div class="work-diff-bar__title"><span class="work-meta">Reviewing</span> <strong>${esc(job.title || jobKey(job))}</strong></div>` : ''}<span class="work-spacer"></span>
+                ${zen ? '<span class="work-meta work-diff-bar__hint">Esc to leave</span>' : ''}<button type="button" class="w-btn" data-variant="icon" data-size="sm" data-diff-zen aria-pressed="${zen}" aria-label="${zen ? 'Leave review mode' : 'Review mode: the diff on its own, full screen'}" title="${zen ? 'Leave review mode (Esc)' : 'Review mode'}">${icon(zen ? 'minimize-2' : 'maximize-2')}</button></div>`;
+            panel.innerHTML = `${zenBar}${liveNote}<div class="work-diff-layout">
                 <nav class="work-diff-tree" aria-label="Changed files"><div class="work-diff-tree-head">
                     <div class="work-toolbar"><strong>${files.length} file${files.length === 1 ? '' : 's'}</strong><span class="work-diffstat"><span class="work-add">+${totalA}</span><span class="work-del">−${totalR}</span></span><span class="work-spacer"></span>${live ? '' : `<span class="work-meta">${files.filter(f => seen.has(f.path)).length}/${files.length} viewed</span>`}</div>
                     <div class="w-segmented work-diff-mode" data-size="sm" role="group" aria-label="Diff layout"><button type="button" class="w-segmented__option" data-diff-mode="unified" aria-pressed="${!splitDiff}">Unified</button><button type="button" class="w-segmented__option" data-diff-mode="split" aria-pressed="${splitDiff}">Split</button></div></div>
@@ -996,6 +1050,7 @@
                         ${findings.some(x => x.file === f.path) ? `<span class="w-chip" data-tone="attention" title="review findings in this file">${chipGlyph('◆')}<span>${findings.filter(x => x.file === f.path).length} finding${findings.filter(x => x.file === f.path).length === 1 ? '' : 's'}</span></span>` : ''}
                         ${live ? '' : `<label class="w-check work-viewed"><input class="w-check__input" type="checkbox" data-viewed="${esc(f.path)}" ${isViewed ? 'checked' : ''}><span>Viewed</span></label>`}</header>
                         ${isCollapsed ? '' : fileBody(f)}</section>`; }).join('')}</div></div>`;
+            panel.querySelector('[data-diff-zen]').onclick = () => setDiffZen(panel, !zen);
             panel.querySelectorAll('[data-diff-mode]').forEach(b => { b.onclick = () => { splitDiff = b.dataset.diffMode === 'split'; localStorage.setItem('mucli-jobs-diff', splitDiff ? 'split' : 'unified'); renderPart('diff', true); }; });
             panel.querySelectorAll('[data-goto-file]').forEach(b => { b.onclick = () => { const f = files[Number(b.dataset.gotoFile)]; collapsed.delete(f.path); collapsed.add(`!${f.path}`); renderPart('diff', true); panel.querySelector(`#diff-file-${b.dataset.gotoFile}`)?.scrollIntoView({block:'start'}); }; });
             panel.querySelectorAll('[data-collapse]').forEach(b => { b.onclick = () => { const p = b.dataset.collapse, open = b.getAttribute('aria-expanded') === 'true';
@@ -1127,6 +1182,7 @@
                         ${!cases.length && Array.isArray(selected.new_failures) && selected.new_failures.length ? `<section><h3 class="work-subhead">New failures <span class="w-count" data-tone="danger">${selected.new_failures.length}</span></h3><ul class="work-mono work-list">${selected.new_failures.map(f => `<li class="work-del">✗ ${esc(typeof f === 'string' ? f : JSON.stringify(f))}</li>`).join('')}</ul></section>` : ''}
                         ${Array.isArray(selected.preexisting_failures) && selected.preexisting_failures.length ? `<section><h3 class="work-subhead">Pre-existing on the base commit <span class="w-count">${selected.preexisting_failures.length}</span></h3><p class="work-meta">These also fail before the change, so they are reported to the reviewer and not sent back to the implementer.</p><ul class="work-mono work-meta work-list">${selected.preexisting_failures.map(f => `<li>${esc(typeof f === 'string' ? f : JSON.stringify(f))}</li>`).join('')}</ul></section>` : ''}
                         ${suitesWithHistory.map(([suite, h]) => durationChart(suite, h, selected.run)).join('')}
+                        <div data-art-mount></div>
                         <section aria-labelledby="log-h" class="work-stack-tight"><h3 id="log-h" class="work-subhead">Log</h3>
                         ${(selected.suites || []).map(s => { const c = suiteCounts(s);
                             return `<details class="work-details work-suite-log" ${s.passed ? '' : 'open'}><summary>${statusIcon(suiteStatus(s))}<strong>${esc(s.suite)}</strong><span class="work-suite-env work-meta work-mono" title="build environment that ran it">${s.environment ? `<span aria-hidden="true">⬢</span> ${esc(s.environment)}` : 'shared runtime'}</span>${(s.preexisting_failures || []).length ? pill('neutral', '<span>pre-existing failures</span>') : ''}<span class="work-spacer"></span>${s.duration_ms != null ? `<span class="work-meta work-num">${esc(duration(s.duration_ms))}</span>` : ''}<span class="work-suite-bar">${resultBar(c.passed, c.failed, c.skipped)}</span><span class="work-nowrap work-num">${c.passed}/${c.total}</span></summary>
@@ -1134,6 +1190,8 @@
                     </div></section>`; })() : ''}</div>`;
             bindCommands(panel);
             bindRepairTranscript(panel);
+            const artMount = panel.querySelector('[data-art-mount]');
+            if (artMount && selected && window.MuArtifacts) window.MuArtifacts.mount(artMount, {jobId:job.id, run:selected.run});
             panel.querySelectorAll('tr[data-run]').forEach(tr => { tr.onclick = () => { selectedRun = Number(tr.dataset.run); renderPart('checks', true); }; });
             const filter = panel.querySelector('[data-failure-filter]');
             if (filter) filter.oninput = () => { failureFilter = filter.value; const pos = filter.selectionStart; renderPart('checks', true); const f = panel.querySelector('[data-failure-filter]'); f?.focus(); f?.setSelectionRange(pos, pos); };
@@ -1333,6 +1391,7 @@
         }
         function selectTab(next) {
             if (!tabs.includes(next)) next = 'session';
+            if (next !== 'diff' && q('[data-panel="diff"][data-zen]')) { q('[data-panel="diff"]').removeAttribute('data-zen'); document.documentElement.removeAttribute('data-diff-zen'); }
             tab = next;
             qa('[data-tab]').forEach(b => { const on = b.dataset.tab === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
             qa('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== tab; });
@@ -1374,6 +1433,7 @@
             if (selectedId !== id) {
                 editor?.destroy(); editor = null; editing = false; selectedFindings.clear(); signatures.clear(); collapsed.clear(); stale.clear();
                 sessionStage = ''; selectedRun = null; failureFilter = ''; showUnavailable = false; attempts = null;
+                document.documentElement.removeAttribute('data-diff-zen');
                 tab = tabs.includes(requested) ? requested : defaultTab(next); selectedId = id; shell();
             } else if (tabs.includes(requested) && requested !== tab) { tab = requested; }
             const kept = selectedId === id && job ? Object.fromEntries(LAZY.filter(p => job[p] !== undefined && next[p] === undefined).map(p => { stale.add(p); return [p, job[p]]; })) : {};

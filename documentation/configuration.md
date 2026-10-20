@@ -36,7 +36,6 @@ Invoke via `python mucli.py [flags]`.
 | `MUCLI_HOME` | Filesystem layout | Base directory for sessions and logs. Defaults to `~/.mucli/`. |
 | `MUCLI_GUI_ALLOWED_HOSTS` | GUI | Comma-separated host names (besides IP addresses and `localhost`) the GUI accepts on mutating orchestration requests; guards against DNS rebinding. |
 | `MUCLI_ORCH_ALLOW_PUBLIC_BIND` | Orchestration | `1` lets the node endpoint bind to `0.0.0.0` or a public address. Refused otherwise; see [orchestration.md](orchestration.md). |
-| `MUCLI_ORCH_DOCKER_TESTS` | Tests | `1` runs the Docker-backed orchestration container-node test. |
 
 Sessions and logs live under `MUCLI_HOME`:
 

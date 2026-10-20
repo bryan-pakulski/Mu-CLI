@@ -108,11 +108,17 @@ def _theme_block(theme: str) -> list[str]:
     for name, value in spec.get("glass", {}).items():
         var = "--wash-glass" if name == "surface" else f"--wash-glass-{name}"
         lines.append(f"  {var}: {value};")
+    art = "/static/wash/art"
     for wash in tokens["glass"]["ambient"]:
-        lines.append(f"  --wash-art-ambient-{wash}: url(\"/static/wash/art/ambient-{wash}-{theme}-1920.webp\");")
-    lines.append(f"  --wash-art-hero: url(\"/static/wash/art/dawn-{theme}-1600.webp\");")
-    lines.append(f"  --wash-art-work: url(\"/static/wash/art/lagoon-{theme}-1600.webp\");")
-    lines.append(f"  --wash-art-env: url(\"/static/wash/art/meadow-{theme}-1600.webp\");")
+        # Ambient: the painting flattened at 24% over the canvas (text may sit near it).
+        lines.append(f"  --wash-art-ambient-{wash}: image-set(url(\"{art}/ambient-{wash}-{theme}-1920.webp\") 1x, "
+                     f"url(\"{art}/ambient-{wash}-{theme}-3840.webp\") 2x);")
+        # Scene: the full painting, for behind the glass leaf (the shell's watercolour).
+        lines.append(f"  --wash-art-scene-{wash}: image-set(url(\"{art}/{wash}-{theme}-1600.webp\") 1x, "
+                     f"url(\"{art}/{wash}-{theme}-3840.webp\") 2x);")
+    for role, scene in (("hero", "dawn"), ("work", "lagoon"), ("env", "meadow")):
+        lines.append(f"  --wash-art-{role}: image-set(url(\"{art}/{scene}-{theme}-1600.webp\") 1x, "
+                     f"url(\"{art}/{scene}-{theme}-3840.webp\") 2x);")
     return lines
 
 
@@ -132,6 +138,7 @@ def _palette_block(name: str, mode: str) -> list[str]:
         lines.append(f"  --wash-elevation-{level}: {value.replace('{tint}', tint)};")
     for wash in tokens["glass"]["ambient"]:
         lines.append(f"  --wash-art-ambient-{wash}: none;")
+        lines.append(f"  --wash-art-scene-{wash}: none;")
     for art in ("hero", "work", "env"):
         lines.append(f"  --wash-art-{art}: none;")
     return lines

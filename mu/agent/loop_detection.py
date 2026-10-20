@@ -26,7 +26,7 @@ Three primitives:
     non-empty. The session's iteration loop calls this each turn to
     break out of stuck-in-a-rut patterns.
 
-Tests: `tests/test_loop_detection.py`.
+Tests: `tests/agent/test_loop_detection.py`.
 """
 
 from __future__ import annotations

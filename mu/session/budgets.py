@@ -13,8 +13,8 @@ history gets compacted before each provider call:
 
 The Ollama "prompt too long; exceeded max context length" bug that
 drove `resolve_context_limit` is regression-pinned in
-`tests/test_context_budget.py`. End-to-end coverage in
-`tests/test_compaction_e2e.py`.
+`tests/context/`. End-to-end coverage in
+`tests/context/`.
 
 These functions take a `session` argument because they need access to
 `session.provider` (for `effective_context_window` /

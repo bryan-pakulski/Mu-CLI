@@ -505,6 +505,13 @@ def helper_main(argv: List[str]) -> int:
     keys = Keys(b64d(trust["signing_key"]), b64d(trust["test_key"]) if trust.get("test_key") else None)
     policy = load_policy_file(os.path.join(ETC_DIR, "policy.yaml"))
     replay = root_store.replay_cache()
+    if "policy" in spec:
+        from .remote_policy import apply as apply_policy
+        ok, message = apply_policy(spec["policy"], etc_dir=ETC_DIR, node_id=str(trust["node_id"]),
+                                   signing_key=keys.signing, replay=replay)
+        root_store.save_replay_cache(replay)
+        print(message if ok else f"mucli-node-exec refused the policy: {message}", file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 125
     if "update" in spec:
         from .update import install
         ok, message = install(spec["update"], str(spec.get("pyz") or ""), node_id=str(trust["node_id"]),

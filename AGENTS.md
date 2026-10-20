@@ -40,17 +40,33 @@ python3 mucli.py --gui
 
 ## Testing
 
-- Run the complete Python suite from the repository root:
+The harness is lean by design: it validates the product's core requirements, not every past
+regression (`documentation/testing/harness.md` lists the pillars, their requirements and the
+files that prove them).
+
+- Run the complete suite from the repository root (Docker is required; see below):
 
 ```bash
 python3 -m pytest tests/ -q
 ```
 
-- The full suite is approximately 4,250 tests and normally takes about 2.5 minutes.
-- `tests/` intentionally has no `__init__.py`; do not add one.
-- Never weaken, skip, or delete tests to make a change pass.
-- Fix product code first; change a test only when the specified behavior changes.
-- Use focused test paths while iterating, then run the complete suite.
+- Tests live in pillar folders: `tests/agent`, `context`, `sessions`, `tools`, `modes`,
+  `containers`, `jobs`, `orchestration`, `gui` (+ `gui/frontend`, node tests), `design`,
+  `terminal`, `trace`. Shared helpers are in `tests/helpers/` (on `sys.path` via
+  `tests/conftest.py`). `tests/` has no `__init__.py`; keep test file names unique.
+- A test exercises behaviour. Never assert text in source files (Python, JS, CSS, HTML,
+  templates, Markdown, prompt copy); the only exceptions are the rule-based lints listed in the
+  harness doc (generated tokens fresh, CSS colour/variable rules, Rich markup escaping, node
+  agent stdlib-only, orchestration schema parity, publish tokens never in sandbox code).
+- Docker is mandatory: the Docker suites never skip; without a reachable daemon they fail.
+  `tests/helpers/docker_helpers.py` builds a missing or stale `mucli-job-runtime` image from the
+  tree. Only host features (an NVIDIA GPU, a running Sysbox) may skip.
+- Old job stores are not supported: no migrations, no backfills, and no tests for them.
+- New behaviour gets a behavioural test in its pillar folder; a test whose behaviour is no
+  longer specified is deleted, not kept as a pin. Never weaken or skip a test to make a change
+  pass; fix product code first.
+- Use focused paths while iterating (`python3 -m pytest tests/<pillar> -q`), then run the
+  complete suite.
 
 ## Repository layout
 
@@ -121,7 +137,9 @@ python3 -m pytest tests/ -q
 - Orchestration (`documentation/orchestration.md`): every mutation goes through
   `mu/orchestration/commands.dispatch`; the AI (`ai:*` actors) is limited to
   `AI_COMMANDS` and can never publish, approve, dispatch, discard, or touch policy
-  or secrets. `orch_*` tools exist only in `orchestration` sessions. Nodes verify
+  or secrets. `orch_*` tools exist only in `orchestration` sessions; the read-only
+  `fleet_overview` / `fleet_results` tools (`mu/orchestration/fleet_tools.py`) are available in every
+  interactive session once orchestration exists on the machine, and never mutate or create it. Nodes verify
   signatures, parameters and their local policy before running anything. Tests of
   drafts (`test`, `runbook_test`) are decided by `run: test` access rules (default
   confirm), but canary-only targeting, test-key signing, the digest freeze and

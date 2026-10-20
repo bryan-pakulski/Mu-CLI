@@ -21,9 +21,9 @@ syncs, the `_loop_blocker_raised` watchdog signal, etc.):
     `raise_blocker`, write its result back into the session's feature
     state so the next turn sees the updated plan / blocker.
 
-Tests covering these paths live in `tests/test_mu_agent_session_integration.py`
-(pre/post_tool hooks, plan-mode block, abort flag), `tests/test_session.py`
-(structured-result shape), and `tests/test_loop_blocker_halts_watchdog.py`
+Tests covering these paths live in `tests/agent/test_mu_agent_session_integration.py`
+(pre/post_tool hooks, plan-mode block, abort flag), `tests/sessions/`
+(structured-result shape), and `tests/agent/`
 (the raise_blocker → `_loop_blocker_raised` interlock).
 """
 

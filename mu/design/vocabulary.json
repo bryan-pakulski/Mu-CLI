@@ -475,6 +475,10 @@
       "status": "done",
       "label": "active"
     },
+    "connecting": {
+      "status": "pending",
+      "label": "connecting"
+    },
     "offline": {
       "status": "failed",
       "label": "offline"

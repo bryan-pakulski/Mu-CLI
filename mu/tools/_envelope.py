@@ -13,7 +13,7 @@ The canonical envelope shape every tool result must satisfy:
         "telemetry":   {"tool_name": str, ...},
     }
 
-Tests in `tests/test_harness_layers.py` and `tests/test_envelope_hints_retry.py`
+Tests in `tests/tools/test_harness_layers.py` and `tests/tools/test_envelope_hints_retry.py`
 pin this shape. Handlers can return any of:
 
   * a plain string                           — wrapped automatically

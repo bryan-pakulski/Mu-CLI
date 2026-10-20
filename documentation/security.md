@@ -340,12 +340,12 @@ it deliberately.
 | Hook registry / loader | `mu/agent/hooks.py`, `mu/agent/hooks_config.py` |
 | Security audit engine | `mu/security/engine.py` |
 
-Tests: `tests/test_secret_paths.py`, `tests/test_secret_scrubber.py`,
-`tests/test_bash_secret_guard.py`, `tests/test_workspace.py` (sandbox +
-gitignore), `tests/test_tools.py` (workspace boundary + `..`
-traversal), `tests/test_mu_spawn_agent.py` (depth cap, plan-mode block,
-tool whitelist), `tests/test_mu_agent_plan_mode.py` (plan-mode hook),
-`tests/test_security_mode.py` (audit engine).
+Tests: `tests/tools/test_secret_paths.py`, `tests/tools/test_secret_scrubber.py`,
+`tests/tools/test_bash_secret_guard.py`, `tests/tools/` (sandbox +
+gitignore), `tests/tools/` (workspace boundary + `..`
+traversal), `tests/agent/test_mu_spawn_agent.py` (depth cap, plan-mode block,
+tool whitelist), `tests/tools/test_mu_agent_plan_mode.py` (plan-mode hook),
+`tests/modes/test_security_mode.py` (audit engine).
 
 ## Container-mode trust boundary
 

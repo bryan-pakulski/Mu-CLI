@@ -315,6 +315,8 @@ class Orchestrator:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
+        # Nodes reconnect over the next minute or two: until then they show as connecting.
+        self.store.set_setting("master_started_at", self.store.now())
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="orchestration-scheduler", daemon=True)
         self._thread.start()
@@ -344,12 +346,15 @@ class Orchestrator:
             self._wake.clear()
 
     # ------------------------------------------------------------ starter pack
-    def install_starter_pack(self, *, force: bool = False) -> List[str]:
-        if self.store.get_setting("starter_installed", False) and not force:
-            return []
+    def install_starter_pack(self, *, force: bool = False, only: Optional[List[str]] = None) -> List[str]:
+        """Sign and publish the built-in tools that aren't published yet (all of them with
+        ``force``). Safe to repeat: a master that installed an older pack gains the new tools
+        (e.g. the maintenance tools) without touching the ones it has. ``only`` limits it to ids."""
         from .starter import load_starter_tools
         installed = []
         for manifest, files in load_starter_tools():
+            if only is not None and manifest["id"] not in only:
+                continue
             if self.store.latest_version(manifest["id"], published_only=True) and not force:
                 continue
             existing = [v for v in self.store.list_versions(manifest["id"]) if v.status in ("draft", "testing", "in_review")]
@@ -358,7 +363,8 @@ class Orchestrator:
             tv = catalog.create_draft(self.store, actor="system", manifest=manifest, files=files, origin="starter",
                                       intent="Built-in starter pack")
             catalog.submit_for_review(self.store, tv.tool_id, tv.version, actor="system",
-                                      headline="Built-in read-only starter tool")
+                                      headline="Built-in starter tool" if manifest.get("effect") == "read_only"
+                                      else f"Built-in {manifest.get('effect')} maintenance tool")
             catalog.publish(self.store, self.keys, tv.tool_id, tv.version, actor="system")
             installed.append(tv.ref)
         self.store.set_setting("starter_installed", True)

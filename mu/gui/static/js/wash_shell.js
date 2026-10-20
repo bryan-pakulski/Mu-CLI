@@ -40,6 +40,12 @@
 //   (another hash / query of this page; a query change first fires a cancelable
 //   window `mu:route` event {href} so the page can apply it without reloading) and `mu:theme`; window.MuNav.go does the same
 //   for scripts and the palette.
+// - window.WashMotion — switching tab or item fades (Mu §4.3): leave(els) fades the old
+//   content out and resolves when it's gone (at once under reduced motion); enter(el) fades
+//   the new content in. [data-leaving] / [data-entering] styles live in components/mu.css.
+//   Every [role=tab] whose aria-selected flips to "true" fades its panel in (aria-controls,
+//   else the nearest [role=tabpanel]) with no per-page wiring; hash-routed pages call
+//   leave() before and enter() after a route change.
 // - Page transitions where the browser lacks cross-document View Transitions (Firefox):
 //   fade the stage out before following a same-origin link.
 (function () {
@@ -512,6 +518,8 @@
                 if (data.theme && window.MuTheme) window.MuTheme.apply(data.theme, { silent: true });
                 if (data.decoration && window.MuDecoration) window.MuDecoration.apply(data.decoration);
                 if (data.palette && window.MuPalette && window.MuPalette.current() !== data.palette) window.MuPalette.apply(data.palette);
+                if (typeof data.glass === 'number' && window.MuGlass) window.MuGlass.apply(data.glass, { silent: true });
+                if (typeof data.blur === 'number' && window.MuGlassBlur) window.MuGlassBlur.apply(data.blur, { silent: true });
             }
         });
     }
@@ -571,7 +579,63 @@
     }
     window.WashPanes = { apply: applyPaneWidths };
 
-    function init() { initSidebar(); initCollapse(); initOrchBadge(); initWorkBadge(); initEmbed(); initKeys(); initPanes(); }
+    // ------------------------------------------------------------ tab transitions
+    var LEAVE_FADE_MS = 120;
+    function reducedMotion() {
+        return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    }
+    function leave(els) {
+        els = (els || []).filter(function (el) { return el && el.setAttribute; });
+        if (!els.length) return Promise.resolve();
+        var already = els.every(function (el) { return el.hasAttribute('data-leaving'); });
+        els.forEach(function (el) { el.removeAttribute('data-entering'); el.setAttribute('data-leaving', ''); });
+        if (already || reducedMotion()) return Promise.resolve();
+        return new Promise(function (resolve) { setTimeout(resolve, LEAVE_FADE_MS); });
+    }
+    function enter(el) {
+        if (!el || !el.setAttribute) return;
+        el.removeAttribute('data-leaving');
+        el.removeAttribute('data-entering');
+        void el.offsetWidth;                         // restart the animation on a quick second change
+        el.setAttribute('data-entering', '');
+        clearTimeout(el._muEnterTimer);
+        el._muEnterTimer = setTimeout(function () { el.removeAttribute('data-entering'); }, 600);
+    }
+    function tabPanel(tab) {
+        var ids = (tab.getAttribute('aria-controls') || '').split(/\s+/).filter(Boolean);
+        for (var i = 0; i < ids.length; i++) {
+            var byId = document.getElementById(ids[i]);
+            if (byId && !byId.hidden) return byId;
+        }
+        // Alpine tabs (inspector, memory) without aria-controls: the visible panel nearest the tablist.
+        var list = tab.closest('[role="tablist"]');
+        var scope = list && list.parentElement;
+        for (var depth = 0; scope && depth < 3; depth++, scope = scope.parentElement) {
+            var panels = scope.querySelectorAll('[role="tabpanel"]');
+            for (var j = 0; j < panels.length; j++) {
+                if (!panels[j].hidden && panels[j].offsetParent !== null) return panels[j];
+            }
+        }
+        return null;
+    }
+    function initTabMotion() {
+        if (!window.MutationObserver) return;
+        new MutationObserver(function (records) {
+            var chosen = null;
+            records.forEach(function (r) {
+                var t = r.target;
+                if (!t.getAttribute || t.getAttribute('role') !== 'tab') return;
+                var now = t.getAttribute('aria-selected') === 'true';
+                if (now && r.oldValue !== 'true') chosen = t;
+            });
+            if (!chosen) return;
+            // After the page's own handler shows the panel (Alpine and x-show run in a microtask).
+            requestAnimationFrame(function () { enter(tabPanel(chosen)); });
+        }).observe(document.body, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['aria-selected'] });
+    }
+    window.WashMotion = { enter: enter, leave: leave };
+
+    function init() { initSidebar(); initCollapse(); initOrchBadge(); initWorkBadge(); initEmbed(); initKeys(); initPanes(); initTabMotion(); }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
     else init();
 

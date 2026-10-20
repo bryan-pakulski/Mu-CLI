@@ -6,7 +6,9 @@
      prefers-reduced-transparency. Reduced sets html[data-decoration="reduced"],
      which swaps every wash painting for a flat wash token. It applies the palette
      (localStorage `mucli-palette`: darcula | one | material | tokyo → html[data-palette];
-     wash, the default, sets nothing). It also sets
+     wash, the default, sets nothing) and the Wash glass strength (`mucli-glass`, 0–100,
+     default 60 → --mu-glass and html[data-glass]) and its blur (`mucli-glass-blur`, 0–100,
+     default 60 → --mu-blur). It also sets
      html[data-nav] = vt | fade for page transitions, and html[data-sidebar] =
      collapsed when the sidebar was collapsed (localStorage `mucli-layout`
      .sidebarOpen === false; wash_shell.js toggles it on every page). -->
@@ -33,6 +35,20 @@
         var palette = localStorage.getItem('mucli-palette');
         if (palette === 'darcula' || palette === 'one' || palette === 'material' || palette === 'tokyo') root.setAttribute('data-palette', palette);
     } catch (e) { /* storage unavailable: wash */ }
+    // Glass strength for the Wash theme (route_theme.js MuGlass): 0–100, default 60.
+    var glass = 60;
+    try {
+        var rawGlass = localStorage.getItem('mucli-glass');
+        if (rawGlass !== null && !isNaN(parseInt(rawGlass, 10))) glass = Math.max(0, Math.min(100, parseInt(rawGlass, 10)));
+    } catch (e) { /* default */ }
+    root.style.setProperty('--mu-glass', String(glass / 100));
+    var blur = 60;
+    try {
+        var rawBlur = localStorage.getItem('mucli-glass-blur');
+        if (rawBlur !== null && !isNaN(parseInt(rawBlur, 10))) blur = Math.max(0, Math.min(100, parseInt(rawBlur, 10)));
+    } catch (e) { /* default */ }
+    root.style.setProperty('--mu-blur', String(blur / 100));
+    if (glass > 0) root.setAttribute('data-glass', '');
     // Page navigation style (base.css "page transitions"): browsers with cross-document View
     // Transitions (pageswap/pagereveal) animate natively; the rest (e.g. Firefox) get the
     // scripted fade in wash_shell.js.

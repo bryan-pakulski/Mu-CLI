@@ -248,6 +248,12 @@ Every page is built the same way, top to bottom.
   sub-navigation.
 - The active tab is in `ink` with a 2px ink underline. The others are `ink-3`.
 - No counts on tabs. Counts live in the rail and the state sentence.
+- Changing tab or item fades: the old content fades out over `motion-micro`, the new one fades in
+  over `motion-medium` (another node, run, tool, job or environment as well as another tab; the
+  list beside an item stays put). Any `[role=tab]` whose `aria-selected` turns true fades its
+  panel in (`aria-controls`, else the nearest `[role=tabpanel]`); hash-routed pages call
+  `WashMotion.leave(els)` before and `WashMotion.enter(el)` after a route change. Reduced motion
+  makes it instant.
 
 ### 4.4 Primary action
 

@@ -11,15 +11,20 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { devicesApi, type PairedDevice } from '../api/devices';
 import { useConnectionStore } from '../store/connection';
-import { useTheme, type ThemePreference } from '../theme/ThemeContext';
+import { TEXT_SCALE_RANGE, useTheme, type ThemePreference } from '../theme/ThemeContext';
 import { PALETTES, paletteLabel, paletteNote, radii, spacing, washColors, type PaletteName } from '../theme/tokens';
 import { PageHeader, Pressable, Row, Rows, Segmented, Slider, SwitchRow, Text } from '../ui';
 
 const GLASS_STOPS = [0, 20, 40, 60, 80, 100].map(v => ({ value: String(v), label: v === 0 ? 'Off' : `${v}%` }));
+// Text size stops from tokens.json density.text_scale (85–120 in steps of 5).
+const TEXT_STOPS: Array<{ value: string; label: string }> = [];
+for (let v = TEXT_SCALE_RANGE.min; v <= TEXT_SCALE_RANGE.max; v += TEXT_SCALE_RANGE.step) {
+  TEXT_STOPS.push({ value: String(v), label: `${v}%` });
+}
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
-  const { colors, preference, setPreference, reduceDecoration, setReduceDecoration, palette, setPalette, glass, setGlass } = useTheme();
+  const { colors, preference, setPreference, reduceDecoration, setReduceDecoration, palette, setPalette, glass, setGlass, textScale, setTextScale } = useTheme();
   const { baseUrl, isConnected, pairingRequired } = useConnectionStore();
   const [me, setMe] = useState<PairedDevice | null>(null);
   const server = baseUrl.replace(/^https?:\/\//, '');
@@ -67,6 +72,11 @@ export function SettingsScreen() {
               <Slider stops={GLASS_STOPS} value={glassStop} onChange={v => setGlass(Number(v))} accessibilityLabel="Glass" disabled={reduceDecoration} />
             </View>
           ) : null}
+          <View style={styles.setting} testID="text-scale-setting">
+            <Text variant="label">Text size</Text>
+            <Text variant="caption" tone="ink3">Smaller fits more on screen. Applies on top of the phone's own font size.</Text>
+            <Slider stops={TEXT_STOPS} value={String(textScale)} onChange={v => setTextScale(Number(v))} accessibilityLabel="Text size" />
+          </View>
           <SwitchRow label="Reduce decoration" hint="A flat colour instead of the watercolour around the page."
             value={reduceDecoration} onValueChange={setReduceDecoration} testID="reduce-decoration" />
         </Section>

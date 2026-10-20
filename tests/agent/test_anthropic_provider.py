@@ -431,10 +431,12 @@ def test_request_defaults_cache_system_prompt_and_tail(monkeypatch):
     assert request["system"] == [{"type": "text", "text": "SYSTEM", "cache_control": {"type": "ephemeral"}}]
     assert request["cache_control"] == {"type": "ephemeral"}
     assert request["tool_choice"] == {"type": "auto"}
+    # The tools lead the cached prefix and carry their own breakpoint.
     assert request["tools"][0] == {
         "name": "read_file",
         "description": "Read",
         "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}},
+        "cache_control": {"type": "ephemeral"},
     }
     # Opus 5 thinks by default: no explicit thinking config is sent.
     assert "thinking" not in request and "output_config" not in request
@@ -453,6 +455,43 @@ def test_request_cache_hint_and_env_switches(monkeypatch):
     assert request["system"] == [{"type": "text", "text": "SYSTEM"}]
     assert "cache_control" not in request
     assert request["tools"][0]["eager_input_streaming"] is True
+
+
+def _breakpoints(request):
+    found = [("tools", t["cache_control"]) for t in request.get("tools", []) if "cache_control" in t]
+    found += [("system", b["cache_control"]) for b in request.get("system", []) if "cache_control" in b]
+    for msg in request["messages"]:
+        found += [("messages", b["cache_control"]) for b in msg["content"] if "cache_control" in b]
+    if "cache_control" in request:
+        found.append(("auto", request["cache_control"]))
+    return found
+
+
+def test_one_hour_ttl_applies_to_every_breakpoint_in_order():
+    provider = _provider("claude-opus-5")
+    msgs = [
+        Message(role="user", parts=[MessagePart(type="text", text="go")]),
+        Message(role="assistant", parts=[MessagePart(type="tool_call", tool_name="read_file", tool_args={"path": "a"}, tool_call_id="t1")]),
+        Message(role="tool", parts=[MessagePart(type="tool_result", tool_name="read_file", tool_result="x", tool_call_id="t1")]),
+        Message(role="user", parts=[MessagePart(type="text", text="RUNTIME STATE ...")]),
+    ]
+    request = provider._build_request(msgs, "SYSTEM", False, _tools(), CacheHint(volatile_tail_parts=1, ttl="1h"), None)
+    marks = _breakpoints(request)
+    # tools -> system -> history (explicit, before the volatile tail): within the 4 allowed,
+    # every one 1h, so no shorter TTL precedes a longer one.
+    assert [where for where, _ in marks] == ["tools", "system", "messages", "messages"]
+    assert all(cc == {"type": "ephemeral", "ttl": "1h"} for _, cc in marks)
+    tail = request["messages"][-1]["content"][-1]
+    assert "cache_control" not in tail  # the volatile runtime state is never a breakpoint
+
+
+def test_default_ttl_and_automatic_tail_stay_within_four_breakpoints():
+    provider = _provider("claude-opus-5")
+    msgs = [Message(role="user", parts=[MessagePart(type="text", text="hi")])]
+    request = provider._build_request(msgs, "SYSTEM", False, _tools(), CacheHint(ttl="5m"), None)
+    marks = _breakpoints(request)
+    assert [where for where, _ in marks] == ["tools", "system", "auto"]
+    assert all(cc == {"type": "ephemeral"} for _, cc in marks)
 
 
 def test_adaptive_thinking_and_effort_mapping():

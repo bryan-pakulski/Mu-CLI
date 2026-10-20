@@ -92,6 +92,36 @@ def build_input(provider, messages: List[Message]) -> List[Dict[str, Any]]:
     return items
 
 
+BREAKPOINT = {"mode": "explicit"}
+
+
+def add_cache_breakpoints(items: List[Dict[str, Any]], system_prompt: Optional[str], *,
+                          volatile_tail_parts: int = 0) -> List[Dict[str, Any]]:
+    """GPT-5.6+ prompt caching: ``items`` with the system prompt as a leading developer message
+    and explicit ``prompt_cache_breakpoint`` markers on (1) that message and (2) the last
+    content block, before the volatile tail, of the latest user message — the request's stable
+    end that the next request repeats. Content blocks inside input messages are the only place
+    a breakpoint is accepted (not ``instructions``, not function-call items)."""
+    out = [dict(item) for item in items]
+    if system_prompt:
+        out.insert(0, {"role": "developer",
+                       "content": [{"type": "input_text", "text": system_prompt, "prompt_cache_breakpoint": dict(BREAKPOINT)}]})
+    for idx in range(len(out) - 1, -1, -1):
+        item = out[idx]
+        if item.get("role") != "user" or not isinstance(item.get("content"), list):
+            continue
+        content = [dict(block) for block in item["content"]]
+        # The runtime-state tail is the last part of the last user message (or the whole message).
+        skip = volatile_tail_parts if idx == len(out) - 1 else 0
+        stable = len(content) - skip
+        if stable <= 0:
+            continue
+        content[stable - 1]["prompt_cache_breakpoint"] = dict(BREAKPOINT)
+        out[idx] = {**item, "content": content}
+        break
+    return out
+
+
 def convert_tools(tools: Optional[List[ToolDefinition]]) -> Optional[List[Dict[str, Any]]]:
     if not tools:
         return None
@@ -158,12 +188,17 @@ def stream_events(response_stream) -> Iterator[StreamEvent]:
             yield from pending
             pending = []
             if usage is not None:
-                cached = getattr(getattr(usage, "input_tokens_details", None), "cached_tokens", 0) or 0
+                details = getattr(usage, "input_tokens_details", None)
+                cached = getattr(details, "cached_tokens", 0) or 0
+                # GPT-5.6+ also report the tokens written to the cache this request.
+                written = getattr(details, "cache_write_tokens", 0) or 0
                 thinking = getattr(getattr(usage, "output_tokens_details", None), "reasoning_tokens", 0) or 0
                 yield StreamEvent(kind="usage", input_tokens=getattr(usage, "input_tokens", 0) or 0,
                                   output_tokens=getattr(usage, "output_tokens", 0) or 0,
                                   total_tokens=getattr(usage, "total_tokens", 0) or 0,
-                                  cached_tokens=cached, reasoning_tokens=thinking)
+                                  cached_tokens=cached, reasoning_tokens=thinking,
+                                  cache_read_tokens=cached if written else 0,
+                                  cache_creation_tokens=written if isinstance(written, int) else 0)
         elif kind == "response.incomplete":  # e.g. max output tokens: keep what arrived
             if reasoning and pending:
                 pending[0].thought_signature = encode_reasoning(reasoning)

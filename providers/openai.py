@@ -25,7 +25,7 @@ from .base import (
 from utils.model_pricing import input_modality_for_mime
 
 
-_REASONING_MODEL_PREFIXES = ("o1", "o3", "o4", "gpt-5")
+_REASONING_MODEL_PREFIXES = ("o1", "o3", "o4", "gpt-5", "gpt-6")
 
 
 def _sanitize_stream_error(exc: BaseException, *, cap: int = 300) -> str:
@@ -55,13 +55,32 @@ def _is_reasoning_model(name: str) -> bool:
     return any(n.startswith(p) for p in _REASONING_MODEL_PREFIXES)
 
 
-def _gpt5_minor(name: str) -> int:
-    """5 for gpt-5, 51 for gpt-5.1, 52 for gpt-5.2 … (0 when not a gpt-5 model)."""
+def _gpt_version(name: str) -> Optional[tuple]:
+    """(major, minor) of a gpt-N[.M] model name: (5, 0) for gpt-5, (5, 6) for gpt-5.6-luna,
+    (6, 1) for gpt-6.1-sol; None when not a numbered gpt model."""
     import re
-    match = re.match(r"gpt-5(?:\.(\d+))?", (name or "").lower())
+    match = re.match(r"gpt-(\d+)(?:\.(\d+))?", (name or "").lower())
     if not match:
+        return None
+    return int(match.group(1)), int(match.group(2) or 0)
+
+
+def _gpt5_minor(name: str) -> int:
+    """5 for gpt-5, 51 for gpt-5.1, 52 for gpt-5.2 …, 100+ for gpt-6 and later (0 when not a
+    gpt-5+ model)."""
+    version = _gpt_version(name)
+    if not version or version[0] < 5:
         return 0
-    return 50 + int(match.group(1)) if match.group(1) else 5
+    if version[0] > 5:
+        return 100 * (version[0] - 5) + version[1]
+    return 50 + version[1] if version[1] else 5
+
+
+def uses_cache_breakpoints(name: str) -> bool:
+    """GPT-5.6 and later families cache through prompt_cache_options and explicit
+    prompt_cache_breakpoint markers; prompt_cache_retention is deprecated for them."""
+    version = _gpt_version(name)
+    return bool(version) and version >= (5, 6)
 
 
 def openai_reasoning_effort(model: str, effort: Optional[str], thinking: bool,
@@ -137,6 +156,9 @@ class OpenAIProvider(LLMProvider):
     API_KEY = os.getenv("OPENAI_API_KEY")
     BASE_URL = os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
 
+    # Set when the endpoint rejected GPT-5.6+ prompt_cache_breakpoint markers (see _stream_responses).
+    _breakpoints_rejected = False
+
     def __init__(self, model_name: str = "", api_key: Optional[str] = None):
         if not api_key:
             api_key = self.API_KEY
@@ -168,10 +190,20 @@ class OpenAIProvider(LLMProvider):
 
     def _stream_responses(self, model, messages, system_prompt, thinking, tools, cache_hint, reasoning_effort,
                           variables) -> Iterator[StreamEvent]:
-        from .openai_responses import build_input, convert_tools, stream_events
+        from .openai_responses import add_cache_breakpoints, build_input, convert_tools, stream_events
         payload: Dict[str, Any] = {"model": model, "input": build_input(self, messages), "stream": True,
                                    "store": False, "include": ["reasoning.encrypted_content"]}
-        if system_prompt:
+        breakpoints = uses_cache_breakpoints(model) and not self._breakpoints_rejected
+        if breakpoints:
+            # GPT-5.6+: explicit breakpoints on the stable prefix — top-level `instructions` can't
+            # carry one, so the system prompt rides as the leading developer message — and on the
+            # last user message before mucli's volatile runtime-state tail. The implicit breakpoint
+            # (end of the latest message) lands on that tail and is never reused.
+            payload["input"] = add_cache_breakpoints(
+                payload["input"], system_prompt,
+                volatile_tail_parts=int(getattr(cache_hint, "volatile_tail_parts", 0) or 0),
+            )
+        elif system_prompt:
             payload["instructions"] = system_prompt
         tool_defs = convert_tools(tools)
         if tool_defs:
@@ -184,11 +216,22 @@ class OpenAIProvider(LLMProvider):
         if cache_hint is not None and getattr(cache_hint, "cache_key", ""):
             payload["prompt_cache_key"] = cache_hint.cache_key
         retention = str(variables.get("openai_prompt_cache_retention") or "").strip()
-        if retention:
+        if retention and not uses_cache_breakpoints(model):
             payload["prompt_cache_retention"] = retention
         stream = None
         try:
-            stream = self._client.responses.create(**payload)
+            try:
+                stream = self._client.responses.create(**payload)
+            except Exception as exc:  # noqa: BLE001
+                if not (breakpoints and "cache" in str(exc).lower() and getattr(exc, "status_code", None) == 400):
+                    raise
+                # The endpoint rejected the breakpoint markers (a proxy, or an API change):
+                # fall back to the plain shape for this provider instance.
+                self._breakpoints_rejected = True
+                payload["input"] = build_input(self, messages)
+                if system_prompt:
+                    payload["instructions"] = system_prompt
+                stream = self._client.responses.create(**payload)
             yield from stream_events(stream)
         except Exception as exc:
             yield StreamEvent(kind="error", text=_sanitize_stream_error(exc))
@@ -411,7 +454,7 @@ class OpenAIProvider(LLMProvider):
         if cache_hint is not None and getattr(cache_hint, "cache_key", ""):
             payload["prompt_cache_key"] = cache_hint.cache_key
         retention = str(variables.get("openai_prompt_cache_retention") or "").strip()
-        if retention:
+        if retention and not uses_cache_breakpoints(model):
             payload["prompt_cache_retention"] = retention
 
         # ------------------------------------------------------ stream events

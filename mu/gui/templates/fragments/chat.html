@@ -657,7 +657,7 @@
         <div class="composer-toolbar w-composer__bar">
             <button type="button" class="attach-btn w-btn" data-variant="icon"
                     aria-label="Attach a file"
-                    @click="$store.mode.setView('artifacts'); $store.layout.panelOpen = true; modeOpen = false; settingsOpen = false; $store.attachments.load($store.chat.currentName)"
+                    @click="$store.mode.setView('artifacts'); $store.layout.setPanel(true); modeOpen = false; settingsOpen = false; $store.attachments.load($store.chat.currentName)"
                     :class="{ active: $store.attachments.selectedIds().length > 0 }"
                     title="Attach a file"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-plus"></use></svg></button>
             <!-- Mode selector: changes actual MuCLI backend mode -->
@@ -832,7 +832,7 @@
             <button type="button" class="header-token-meter w-composer__ring"
                     :title="$store.context.label + ' · ' + ($store.tokens.total || 0).toLocaleString() + ' tokens this session'"
                     :aria-label="$store.context.label || 'Context'"
-                    @click="$store.mode.setView('memory'); $store.layout.panelOpen = true; $store.memory.tab = 'context'; $store.memory.loadContext && $store.memory.loadContext()">
+                    @click="$store.mode.setView('memory'); $store.layout.setPanel(true); $store.memory.tab = 'context'; $store.memory.loadContext && $store.memory.loadContext()">
                 <span class="w-ring" data-size="sm" :data-level="$store.context.level || null"
                       :style="'--w-fill:' + ($store.context.known ? Math.min(100, Math.round($store.context.fillPct)) : 0) + '%'" aria-hidden="true"></span>
             </button>

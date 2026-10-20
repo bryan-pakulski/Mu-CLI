@@ -520,6 +520,7 @@
                 if (data.palette && window.MuPalette && window.MuPalette.current() !== data.palette) window.MuPalette.apply(data.palette);
                 if (typeof data.glass === 'number' && window.MuGlass) window.MuGlass.apply(data.glass, { silent: true });
                 if (typeof data.blur === 'number' && window.MuGlassBlur) window.MuGlassBlur.apply(data.blur, { silent: true });
+                if (typeof data.textScale === 'number' && window.MuTextScale) window.MuTextScale.apply(data.textScale, { silent: true });
             }
         });
     }

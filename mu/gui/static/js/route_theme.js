@@ -310,3 +310,53 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
     else apply(null, { silent: true });
 })();
+
+// Text size — Settings → Appearance → Text size (every theme). Preference (localStorage
+// `mucli-text-scale`): percent of the design, 85–120 in steps of 5 (tokens.json
+// density.text_scale), default 100. Applied as --mu-scale on <html> (the pre-paint bootstrap
+// does the same); tokens.css multiplies type, line heights, spacing and control sizes by it, so
+// a smaller size packs more on screen and keeps its proportions. Controls:
+// input[data-text-scale-range]; output[data-text-scale-value].
+(function () {
+    'use strict';
+    var KEY = 'mucli-text-scale';
+    var MIN = 85, MAX = 120, STEP = 5, DEFAULT = 100;
+    function clamp(value) {
+        var n = parseInt(value, 10);
+        if (isNaN(n)) return DEFAULT;
+        return Math.max(MIN, Math.min(MAX, Math.round(n / STEP) * STEP));
+    }
+    function preference() {
+        try { var raw = localStorage.getItem(KEY); return raw == null ? DEFAULT : clamp(raw); } catch (_) { return DEFAULT; }
+    }
+    function apply(value, opts) {
+        var v = clamp(value == null ? preference() : value);
+        var root = document.documentElement;
+        if (v === DEFAULT) root.style.removeProperty('--mu-scale');
+        else root.style.setProperty('--mu-scale', String(v / 100));
+        document.querySelectorAll('[data-text-scale-range]').forEach(function (input) {
+            if (String(input.value) !== String(v)) input.value = v;
+            input.style.setProperty('--w-fill', ((v - MIN) / (MAX - MIN) * 100) + '%');
+        });
+        document.querySelectorAll('[data-text-scale-value]').forEach(function (out) { out.textContent = v + '%'; });
+        if (!(opts && opts.silent)) window.dispatchEvent(new CustomEvent('mucli-text-scale-change', { detail: { textScale: v } }));
+        return v;
+    }
+    function set(value) {
+        var v = clamp(value);
+        try { localStorage.setItem(KEY, String(v)); } catch (_) { /* private mode */ }
+        return apply(v);
+    }
+    document.addEventListener('input', function (event) {
+        var input = event.target.closest && event.target.closest('[data-text-scale-range]');
+        if (input) set(input.value);
+    });
+    document.addEventListener('click', function (event) {
+        var reset = event.target.closest && event.target.closest('[data-text-scale-reset]');
+        if (reset) set(DEFAULT);
+    });
+    window.addEventListener('storage', function (event) { if (event.key === KEY) apply(event.newValue == null ? DEFAULT : event.newValue); });
+    window.MuTextScale = { KEY: KEY, MIN: MIN, MAX: MAX, STEP: STEP, DEFAULT: DEFAULT, preference: preference, set: set, apply: apply };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
+    else apply(null, { silent: true });
+})();

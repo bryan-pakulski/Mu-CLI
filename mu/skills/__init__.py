@@ -379,6 +379,40 @@ def _render_compact(
     return "\n".join(out).strip()
 
 
+def render_skills_index(skills: List[Skill], budget: int = 6144) -> str:
+    """The compact name+description index of every skill, with no bodies.
+
+    Independent of the user's message, so it can sit in the byte-stable system prompt; the
+    bodies of triggered skills are rendered per turn by :func:`render_triggered_skills`.
+    """
+    return _render_compact(skills, budget, None)
+
+
+def render_triggered_skills(
+    skills: List[Skill], user_text: Optional[str], budget: int = 6144, budget_scale: float = 1.0
+) -> str:
+    """The bodies of the skills whose trigger matches ``user_text`` (compact mode's
+    auto-expansion), each capped at ``budget * budget_scale`` chars; '' when none match."""
+    if not skills or budget <= 0 or not user_text:
+        return ""
+    expanded = [skill for skill in skills if match_trigger(skill, user_text)]
+    if not expanded:
+        return ""
+    cap = int(budget * min(max(budget_scale, 0.1), 1.0))
+    out: List[str] = ["# AUTO-EXPANDED SKILLS"]
+    used = len(out[0]) + 2
+    for skill in expanded:
+        block = render_skills_expanded(skill)
+        if len(block) > cap:
+            trimmed = block[: cap - 3].rstrip() + "..."
+            block = f"{trimmed}\n\n[body capped: invoke via `invoke_skill {skill.name}` for the remainder]"
+        if used + len(block) + 2 > budget:
+            break
+        out.append(block)
+        used += len(block) + 2
+    return "\n".join(out).strip() if len(out) > 1 else ""
+
+
 def render_skills_block(
     skills: List[Skill],
     budget: int = 6144,
@@ -410,5 +444,7 @@ __all__ = [
     "match_trigger",
     "render_skills_block",
     "render_skills_expanded",
+    "render_skills_index",
+    "render_triggered_skills",
     "clear_skill_cache",
 ]

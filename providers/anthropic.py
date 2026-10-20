@@ -26,9 +26,11 @@
 #     preserved-thinking models). If the API still rejects a replayed block,
 #     the request is retried once without thinking replay.
 #
-#   * Prompt caching. One explicit breakpoint on the system prompt (the
-#     stable prefix) plus top-level automatic caching for the growing
-#     conversation tail. Set ANTHROPIC_AUTO_CACHE=0 when talking to a proxy or
+#   * Prompt caching. Explicit breakpoints on the tools and the system
+#     prompt (the stable prefix), plus top-level automatic caching for the
+#     growing conversation, or explicit history breakpoints when the request
+#     ends with the volatile runtime-state block. The `anthropic_cache_ttl`
+#     variable (default 1h) sets the lifetime. Set ANTHROPIC_AUTO_CACHE=0 when talking to a proxy or
 #     platform that rejects the top-level `cache_control` field.
 import base64
 import json
@@ -57,6 +59,13 @@ from utils.model_pricing import input_modality_for_mime
 
 
 DEFAULT_MODEL = "claude-opus-5"
+
+
+def _cache_control(cache_hint: Optional[CacheHint]) -> Dict[str, Any]:
+    """The cache_control for every breakpoint of a request: ephemeral, with the hint's
+    TTL ("1h"; "5m" is the API default and sent as no TTL)."""
+    ttl = str(getattr(cache_hint, "ttl", "") or "").strip().lower()
+    return {"type": "ephemeral", "ttl": "1h"} if ttl == "1h" else {"type": "ephemeral"}
 
 # Used when the Models API is unreachable (offline, restricted key, proxy).
 _FALLBACK_MODELS = [
@@ -653,14 +662,21 @@ class AnthropicProvider(LLMProvider):
             "0", "false", "no", "off",
         }
 
+        cache_control = _cache_control(cache_hint)
+        cache_tools = cache_hint is None or cache_hint.cache_tools
+
         if system_prompt:
             block: Dict[str, Any] = {"type": "text", "text": system_prompt}
             if cache_system:
-                block["cache_control"] = {"type": "ephemeral"}
+                block["cache_control"] = dict(cache_control)
             payload["system"] = [block]
 
         tool_defs = self._convert_tools(tools)
         if tool_defs:
+            if cache_tools:
+                # Tools lead the cached prefix (tools -> system -> messages): their own
+                # breakpoint keeps them cached when the system prompt changes.
+                tool_defs[-1]["cache_control"] = dict(cache_control)
             payload["tools"] = tool_defs
             payload["tool_choice"] = {"type": "auto"}
 
@@ -673,17 +689,19 @@ class AnthropicProvider(LLMProvider):
             # The request ends with blocks that change every iteration, so an
             # automatic (last-block) breakpoint would write a prefix the next
             # request never repeats. Mark the conversation explicitly instead.
-            self._mark_history_breakpoints(payload["messages"], volatile)
+            self._mark_history_breakpoints(payload["messages"], volatile, cache_control)
         elif cache_tail:
             # Automatic breakpoint on the last cacheable block: the whole
             # prefix built this iteration is what the next iteration reads.
-            payload["cache_control"] = {"type": "ephemeral"}
+            payload["cache_control"] = dict(cache_control)
         return payload
 
     _UNCACHEABLE_BLOCKS = frozenset({"thinking", "redacted_thinking"})
 
     @classmethod
-    def _mark_history_breakpoints(cls, messages: List[Dict[str, Any]], volatile_blocks: int) -> None:
+    def _mark_history_breakpoints(
+        cls, messages: List[Dict[str, Any]], volatile_blocks: int, cache_control: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Explicit history cache breakpoints for a request with a volatile tail.
 
         1. The last block before the ``volatile_blocks`` trailing blocks of the final
@@ -691,7 +709,7 @@ class AnthropicProvider(LLMProvider):
         2. The last block of the previous user turn: the position the previous request
            wrote, so a large multi-tool turn still reads the long prefix directly
            (Anthropic only looks ~20 blocks back from a breakpoint).
-        With the system breakpoint this uses at most 3 of the 4 allowed breakpoints.
+        With the tools and system breakpoints this uses all 4 allowed breakpoints.
         """
         positions: List[Tuple[int, int]] = [
             (mi, bi) for mi, msg in enumerate(messages) for bi in range(len(msg.get("content") or []))
@@ -717,7 +735,7 @@ class AnthropicProvider(LLMProvider):
                         break
                 break
         for mi, bi in marked:
-            messages[mi]["content"][bi]["cache_control"] = {"type": "ephemeral"}
+            messages[mi]["content"][bi]["cache_control"] = dict(cache_control or {"type": "ephemeral"})
 
     @staticmethod
     def _is_thinking_replay_error(exc: BaseException) -> bool:

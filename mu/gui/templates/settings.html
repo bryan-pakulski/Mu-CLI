@@ -14,7 +14,7 @@
 <div class="w-panes" data-layout="list-main" data-show="main">
     <nav class="w-pane" data-pane="list" aria-label="Settings sections">
         <ul class="w-rows mu-settings-index">
-            <li class="w-row"><a class="w-row__main" href="#set-appearance"><span class="w-row__title">Appearance</span><span class="w-row__sub">Theme, light or dark, decoration</span></a></li>
+            <li class="w-row"><a class="w-row__main" href="#set-appearance"><span class="w-row__title">Appearance</span><span class="w-row__sub">Theme, light or dark, text size, decoration</span></a></li>
             <li class="w-row"><a class="w-row__main" href="#set-areas"><span class="w-row__title">Areas</span><span class="w-row__sub">Chat, Work, Orchestration, pricing</span></a></li>
             <li class="w-row"><a class="w-row__main" href="#set-devices"><span class="w-row__title">Devices</span><span class="w-row__sub">Pair a phone; paired devices</span></a></li>
             <li class="w-row"><a class="w-row__main" href="#set-keys"><span class="w-row__title">Keyboard</span><span class="w-row__sub">Shortcuts and the palette</span></a></li>
@@ -59,6 +59,10 @@
         <div class="w-setting" data-glass-setting>
             <label class="w-setting__label" for="set-blur">Blur<span class="w-setting__help">How soft the watercolour looks behind the glass. Off shows it sharp.</span></label>
             <span class="w-glassctl"><input id="set-blur" type="range" min="0" max="100" step="5" class="w-slider" data-blur-range aria-describedby="set-blur-value"><output id="set-blur-value" data-blur-value>60%</output></span>
+        </div>
+        <div class="w-setting">
+            <label class="w-setting__label" for="set-text-scale">Text size<span class="w-setting__help">Smaller fits more on screen; spacing follows the text so pages keep their shape.</span></label>
+            <span class="w-glassctl"><input id="set-text-scale" type="range" min="{{ wash_text_scale.min or 85 }}" max="{{ wash_text_scale.max or 120 }}" step="{{ wash_text_scale.step or 5 }}" value="{{ wash_text_scale.default or 100 }}" class="w-slider" data-text-scale-range aria-describedby="set-text-scale-value"><output id="set-text-scale-value" data-text-scale-value>100%</output><button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-text-scale-reset>Reset</button></span>
         </div>
         <div class="w-setting">
             <label class="w-setting__label" for="set-decoration">Reduce decoration<span class="w-setting__help">A flat colour instead of the watercolour around the page.</span></label>

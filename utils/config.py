@@ -390,8 +390,17 @@ VARIABLE_SCHEMA = {
         "type": str,
         "default": "auto",
     },
+    "anthropic_cache_ttl": {
+        # Lifetime of Anthropic prompt-cache entries: "1h" (default) keeps the cached
+        # tools + system + history across pauses between turns longer than 5 minutes
+        # (writes cost 2x instead of 1.25x input; reads 0.1x or less either way);
+        # "5m" is the API default, cheaper for back-to-back automated work.
+        "type": str,
+        "default": "1h",
+    },
     "openai_prompt_cache_retention": {
-        # e.g. "24h" for models that support extended prompt-cache retention; empty = API default.
+        # e.g. "24h" for models that support extended prompt-cache retention (before GPT-5.6;
+        # never sent to GPT-5.6+, which use prompt_cache_options); empty = API default.
         "type": str,
         "default": "",
     },

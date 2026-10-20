@@ -40,13 +40,14 @@ class _ScriptedProvider(LLMProvider):
         self._available = list(available) if available is not None else ["scripted-model"]
         # Shared by reference across copy.copy() — the child's copy writes
         # here and the test thread reads here.
-        self._captures = {"system_prompt": None, "tool_names": None}
+        self._captures = {"system_prompt": None, "tool_names": None, "messages": None}
 
     def get_available_models(self):
         return list(self._available)
 
     def generate(self, messages, system_prompt=None, thinking=False, tools=None):
         self._captures["system_prompt"] = system_prompt or ""
+        self._captures["messages"] = list(messages)
         self._captures["tool_names"] = (
             [t.name for t in tools] if tools is not None else None
         )
@@ -158,7 +159,12 @@ def test_spawn_agent_passes_task_into_child_system_prompt(tmp_path, monkeypatch)
 
     child_prompt = provider._captures["system_prompt"]
     assert child_prompt is not None, "child never called generate()"
-    assert "refactor module X" in child_prompt
+    # The task reaches the child as its delegated message and its turn goal (request-only
+    # turn context), not in the cache-stable system prompt.
+    texts = [p.text or "" for m in provider._captures["messages"] for p in m.parts]
+    assert any("refactor module X" in t and not t.startswith("TURN CONTEXT") for t in texts)
+    turn_context = [t for t in texts if t.startswith("TURN CONTEXT")]
+    assert turn_context and "Active Goal" in turn_context[0] and "refactor module X" in turn_context[0]
     # The subagent system prompt should NOT contain the parent's system text.
     assert "system" not in child_prompt or "Sub-agent task" in child_prompt
 

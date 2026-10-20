@@ -2,7 +2,7 @@
 // UI primitives from here only.
 
 export { Pressable, fireHaptic, type PressableProps, type Haptic } from './Pressable';
-export { Text, textStyle, type TextProps, type TextVariant, type TextTone } from './Text';
+export { Text, textStyle, scaleText, MIN_SCALED_TEXT, type TextProps, type TextVariant, type TextTone } from './Text';
 export { Icon, type IconName, type IconProps } from './Icon';
 export { SessionAvatar, sessionMonogram, sessionPigment, AVATAR_PIGMENTS } from './SessionAvatar';
 export { Button, IconButton, resolveVariant, type ButtonProps, type ButtonVariant } from './Button';

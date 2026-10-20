@@ -10,18 +10,23 @@ import { StyleSheet, Text } from 'react-native';
 import MarkdownRenderer from 'react-native-markdown-display';
 import { openExternalUrl } from '../api/urlSafety';
 import { useTheme } from '../theme/ThemeContext';
+import { scaleText } from './Text';
 import { fonts, fontStyle, radii, spacing, typeStyle, type WashColors } from '../theme/tokens';
 import { CodeBlock } from '../components/CodeBlock';
 import { glassStyle, useGlass } from './Glass';
 
 export type MarkdownVariant = 'chat' | 'compact' | 'document';
 
-export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'chat', options: { solid?: boolean; strength?: number } = {}) {
+export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'chat', options: { solid?: boolean; strength?: number; textScale?: number } = {}) {
   const bodyType = variant === 'chat' ? typeStyle('body-lg') : variant === 'compact' ? typeStyle('caption') : typeStyle('body');
   const mono = { fontFamily: fonts.mono, fontSize: typeStyle('mono').fontSize, lineHeight: typeStyle('mono').lineHeight };
   const heading = (name: 'title-2' | 'title-3' | 'body-lg') => ({ ...typeStyle(name), color: colors.plum, marginTop: spacing.md, marginBottom: spacing.sm });
   const compact = variant === 'compact';
-  return StyleSheet.create({
+  const scaled = <T extends Record<string, any>>(styles: T): T => {
+    if (!options.textScale || options.textScale === 100) return styles;
+    return Object.fromEntries(Object.entries(styles).map(([k, v]) => [k, scaleText(v, options.textScale as number)])) as T;
+  };
+  return StyleSheet.create(scaled({
     body: { ...bodyType, color: compact ? colors.ink2 : colors.ink, flexShrink: 1 },
     heading1: compact ? { ...typeStyle('label'), color: colors.ink2 } : heading('title-2'),
     heading2: compact ? { ...typeStyle('label'), color: colors.ink2 } : heading('title-3'),
@@ -46,11 +51,11 @@ export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'c
     th: { padding: spacing.sm, flex: 1, ...fontStyle(fonts.ui, '500'), color: colors.ink2 },
     td: { padding: spacing.sm, flex: 1 },
     tr: { borderBottomColor: colors.hairline, borderBottomWidth: 1, flexDirection: 'row' },
-  });
+  }));
 }
 
 /** Fenced and indented code render through the Wash CodeBlock; inline code is mono on sunken. */
-export function markdownRules(colors: WashColors) {
+export function markdownRules(colors: WashColors, textScale = 100) {
   return {
     fence: (node: any) => (
       <CodeBlock key={node.key} code={node.content} language={(node.sourceInfo || '').trim()} colors={colors} />
@@ -64,7 +69,7 @@ export function markdownRules(colors: WashColors) {
         style={{
           color: colors.syntax.keyword,
           fontFamily: fonts.mono,
-          fontSize: typeStyle('mono-sm').fontSize,
+          fontSize: scaleText({ fontSize: typeStyle('mono-sm').fontSize }, textScale).fontSize,
           backgroundColor: colors.sunken,
           borderRadius: radii.xs,
           paddingHorizontal: spacing.xs,
@@ -79,10 +84,10 @@ export function markdownRules(colors: WashColors) {
 const Renderer = React.memo(MarkdownRenderer);
 
 export function Markdown({ children, variant = 'chat' }: { children: string; variant?: MarkdownVariant }) {
-  const { colors } = useTheme();
+  const { colors, textScale } = useTheme();
   const { solid, strength } = useGlass();
-  const style = useMemo(() => markdownStyles(colors, variant, { solid, strength }), [colors, variant, solid, strength]);
-  const rules = useMemo(() => markdownRules(colors), [colors]);
+  const style = useMemo(() => markdownStyles(colors, variant, { solid, strength, textScale }), [colors, variant, solid, strength, textScale]);
+  const rules = useMemo(() => markdownRules(colors, textScale), [colors, textScale]);
   // Safe link handler: only http(s) URLs reach the OS.
   const onLinkPress = useCallback((url: string) => {
     void openExternalUrl(url);

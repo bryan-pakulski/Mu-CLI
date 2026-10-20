@@ -16,6 +16,7 @@ import { useWorkBadge } from '../store/workBadge';
 import { NeedsYouNotifier } from '../components/NeedsYouNotifier';
 import { OrchestrationNotifier } from '../components/OrchestrationNotifier';
 import { Banner, Icon, ToastHost, textStyle } from '../ui';
+import { scaleText } from '../ui/Text';
 import { GlassChrome, glassStyle } from '../ui/Glass';
 import { navRef, navigateTo } from './nav';
 import { useNotificationTaps } from './notifications';
@@ -63,8 +64,8 @@ function TabIcon({ spec, focused }: { spec: TabSpec; focused: boolean }) {
   const { colors } = useTheme();
   const accent = colors.destination[spec.destination];
   return (
-    <View style={{ width: 52, height: 28, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: focused ? accent.wash : 'transparent' }}>
-      <Icon name={spec.icon} size="lg" color={focused ? accent.ink : colors.ink3} />
+    <View style={{ width: 40, height: 24, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: focused ? accent.wash : 'transparent' }}>
+      <Icon name={spec.icon} size="md" color={focused ? accent.ink : colors.ink3} />
     </View>
   );
 }
@@ -83,7 +84,7 @@ function PairingBanner() {
 }
 
 function MainTabs() {
-  const { colors, setDestination } = useTheme();
+  const { colors, setDestination, textScale } = useTheme();
   const orchCount = useOrchBadge(state => state.count);
   const orchSummary = useOrchBadge(state => state.summary);
   const workCount = useWorkBadge(state => state.count);
@@ -107,8 +108,11 @@ function MainTabs() {
             tabBarLabel: spec.label,
             tabBarActiveTintColor: colors.ink,
             tabBarInactiveTintColor: colors.ink3,
-            tabBarLabelStyle: { ...textStyle('caption'), fontSize: 11, marginBottom: 2 },
-            tabBarStyle: { backgroundColor: 'transparent', borderTopColor: colors.hairline, minHeight: 64, paddingTop: 6, elevation: 0 },
+            // Compact bar: 20pt icons, 11pt labels, 52pt tall (plus the system inset); every
+            // item still clears the 44pt touch target.
+            tabBarLabelStyle: { ...scaleText({ ...textStyle('caption'), fontSize: 11, lineHeight: 13 }, Math.min(textScale, 110)), marginTop: 1, marginBottom: 0 },
+            tabBarIconStyle: { marginTop: 0 },
+            tabBarStyle: { backgroundColor: 'transparent', borderTopColor: colors.hairline, minHeight: 52, paddingTop: 4, elevation: 0 },
             tabBarBackground: TabBarGlass,
             tabBarItemStyle: { minHeight: 44 },
             tabBarHideOnKeyboard: true,

@@ -3572,7 +3572,12 @@ ${problem.text}`, "error", 16000);
             if (this.sessionsOpen) this.toggleSessions(false);
         },
         togglePanel() {
-            this.panelOpen = !this.panelOpen;
+            this.setPanel(!this.panelOpen);
+        },
+        // Open or close the workspace panel (Files, Context, Artifacts…) and remember it, so a
+        // closed panel stays closed across reloads.
+        setPanel(open) {
+            this.panelOpen = !!open;
             this._persist();
         },
         startDrag(which, e) {

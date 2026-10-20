@@ -7,6 +7,8 @@
 //   Palettes are flat: no glass, no watercolour (as on the web).
 // - glass: 0–100 (default 60), the Wash theme's glass strength.
 // - decoration: "Reduce decoration" swaps the watercolour for a flat canvas (G§6.2.5).
+// - text scale: percent of the design text size (tokens.json density.text_scale, 85–120); smaller
+//   packs more on screen. Text (and its line height) scales on top of the system font size.
 // The provider also tracks the current destination (the tab), whose accent tints the chrome, and
 // renders the status bar so its icons match the active theme.
 
@@ -15,6 +17,7 @@ import { useColorScheme } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PALETTES, themeFor, type DestinationName, type PaletteName, type Theme, type Tone3 } from './tokens';
+import { textScale as TEXT_SCALE } from './wash.generated';
 
 export type ThemePreference = 'system' | 'paper' | 'dusk';
 export type ThemeName = 'paper' | 'dusk';
@@ -24,6 +27,16 @@ export const DECORATION_STORAGE_KEY = '@mucli/reduce-decoration';
 export const PALETTE_STORAGE_KEY = '@mucli/palette';
 export const GLASS_STORAGE_KEY = '@mucli/glass';
 export const GLASS_DEFAULT = 60;
+export const TEXT_SCALE_STORAGE_KEY = '@mucli/text-scale';
+export const TEXT_SCALE_RANGE = TEXT_SCALE;
+
+/** A stored text size (percent), clamped to the range and its step; the default when unset. */
+export function parseTextScale(raw: string | number | null | undefined): number {
+  const n = raw == null || raw === '' ? TEXT_SCALE.default : Number(raw);
+  if (!Number.isFinite(n)) return TEXT_SCALE.default;
+  const stepped = Math.round(n / TEXT_SCALE.step) * TEXT_SCALE.step;
+  return Math.max(TEXT_SCALE.min, Math.min(TEXT_SCALE.max, stepped));
+}
 
 export function parsePalette(raw: string | null | undefined): PaletteName | null {
   return raw && (PALETTES as readonly string[]).includes(raw) ? (raw as PaletteName) : null;
@@ -70,6 +83,9 @@ export type ThemeContextValue = Theme & {
   destination: DestinationName;
   setDestination: (destination: DestinationName) => void;
   accent: Tone3;
+  /** Text size in percent of the design (100 = as designed). */
+  textScale: number;
+  setTextScale: (percent: number) => void;
 };
 
 const noop = () => undefined;
@@ -93,6 +109,8 @@ const ThemeContext = createContext<ThemeContextValue>({
   destination: 'chat',
   setDestination: noop,
   accent: DEFAULT_THEME.colors.destination.chat,
+  textScale: TEXT_SCALE.default,
+  setTextScale: noop,
 });
 
 export function ThemeProvider({ children, statusBar = true }: { children: React.ReactNode; statusBar?: boolean }) {
@@ -102,16 +120,18 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
   const [palette, setPaletteState] = useState<PaletteName | null>(null);
   const [glass, setGlassState] = useState(GLASS_DEFAULT);
   const [destination, setDestinationState] = useState<DestinationName>('chat');
+  const [textScale, setTextScaleState] = useState<number>(TEXT_SCALE.default);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [themeRaw, decorationRaw, paletteRaw, glassRaw] = await Promise.all([
+        const [themeRaw, decorationRaw, paletteRaw, glassRaw, scaleRaw] = await Promise.all([
           AsyncStorage.getItem(THEME_STORAGE_KEY),
           AsyncStorage.getItem(DECORATION_STORAGE_KEY),
           AsyncStorage.getItem(PALETTE_STORAGE_KEY),
           AsyncStorage.getItem(GLASS_STORAGE_KEY),
+          AsyncStorage.getItem(TEXT_SCALE_STORAGE_KEY),
         ]);
         if (cancelled) return;
         // Only touch state when storage differs from the defaults, so a
@@ -123,6 +143,8 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
         if (storedPalette) setPaletteState(storedPalette);
         const storedGlass = parseGlass(glassRaw);
         if (storedGlass !== GLASS_DEFAULT) setGlassState(storedGlass);
+        const storedScale = parseTextScale(scaleRaw);
+        if (storedScale !== TEXT_SCALE.default) setTextScaleState(storedScale);
       } catch {
         // Storage unavailable: keep following the OS.
       }
@@ -151,6 +173,12 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
     AsyncStorage.setItem(GLASS_STORAGE_KEY, String(value)).catch(noop);
   }, []);
 
+  const setTextScale = useCallback((next: number) => {
+    const value = parseTextScale(next);
+    setTextScaleState(value);
+    AsyncStorage.setItem(TEXT_SCALE_STORAGE_KEY, String(value)).catch(noop);
+  }, []);
+
   const setDestination = useCallback((next: DestinationName) => {
     setDestinationState(prev => (prev === next ? prev : next));
   }, []);
@@ -176,8 +204,10 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
     destination,
     setDestination,
     accent: theme.colors.destination[destination],
-  }), [theme, name, preference, reduceDecoration, palette, glass, destination,
-       setPreference, setReduceDecoration, setPalette, setGlass, setDestination, toggleTheme]);
+    textScale,
+    setTextScale,
+  }), [theme, name, preference, reduceDecoration, palette, glass, destination, textScale,
+       setPreference, setReduceDecoration, setPalette, setGlass, setDestination, setTextScale, toggleTheme]);
 
   return (
     <ThemeContext.Provider value={value}>

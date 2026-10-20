@@ -51,6 +51,15 @@ def _px(value: float) -> str:
     return "0" if value == 0 else f"{value}px"
 
 
+def _scaled(value: float, floor: float = 0) -> str:
+    """A length times the user's text size (--mu-scale, set on <html> by route_theme.js
+    MuTextScale; 1 when unset), never below ``floor``."""
+    if value == 0:
+        return "0"
+    expr = f"calc({value}px * var(--mu-scale, 1))"
+    return f"max({_num(floor)}px, {expr})" if floor else expr
+
+
 def _em(value: float) -> str:
     return "0" if value == 0 else f"{value}em"
 
@@ -202,18 +211,21 @@ def _static_block() -> list[str]:
         target = f"var(--wash-{ref})" if ref.startswith("ink") else f"var(--wash-{ref}-ink)"
         lines.append(f"  --wash-syntax-{role}: {target};")
     web = web_scale(tokens)
-    lines.append(f"  --wash-density: {(tokens.get('density') or {}).get('web', 1)};")
+    density = tokens.get("density") or {}
+    keep = set(density.get("keep") or [])
+    min_px = float((density.get("text_scale") or {}).get("min_px", 0))
+    lines.append(f"  --wash-density: {density.get('web', 1)};")
     for name, spec in web["type"].items():
-        lines.append(f"  --wash-type-{name}-size: {_px(spec['size'])};")
-        lines.append(f"  --wash-type-{name}-line: {_px(spec['line'])};")
+        lines.append(f"  --wash-type-{name}-size: {_scaled(spec['size'], floor=min_px)};")
+        lines.append(f"  --wash-type-{name}-line: {_scaled(spec['line'], floor=_round(min_px * 1.25, 0.5))};")
         lines.append(f"  --wash-type-{name}-weight: {spec['weight']};")
         lines.append(f"  --wash-type-{name}-tracking: {_em(spec['tracking'])};")
     for index, value in enumerate(web["space"], start=1):
-        lines.append(f"  --wash-space-{index}: {_px(value)};")
+        lines.append(f"  --wash-space-{index}: {_scaled(value)};")
     for name, value in web["radius"].items():
         lines.append(f"  --wash-radius-{name}: {_px(value)};")
     for name, value in web["size"].items():
-        lines.append(f"  --wash-size-{name}: {_px(value)};")
+        lines.append(f"  --wash-size-{name}: {_px(value) if name in keep else _scaled(value)};")
     for name, spec in tokens["motion"].items():
         lines.append(f"  --wash-motion-{name}: {spec['duration']}ms;")
         lines.append(f"  --wash-ease-{name}: {spec['easing']};")
@@ -335,6 +347,7 @@ def _payload(*, web: bool = True) -> dict:
                             "paper": _flat(spec["light"]), "dusk": _flat(spec["dark"])}
                      for name, spec in palettes().items()},
         "destination": destinations(),
+        "textScale": {k: v for k, v in (tokens.get("density") or {}).get("text_scale", {}).items() if not k.startswith("_")},
     }
 
 

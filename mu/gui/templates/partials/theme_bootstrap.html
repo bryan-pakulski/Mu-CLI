@@ -8,7 +8,8 @@
      (localStorage `mucli-palette`: darcula | one | material | tokyo → html[data-palette];
      wash, the default, sets nothing) and the Wash glass strength (`mucli-glass`, 0–100,
      default 60 → --mu-glass and html[data-glass]) and its blur (`mucli-glass-blur`, 0–100,
-     default 60 → --mu-blur). It also sets
+     default 60 → --mu-blur) and the text size (`mucli-text-scale`, 85–120 percent → --mu-scale).
+     It also sets
      html[data-nav] = vt | fade for page transitions, and html[data-sidebar] =
      collapsed when the sidebar was collapsed (localStorage `mucli-layout`
      .sidebarOpen === false; wash_shell.js toggles it on every page). -->
@@ -49,6 +50,11 @@
     } catch (e) { /* default */ }
     root.style.setProperty('--mu-blur', String(blur / 100));
     if (glass > 0) root.setAttribute('data-glass', '');
+    // Text size (route_theme.js MuTextScale): percent 85–120, default 100 → --mu-scale.
+    try {
+        var rawScale = parseInt(localStorage.getItem('mucli-text-scale'), 10);
+        if (!isNaN(rawScale) && rawScale !== 100) root.style.setProperty('--mu-scale', String(Math.max(85, Math.min(120, rawScale)) / 100));
+    } catch (e) { /* default */ }
     // Page navigation style (base.css "page transitions"): browsers with cross-document View
     // Transitions (pageswap/pagereveal) animate natively; the rest (e.g. Firefox) get the
     // scripted fade in wash_shell.js.

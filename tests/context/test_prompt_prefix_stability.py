@@ -146,7 +146,9 @@ def test_system_prompt_hash_stable_while_memory_and_scratchpad_change(session):
     # last PART (user text stays first). Later iterations: tool-result tail
     # -> separate trailing user message.
     assert calls[0]["messages"][-1].parts[0].text == "investigate compaction"
-    assert len(calls[0]["messages"][-1].parts) == 2
+    # user text, the turn context (the turn-scoped goal), then the runtime state.
+    assert len(calls[0]["messages"][-1].parts) == 3
+    assert _turn_context_parts(calls[0]["messages"][-1]) == [calls[0]["messages"][-1].parts[1]]
     assert len(calls[1]["messages"][-1].parts) == 1
     texts = [runtime_state_text(r[0]) for r in rs]
     assert "Current date/time" in texts[0]
@@ -188,3 +190,79 @@ def test_trace_request_record_reports_stable_hash_and_volatile_tokens(session, t
     assert all("volatile_block_tokens" in r for r in reqs)
     assert all(r["volatile_block_tokens"] > 0 for r in reqs)
     assert all("volatile_block" in r["component_tokens"] for r in reqs)
+
+
+# ------------------------------------------------------------------ across turns
+
+
+# Text only in the commit-message skill's body (the L1B index lists name + description).
+BODY = "git diff --cached"
+
+
+def _turn_context_parts(message):
+    from mu.session.runtime_state import TURN_CONTEXT_HEADER
+    return [p for p in message.parts if (p.text or "").startswith(TURN_CONTEXT_HEADER)]
+
+
+def test_system_prompt_stable_across_turns_with_triggered_skill(session):
+    """A skill triggered by one turn's message changes that turn's context, never the system
+    prompt: tools + system + earlier history stay cacheable from turn to turn."""
+    session.send_message("investigate compaction")
+    session.send_message("write a commit message for this change")
+    calls = session.provider.calls
+    assert len(calls) == 4
+    assert len({_hash(c["system_prompt"]) for c in calls}) == 1
+    assert BODY not in calls[3]["system_prompt"]
+    assert "commit-message" in calls[3]["system_prompt"]  # still listed in the L1B index
+    assert "write a commit message for this change" not in calls[3]["system_prompt"]  # turn goal too
+
+    # Turn 2's request carries the triggered body on turn 2's own user message.
+    last = calls[3]["messages"]
+    turn_msg = [m for m in last if m.role == "user" and m.parts[0].text == "write a commit message for this change"]
+    assert len(turn_msg) == 1
+    ctx = _turn_context_parts(turn_msg[0])
+    assert len(ctx) == 1 and BODY in ctx[0].text
+    assert "Active Goal (session_goal, pinned): write a commit message" in ctx[0].text
+    # It sits after the user's own text and before the runtime-state tail.
+    texts = [p.text for p in turn_msg[0].parts]
+    assert texts[0] == "write a commit message for this change"
+    assert texts.index(ctx[0].text) == 1
+    # Turn 1's message carries no turn context in turn 2's request.
+    first = [m for m in last if m.role == "user" and m.parts[0].text == "investigate compaction"]
+    assert first and not _turn_context_parts(first[0])
+    # Never persisted.
+    for msg in session.session_manager.history:
+        for p in msg.get("parts", []):
+            assert "TURN CONTEXT" not in str(p.get("text", ""))
+
+
+def test_turn_context_rides_every_iteration_of_its_turn(session):
+    session.send_message("write a commit for the hypothesis notes")
+    calls = session.provider.calls
+    assert len(calls) == 3
+    for call in calls:
+        turn_msg = [m for m in call["messages"] if m.role == "user" and m.parts[0].text == "write a commit for the hypothesis notes"]
+        assert len(turn_msg) == 1
+        ctx = _turn_context_parts(turn_msg[0])
+        assert len(ctx) == 1 and BODY in ctx[0].text
+    # Identical bytes in every iteration, so the history prefix through it is reused.
+    assert len({_turn_context_parts([m for m in c["messages"] if m.role == "user"][0])[0].text for c in calls}) == 1
+
+
+def test_turn_context_falls_back_to_runtime_state_when_turn_message_is_absent():
+    from types import SimpleNamespace
+
+    from providers.base import Message
+    from mu.session.runtime_state import (
+        TURN_CONTEXT_HEADER, append_runtime_state, render_runtime_state, render_turn_context, runtime_state_text,
+    )
+
+    sm = SimpleNamespace(history=[{"role": "user", "parts": [{"type": "text", "text": "gone"}]}])
+    sess = SimpleNamespace(
+        session_manager=sm, _current_turn_start_index=0,
+        _turn_context_block=render_turn_context(["LAYER 2M — Durable cross-session recall:\n- fact"]),
+        _runtime_state_block=render_runtime_state(["Current date/time: x"]),
+    )
+    out = append_runtime_state(sess, [Message(role="user", parts=[MessagePart(type="text", text="other")])])
+    text = runtime_state_text(out[-1])
+    assert TURN_CONTEXT_HEADER in text and "- fact" in text and "Current date/time" in text

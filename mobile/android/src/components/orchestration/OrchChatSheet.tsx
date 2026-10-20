@@ -18,7 +18,8 @@ import { providersApi, type ProviderInfo } from '../../api/providers';
 import { sessionsApi } from '../../api/sessions';
 import { subscribeToEvents } from '../../api/sse';
 import { asPendingPrompt } from '../../store/prompts';
-import { spacing } from '../../theme/tokens';
+import { useTheme } from '../../theme/ThemeContext';
+import { radii, spacing } from '../../theme/tokens';
 import { Banner, Button, Chip, Composer, EmptyState, Field, InkDrop, Markdown, Select, Sheet, Text, TextField } from '../../ui';
 import { ToolList } from '../../ui/ToolList';
 import { buildToolCards, type ToolEvent } from '../../ui/toolList';
@@ -124,6 +125,7 @@ export type OrchChatSheetProps = {
 };
 
 export function OrchChatSheet({ visible, onClose, title, open, canStartOver, emptyTitle, emptyBody, suggestions = [], pickerLede, prefill, testID = 'orch-chat' }: OrchChatSheetProps) {
+  const { colors } = useTheme();
   const [phase, setPhase] = useState<'idle' | 'connecting' | 'model' | 'ready' | 'error'>('idle');
   const [problem, setProblem] = useState('');
   const [session, setSession] = useState<string | null>(null);
@@ -252,7 +254,8 @@ export function OrchChatSheet({ visible, onClose, title, open, canStartOver, emp
             </View>
           ) : null}
           {entries.map(e => {
-            if (e.type === 'user') return <View key={e.id} style={styles.user} testID={`${testID}-user`}><Text variant="bodyLg">{e.text}</Text></View>;
+            // Same as the main chat: user turns are accent-wash bubbles, answers sit on the page.
+            if (e.type === 'user') return <View key={e.id} style={[styles.user, { backgroundColor: colors.accent.wash }]} testID={`${testID}-user`}><Text variant="bodyLg">{e.text}</Text></View>;
             if (e.type === 'assistant') return <View key={e.id} testID={`${testID}-assistant`}><Markdown>{e.text || ' '}</Markdown></View>;
             if (e.type === 'tools') return <ToolList key={e.id} items={buildToolCards(e.events, { running: busy && e === entries[entries.length - 1] })} running={busy && e === entries[entries.length - 1]} testID={`${testID}-tools`} />;
             if (e.type === 'resolved') return <ResolvedLine key={e.id} record={e.record} />;
@@ -346,7 +349,7 @@ export function DiscoveryChat({ visible, onClose, draftRef }: { visible: boolean
 const styles = StyleSheet.create({
   body: { flex: 1, gap: spacing.sm },
   log: { gap: spacing.md, paddingBottom: spacing.base },
-  user: { alignSelf: 'flex-end', maxWidth: '88%' },
+  user: { alignSelf: 'flex-end', maxWidth: '80%', paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radii.lg, borderBottomRightRadius: 6 },
   working: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   empty: { gap: spacing.md },
   suggest: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },

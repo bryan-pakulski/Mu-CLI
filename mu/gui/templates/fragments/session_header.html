@@ -34,7 +34,7 @@
             </template>
             <hr class="w-menu__separator">
             <button type="button" class="w-menu__item" role="menuitem"
-                    @click="if (!$store.mode.panelModes.includes($store.mode.active)) { $store.mode.setView('memory'); $store.layout.panelOpen = true } else { $store.layout.togglePanel() }"
+                    @click="if (!$store.mode.panelModes.includes($store.mode.active)) { $store.mode.setView('memory'); $store.layout.setPanel(true) } else { $store.layout.togglePanel() }"
                     :aria-pressed="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen ? 'true' : 'false'"
                     aria-label="Toggle workspace panel">
                 {{ w.icon("panel-right", size="sm") }}<span class="w-menu__label"
@@ -43,7 +43,7 @@
                     @click="$store.inspector.openDrawer()"
                     aria-label="Open settings">{{ w.icon("settings", size="sm") }}<span class="w-menu__label">Workspace and settings</span></button>
             <button type="button" class="w-menu__item" role="menuitem"
-                    @click="$store.mode.setView('memory'); $store.layout.panelOpen = true; $store.memory.tab = 'context'; $store.memory.loadContext && $store.memory.loadContext()">
+                    @click="$store.mode.setView('memory'); $store.layout.setPanel(true); $store.memory.tab = 'context'; $store.memory.loadContext && $store.memory.loadContext()">
                 {{ w.icon("gauge", size="sm") }}<span class="w-menu__label">Context</span></button>
             <a class="w-menu__item" role="menuitem" :href="'/trace?session=' + encodeURIComponent($store.chat.currentName || '')">
                 {{ w.icon("activity", size="sm") }}<span class="w-menu__label">Trace this session</span></a>

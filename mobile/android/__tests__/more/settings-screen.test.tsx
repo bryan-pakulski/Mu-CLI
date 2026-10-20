@@ -12,7 +12,7 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('../../src/api/devices', () => ({ devicesApi: { whoami: jest.fn(async () => ({ id: 'd1', name: 'Pixel 8', created_at: 1, last_seen: 1, address: '' })) } }));
 
 import { SettingsScreen } from '../../src/screens/SettingsScreen';
-import { ThemeProvider, THEME_STORAGE_KEY, DECORATION_STORAGE_KEY, PALETTE_STORAGE_KEY, GLASS_STORAGE_KEY, useTheme } from '../../src/theme/ThemeContext';
+import { ThemeProvider, THEME_STORAGE_KEY, DECORATION_STORAGE_KEY, PALETTE_STORAGE_KEY, GLASS_STORAGE_KEY, TEXT_SCALE_STORAGE_KEY, useTheme } from '../../src/theme/ThemeContext';
 import { PALETTES, washColors } from '../../src/theme/tokens';
 import { useConnectionStore } from '../../src/store/connection';
 
@@ -59,6 +59,13 @@ it('persists light or dark, glass strength and Reduce decoration', async () => {
   await act(async () => { fireEvent(ui.getByTestId('reduce-decoration'), 'valueChange', true); });
   expect(setItem).toHaveBeenCalledWith(DECORATION_STORAGE_KEY, '1');
   expect(theme.flat).toBe(true);
+});
+
+it('stores the text size and applies it app-wide', async () => {
+  const ui = renderScreen();
+  await act(async () => { fireEvent.press(ui.getByLabelText('90%')); });
+  expect(setItem).toHaveBeenCalledWith(TEXT_SCALE_STORAGE_KEY, '90');
+  expect(theme.textScale).toBe(90);
 });
 
 it('shows this phone\'s pairing and opens the pairing screen', async () => {

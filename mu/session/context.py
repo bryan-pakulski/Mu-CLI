@@ -181,9 +181,18 @@ def inject_hierarchical_context(session: Any, system_prompt: str, *, cached_skil
                 "Semantic residue from compacted older conversation (non-authoritative where structured state disagrees):\n"
                 + semantic_residue
             )
-        # The pinned goal is turn-constant: it stays in the stable prompt.
+        # A sticky goal (/goal, loop and feature modes) is constant across turns: it stays in
+        # the stable prompt. A turn-scoped goal (auto-pinned from the turn's message, cleared
+        # at turn end) rides in the turn context on the turn's user message instead
+        # (runtime_state.attach_turn_context); if a tool changes it mid-turn the new goal goes
+        # to the trailing runtime state.
         if goal_context:
-            layers.append("LAYER 3 \u2014 Active task plan / current goal:\n" + goal_context)
+            goal_layer = "LAYER 3 \u2014 Active task plan / current goal:\n" + goal_context
+            turn_goal = getattr(session, "_turn_goal_context", None)
+            if turn_goal is None:
+                layers.append(goal_layer)
+            elif goal_context != turn_goal:
+                volatile_layers.append(goal_layer)
         # The feature plan cursor advances mid-turn: trailing message.
         if feature_context:
             volatile_layers.append("LAYER 3 \u2014 Feature plan cursor:\n" + feature_context)

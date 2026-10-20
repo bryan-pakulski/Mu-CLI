@@ -142,7 +142,9 @@ shares one token and vocabulary source with the web GUI and the terminal.
 - **Themes:** Wash and the palettes from `tokens.json` (theme cards under **More → Settings →
   Appearance**), each with a light (Paper) and a dark (Dusk) side: System / Light / Dark.
   **Glass** (Wash only) sets how much watercolour shows through surfaces, floor-clamped so text
-  stays readable; palettes and **Reduce decoration** are flat.
+  stays readable; palettes and **Reduce decoration** are flat. **Text size** (85–120%, shared
+  with the web GUI's setting via `tokens.json` `density.text_scale`) scales text and line heights
+  on top of the phone's own font size; smaller packs more on screen.
 - **Colour:** components use semantic tokens only — `canvas`, `surface`,
   `sunken`, `raised`, `hairline`, `ink`/`ink2`/`ink3`, `plum`, and
   `accent` (lagoon), `running` (sky), `ok` (meadow), `attention` (apricot,

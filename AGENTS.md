@@ -105,8 +105,9 @@ python3 -m pytest tests/ -q
   thinking signatures, encrypted reasoning) are excluded from every token estimate
   and dropped from older turns in the request projection (`providers.base.project_replay`). `compactor._pressure_clear` runs even with
   `auto_compaction_enabled=False`. With `prompt_prefix_stable` the system prompt is
-  byte-stable per turn; volatile blocks ride in the trailing RUNTIME STATE message
-  (never persisted). Every history shrink records a ledger kind (`turn_fold`,
+  byte-stable across turns: turn-scoped blocks (the auto-pinned goal, triggered skill bodies,
+  durable recall) ride in the request-only TURN CONTEXT part on the turn's user message, and
+  per-iteration blocks in the trailing RUNTIME STATE message (neither is ever persisted). Every history shrink records a ledger kind (`turn_fold`,
   `turn_roll`, `pressure_clear`, `pressure_forced`, ...).
 - UI follows the Wash design system (`documentation/design/wash_design_guide.md`)
   composed per Mu (`documentation/design/mu_style_guide.md`, which wins where they

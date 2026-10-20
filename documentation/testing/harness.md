@@ -54,7 +54,8 @@ Must prove:
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
-| `test_anthropic_provider.py` | 39 | 0.0 s | Anthropic (Claude) provider: request shaping, tool-id pairing, thinking |
+| `test_anthropic_provider.py` | 41 | 0.0 s | Anthropic (Claude) provider: request shaping, cache breakpoints and TTL, tool-id pairing, thinking |
+| `test_provider_prompt_caching.py` | 6 | 0.0 s | Cache hints from the session; OpenAI GPT-5.6+ breakpoints, retention and fallback |
 | `test_loop_detection.py` | 10 | 0.0 s |  |
 | `test_mu_agent_session_integration.py` | 9 | 0.2 s | Integration tests: hooks + plan mode fire from the existing Session loop |
 | `test_mu_parallel_dispatch.py` | 8 | 0.5 s | Tests that the session agentic loop dispatches eligible tool calls in |
@@ -74,7 +75,8 @@ Must prove:
 - Answered tool-call args are stubbed in the projection only; history is never rewritten
 - Replay blobs are excluded from estimates and dropped from older turns
 - pressure_clear runs with auto-compaction off; every shrink records a ledger kind
-- prompt_prefix_stable keeps the system prompt byte-stable
+- prompt_prefix_stable keeps the system prompt byte-stable across iterations and turns
+- Provider requests mark cache breakpoints on the stable prefix, never the volatile tail
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
@@ -84,7 +86,7 @@ Must prove:
 | `test_history_shrink_ledger.py` | 5 | 0.0 s | Governance: every history shrink path leaves a compaction record |
 | `test_job_no_overflow_stop.py` | 27 | 0.5 s | Job stages never stop dead on a context overflow (documentation/design/ledger/no-overflow-stop.md) |
 | `test_pressure_clear.py` | 7 | 0.1 s | context_packaging_v2 / P3-T7: summarizer-free in-turn working-set cap |
-| `test_prompt_prefix_stability.py` | 5 | 0.1 s | context_packaging_v2 / P4-T9: byte-stable system prompt across a turn |
+| `test_prompt_prefix_stability.py` | 8 | 0.1 s | Byte-stable system prompt across iterations and turns; turn context and runtime state placement |
 | `test_result_store.py` | 13 | 0.0 s | Durable ResultStore tests (spec #1, #6, #11) |
 | `test_selective_context.py` | 16 | 0.3 s | Model context edits preserve durable evidence and measure the wire projection |
 | `test_token_estimator.py` | 21 | 0.5 s | Pin the token estimator and its integration with /memory layers |

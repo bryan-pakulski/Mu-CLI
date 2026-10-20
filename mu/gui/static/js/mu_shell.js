@@ -178,6 +178,7 @@
             palette: window.MuPalette ? window.MuPalette.preference() : null,
             glass: window.MuGlass ? window.MuGlass.preference() : null,
             blur: window.MuGlassBlur ? window.MuGlassBlur.preference() : null,
+            textScale: window.MuTextScale ? window.MuTextScale.preference() : null,
         };
         views.forEach(function (view) { post(view, detail); });
     }
@@ -185,6 +186,7 @@
     window.addEventListener('mucli-decoration-change', broadcast);
     window.addEventListener('mucli-palette-change', broadcast);
     window.addEventListener('mucli-glass-change', broadcast);
+    window.addEventListener('mucli-text-scale-change', broadcast);
 
     navigate(location.href, { push: false, focus: false });
 })();

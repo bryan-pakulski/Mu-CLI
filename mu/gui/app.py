@@ -181,6 +181,8 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     templates.env.globals["wash_state"] = state_style
     from mu.design import palette_choices as _palette_choices
     templates.env.globals["wash_palette_choices"] = _palette_choices
+    from mu.design import load_tokens as _load_tokens
+    templates.env.globals["wash_text_scale"] = (_load_tokens().get("density") or {}).get("text_scale") or {}
     app.state.templates = templates
     # The persistent shell: browser navigations to a destination get one shell
     # document; each destination then loads into it as a keep-alive view.

@@ -20,7 +20,7 @@ import { IconButton } from './Button';
 import { ContextRing } from './Meters';
 import { InkDrop } from './Progress';
 import { Pressable } from './Pressable';
-import { Text, textStyle } from './Text';
+import { Text, scaleText, textStyle } from './Text';
 
 export type ComposerSlashItem = { label: string; desc?: string; value: string };
 
@@ -111,7 +111,7 @@ export function Composer({
   value, onChangeText, onSend, onStop, busy, placeholder = 'Ask μcli anything…', attachments = [], onAttach, onRemoveAttachment,
   slash, foot, transcribe, hint, disabled, testID = 'composer',
 }: ComposerProps) {
-  const { colors } = useTheme();
+  const { colors, textScale } = useTheme();
   const glass = useGlass();
   const valueRef = useRef(value);
   valueRef.current = value;
@@ -163,7 +163,7 @@ export function Composer({
           editable={!disabled}
           maxFontSizeMultiplier={2}
           accessibilityLabel="Message μcli"
-          style={[styles.input, textStyle('bodyLg'), { color: colors.ink }]}
+          style={[styles.input, scaleText(textStyle('bodyLg'), textScale), { color: colors.ink }]}
         />
         <View style={styles.foot}>
           {onAttach ? <IconButton icon="plus" label="Attach a file" onPress={onAttach} selected={attachments.length > 0} testID={`${testID}-attach`} /> : null}

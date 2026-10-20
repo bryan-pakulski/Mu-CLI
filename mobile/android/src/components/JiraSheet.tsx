@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import {
   doneSkippedKeys,
@@ -14,15 +14,7 @@ import {
 import { JobImportSheet } from './JobSessionPicker';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
-import { Banner, Button, Field, Icon, Loading, Panel, Pressable, Sheet, SwitchRow, Text, TextField } from '../ui';
-
-export type JiraSheetProps = {
-  visible: boolean;
-  sessionName: string | null;
-  onClose: () => void;
-  onImported?: (jobIds: string[]) => void;
-  onOpenJob?: (jobId: string) => void;
-};
+import { Banner, Button, Field, Icon, InkDrop, Loading, Panel, Pressable, Sheet, SwitchRow, Text, TextField } from '../ui';
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -33,14 +25,6 @@ export function filterTickets(tickets: JiraTicket[], statuses: string[]): JiraTi
   if (!statuses.length) return tickets;
   const wanted = new Set(statuses);
   return tickets.filter(t => wanted.has(t.status));
-}
-
-export function JiraSheet({ visible, sessionName, onClose, onImported, onOpenJob }: JiraSheetProps) {
-  return (
-    <Sheet visible={visible} onClose={onClose} title="Jira">
-      <JiraBrowser active={visible} sessionName={sessionName} onImported={onImported} onOpenJob={onOpenJob} />
-    </Sheet>
-  );
 }
 
 export type JiraBrowserProps = {
@@ -54,8 +38,8 @@ export type JiraBrowserProps = {
   section?: 'all' | 'link';
 };
 
-/** The Jira browser (link, boards, filters, tickets, import) — used by the
- * Boards screen, the Jira sheet and (link only) the jobs Settings screen. */
+/** The Jira browser (link, boards, filters, tickets, import): Work → Tickets, and (link only)
+ * Work settings. */
 export function JiraBrowser({ active, sessionName, onImported, onOpenJob, section = 'all' }: JiraBrowserProps) {
   const visible = active;
   const { colors } = useTheme();
@@ -212,7 +196,7 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
 
       {settings?.configured && !editingLink ? (
         <Panel title="Jira link" glyph="✓" glyphTone="ok">
-          <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={2}>
+          <Text variant="xs" tone="ink3" numberOfLines={2}>
             Linked · {settings.base_url}{settings.email ? ` · ${settings.email}` : ''}
           </Text>
           <View style={styles.actions}>
@@ -251,7 +235,7 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
       {settings?.configured && !linkOnly ? (
         <>
           <Panel title="Board">
-            <Text variant="xs" style={{ color: colors.ink3 }}>Starred and suggested boards (projects with your open work) come first. Long-press to star.</Text>
+            <Text variant="xs" tone="ink3">Starred and suggested boards (projects with your open work) come first. Long-press to star.</Text>
             <TextField accessibilityLabel="Search boards" placeholder="Search boards"
               value={boardQuery} onChangeText={setBoardQuery} onSubmitEditing={() => void loadBoards(boardQuery.trim())}
               returnKeyType="search" />
@@ -259,21 +243,21 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
               {shownBoards.map(board => (
                 <Pressable key={board.id} accessibilityRole="button" accessibilityState={{ selected: boardId === board.id }}
                   onPress={() => setBoardId(boardId === board.id ? null : board.id)} onLongPress={() => togglePreferred(board)} style={chip(boardId === board.id)}>
-                  <Text variant="xs" style={{ color: colors.ink }}>
+                  <Text variant="xs" tone="ink">
                     {board.preferred ? '★ ' : board.suggested ? '• ' : ''}{board.name}{board.project ? ` · ${board.project}` : ''}
                   </Text>
                 </Pressable>
               ))}
-              {busy === 'boards' ? <ActivityIndicator size="small" color={colors.running.ink} /> : null}
+              {busy === 'boards' ? <InkDrop /> : null}
             </View>
             {sprints.length ? (
               <View style={styles.wrap}>
                 <Pressable accessibilityRole="button" accessibilityState={{ selected: sprintId == null }} onPress={() => setSprintId(null)} style={chip(sprintId == null)}>
-                  <Text variant="xs" style={{ color: colors.ink }}>Whole board</Text>
+                  <Text variant="xs" tone="ink">Whole board</Text>
                 </Pressable>
                 {sprints.map(s => (
                   <Pressable key={s.id} accessibilityRole="button" accessibilityState={{ selected: sprintId === s.id }} onPress={() => setSprintId(s.id)} style={chip(sprintId === s.id)}>
-                    <Text variant="xs" style={{ color: colors.ink }}>{s.name}{s.state === 'active' ? ' (active)' : ''}</Text>
+                    <Text variant="xs" tone="ink">{s.name}{s.state === 'active' ? ' (active)' : ''}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -290,7 +274,7 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
                   return (
                     <Pressable key={s.name} accessibilityRole="button" accessibilityState={{ selected: on }}
                       onPress={() => setStatusFilter(prev => (on ? prev.filter(x => x !== s.name) : [...prev, s.name]))} style={chip(on)}>
-                      <Text variant="xs" style={{ color: colors.ink }}>{s.name} · {s.count}</Text>
+                      <Text variant="xs" tone="ink">{s.name} · {s.count}</Text>
                     </Pressable>
                   );
                 })}
@@ -301,10 +285,10 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
           <Panel
             title="Tickets"
             badge={tickets.length ? visibleTickets.length : ''}
-            right={busy === 'tickets' ? <ActivityIndicator size="small" color={colors.running.ink} /> : <Button small ghost label="Refresh" onPress={() => void loadTickets()} />}
+            right={busy === 'tickets' ? <InkDrop /> : <Button small ghost label="Refresh" onPress={() => void loadTickets()} />}
           >
             {!visibleTickets.length && busy !== 'tickets' ? (
-              <Text variant="xs" style={{ color: colors.ink3 }}>{boardId == null && !mine ? 'Pick a board or turn on “Assigned to me”.' : 'No tickets match.'}</Text>
+              <Text variant="xs" tone="ink3">{boardId == null && !mine ? 'Pick a board or turn on “Assigned to me”.' : 'No tickets match.'}</Text>
             ) : null}
             {visibleTickets.map(ticket => {
               const picked = selected.includes(ticket.key);
@@ -319,7 +303,7 @@ export function JiraBrowser({ active, sessionName, onImported, onOpenJob, sectio
                     <Text variant="xs" style={{ color: colors.ink, fontFamily: fonts.mono, fontWeight: fontWeights.semibold }}>{ticket.key}</Text>
                     <Text variant="xs" style={{ color: colors.ink3, flex: 1 }} numberOfLines={1}>{ticket.status}{ticket.assignee ? ` · ${ticket.assignee}` : ''}</Text>
                   </View>
-                  <Text variant="sm" style={{ color: colors.ink }} numberOfLines={2}>{ticket.summary}</Text>
+                  <Text variant="sm" tone="ink" numberOfLines={2}>{ticket.summary}</Text>
                   {job ? (
                     <Pressable accessibilityRole="link" onPress={() => onOpenJob?.(job.job_id)} style={styles.jobLink}>
                       <Text variant="xs" style={{ color: job.live ? colors.attention.ink : colors.accent.ink }}>

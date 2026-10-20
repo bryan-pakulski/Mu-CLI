@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import type { ArtifactDescriptor } from '../api/artifacts';
@@ -8,7 +8,7 @@ import { openExternalUrl } from '../api/urlSafety';
 import type { ThemeColors } from '../theme/tokens';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, fontWeights, radii, spacing, touchTarget } from '../theme/tokens';
-import { ModalFrame, Pressable, Text, Icon } from '../ui';
+import { ModalFrame, Pressable, Text, Icon, InkDrop } from '../ui';
 
 const MUCLI_MOBILE_VISUALIZATION_CONTROLS_V1 = true;
 
@@ -112,7 +112,7 @@ function InteractiveWebView({
           />
           {loading ? (
             <View style={[styles.loading, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline }]}>
-              <ActivityIndicator color={colors.accent.ink} />
+              <InkDrop />
             </View>
           ) : null}
         </>

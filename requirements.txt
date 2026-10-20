@@ -15,6 +15,7 @@ httpx
 tiktoken
 fastapi
 uvicorn[standard]
+segno>=1.6
 jinja2
 python-multipart
 # Orchestration master: Ed25519 signing, TLS, AES-GCM secrets, YAML manifests.

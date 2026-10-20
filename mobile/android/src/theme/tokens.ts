@@ -12,8 +12,10 @@
 
 import { Easing, Platform, type TextStyle, type ViewStyle } from 'react-native';
 import {
+  destination as destinationMap,
   dusk,
   layer as layerPigments,
+  palettes as palettePalettes,
   mode as modePigments,
   motion as washMotion,
   paper,
@@ -37,6 +39,22 @@ export type Tone3 = { wash: string; pigment: string; ink: string };
 export type Semantic = 'accent' | 'running' | 'ok' | 'attention' | 'caution' | 'danger' | 'plan' | 'info' | 'neutral';
 export type PigmentName = 'lagoon' | 'meadow' | 'sun' | 'apricot' | 'rose' | 'lilac' | 'sky' | 'plum';
 export type ModeName = keyof typeof modePigments;
+/** The shell's destinations (tokens.json destination): Chat, Work, Orchestration, Environments, Insights, Settings. */
+export type DestinationName = keyof typeof destinationMap;
+export const DESTINATIONS = Object.keys(destinationMap) as DestinationName[];
+/** Alternative palettes (tokens.json palettes); null = the Wash theme. */
+export type PaletteName = keyof typeof palettePalettes;
+export const PALETTES = Object.keys(palettePalettes) as PaletteName[];
+export function paletteLabel(name: PaletteName | null): string {
+  return name ? palettePalettes[name].label : 'Wash';
+}
+export function paletteNote(name: PaletteName | null): string {
+  return name ? palettePalettes[name].note : 'Watercolour paper, the default.';
+}
+/** A destination's watercolour scene (assets/wash/ambient-<scene>-<theme>). */
+export function destinationAmbient(name: DestinationName): 'dawn' | 'lagoon' | 'meadow' {
+  return destinationMap[name].ambient as 'dawn' | 'lagoon' | 'meadow';
+}
 export type LayerName = keyof typeof layerPigments;
 
 export const SEMANTICS: readonly Semantic[] = ['accent', 'running', 'ok', 'attention', 'caution', 'danger', 'plan', 'info', 'neutral'];
@@ -76,6 +94,8 @@ export type WashColors = {
   info: Tone3;
   neutral: Tone3;
   pigment: Record<PigmentName, Tone3>;
+  /** Each destination's accent (tokens.json destination). */
+  destination: Record<DestinationName, Tone3>;
   mode: Record<ModeName, Tone3>;
   layer: Record<LayerName, Tone3>;
   series: readonly Tone3[];
@@ -114,9 +134,10 @@ function syntaxFrom(p: WashPalette): SyntaxColors {
   };
 }
 
-/** Build the semantic colour shape from one generated palette. */
-export function washColors(name: WashThemeName): WashColors {
-  const p = name === 'dusk' ? dusk : paper;
+/** Build the semantic colour shape from one generated palette (an alternative palette when given). */
+export function washColors(name: WashThemeName, palette: PaletteName | null = null): WashColors {
+  const base = name === 'dusk' ? dusk : paper;
+  const p: WashPalette = palette && palettePalettes[palette] ? { ...base, ...(palettePalettes[palette][name] as WashPalette) } : base;
   const pigment = {} as Record<PigmentName, Tone3>;
   PIGMENTS.forEach(n => { pigment[n] = tone3(p, n); });
   return {
@@ -147,6 +168,7 @@ export function washColors(name: WashThemeName): WashColors {
     info: tone3(p, 'info'),
     neutral: tone3(p, 'neutral'),
     pigment,
+    destination: Object.fromEntries(DESTINATIONS.map(d => [d, tone3(p, destinationMap[d].accent)])) as Record<DestinationName, Tone3>,
     mode: mapRecord(modePigments as Record<ModeName, string>, p),
     layer: mapRecord(layerPigments as Record<LayerName, string>, p),
     series: seriesPigments.map(n => tone3(p, n)),
@@ -399,6 +421,12 @@ export type Theme = {
 
 export const paperTheme: Theme = { colors: paperColors, spacing, typography, fontSizes, fontWeights, radii, motion };
 export const duskTheme: Theme = { colors: duskColors, spacing, typography, fontSizes, fontWeights, radii, motion };
+
+/** A theme for any light/dark side and palette. */
+export function themeFor(name: WashThemeName, palette: PaletteName | null = null): Theme {
+  if (!palette) return name === 'dusk' ? duskTheme : paperTheme;
+  return { colors: washColors(name, palette), spacing, typography, fontSizes, fontWeights, radii, motion };
+}
 
 /** Platform default UI family when the bundled fonts have not loaded. */
 export const fallbackUiFont = Platform.select({ android: 'sans-serif', default: undefined }) as string | undefined;

@@ -1,84 +1,59 @@
-import React, { useState, useCallback } from 'react';
-import { View, ActivityIndicator, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+// Connection (More → Connection): the mucli GUI this phone talks to. The saved address only
+// changes once the new one answers /healthz; signing in is pairing (Settings → Devices).
+
+import React, { useCallback, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useTheme } from '../theme/ThemeContext';
 import { refreshPendingMutations, useConnectionStore } from '../store/connection';
 import { checkHealth } from '../api/client';
 import { validateBaseUrl } from '../api/urlSafety';
 import type { RootStackParamList } from '../navigation/AppNavigator';
-import { fontWeights, spacing } from '../theme/tokens';
-import { Button, Field, Panel, StatusIcon, Text, TextField, WashBackground } from '../ui';
+import { spacing } from '../theme/tokens';
+import { Banner, Button, Field, PageHeader, Row, Rows, TextField } from '../ui';
+
+const MAX_ATTEMPTS = 3;
+const BACKOFF_MS = 1_500;
 
 export function ConnectionScreen() {
-  const { colors } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { baseUrl, isConnected, setBaseUrl, setConnected, loadFromStorage } = useConnectionStore();
+  const { baseUrl, isConnected, pairingRequired, setBaseUrl, setConnected, loadFromStorage } = useConnectionStore();
   const [url, setUrl] = useState(baseUrl);
   const [testing, setTesting] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState('');
 
   useFocusEffect(
     useCallback(() => {
-      if (!loaded) {
-        loadFromStorage().then(() => {
-          setUrl(useConnectionStore.getState().baseUrl);
-          setLoaded(true);
-          // G5 (§3.6): hydrate the queued-mutations badge from storage.
-          void refreshPendingMutations();
-        });
-      }
+      if (loaded) return;
+      void loadFromStorage().then(() => {
+        setUrl(useConnectionStore.getState().baseUrl);
+        setLoaded(true);
+        // G5 (§3.6): hydrate the queued-mutations badge from storage.
+        void refreshPendingMutations();
+      });
     }, [loaded, loadFromStorage]),
   );
 
   const testConnection = async () => {
     if (testing) return;
+    setError('');
     const validated = validateBaseUrl(url);
-    if (!validated.ok) {
-      Alert.alert('Invalid server URL', validated.error);
-      return;
-    }
+    if (!validated.ok) { setError(validated.error); return; }
     const candidate = validated.url;
-
-    // MUCLI_MOBILE_RECONNECT_YOLO_V1: transactional host test. Do not replace
-    // the persisted working host until the candidate has answered healthz.
+    // Transactional host test: the persisted working host only changes once the candidate answers.
     setTesting(true);
-    const MAX_ATTEMPTS = 3;
-    const BACKOFF_MS = 1_500;
-    let reachable = false;
     try {
-      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        if (await checkHealth(candidate, { timeoutMs: 5_000 })) {
-          reachable = true;
-          break;
-        }
-        if (attempt < MAX_ATTEMPTS) {
-          await new Promise(resolve => setTimeout(resolve, BACKOFF_MS * attempt));
-        }
+      let reachable = false;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS && !reachable; attempt++) {
+        reachable = await checkHealth(candidate, { timeoutMs: 5_000 });
+        if (!reachable && attempt < MAX_ATTEMPTS) await new Promise(resolve => setTimeout(resolve, BACKOFF_MS * attempt));
       }
-
-      if (!reachable) {
-        Alert.alert(
-          'Connection failed',
-          `Could not reach ${candidate}. The previous saved host was not changed.`,
-        );
-        return;
-      }
-
+      if (!reachable) { setError(`Couldn't reach ${candidate}. The saved address wasn't changed.`); return; }
       setBaseUrl(candidate);
       setConnected(true);
-      // Round-19 F44: replay fired only from autoReconnect — an explicit
-      // user reconnection left queued offline mutations stranded until
-      // some later reconnect happened. Fire-and-report here too; the
-      // outcome surfaces through the queue badge on the next screen.
-      useConnectionStore
-        .getState()
-        .replayPending()
-        .catch(() => {
-          // Badge refresh inside replayPending already recorded the
-          // failure; never block navigation on it.
-        });
+      // An explicit reconnection replays the offline queue too; the badge reports the outcome.
+      useConnectionStore.getState().replayPending().catch(() => undefined);
       if (navigation.canGoBack()) navigation.goBack();
       else navigation.navigate('Tabs', { screen: 'Chat' });
     } finally {
@@ -86,33 +61,25 @@ export function ConnectionScreen() {
     }
   };
 
+  const server = baseUrl.replace(/^https?:\/\//, '');
   return (
-    <WashBackground art="dawn" height={220} testID="connection-wash">
-    <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
-      {/* Content starts where the Dawn wash has dissolved into canvas (G§6.2.1). */}
-      <View style={{ flex: 1, padding: spacing.base, paddingTop: 150, gap: spacing.base }}>
-        <Text variant="lg" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>
-          Connection Settings
-        </Text>
-        <Panel
-          title="Server"
-          right={<StatusIcon status={isConnected ? 'done' : 'failed'} label={isConnected ? 'Connected' : 'Not connected'} showLabel size="xs" />}
-        >
-          <Field label="Server URL" hint="The mucli GUI address, e.g. http://192.168.1.20:30311. The saved host only changes after it answers.">
-            <TextField
-              value={url}
-              onChangeText={setUrl}
-              placeholder="http://localhost:30311"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-            />
-          </Field>
-          <Button title={testing ? 'Testing…' : 'Test Connection'} onPress={testConnection} disabled={testing} />
-          {testing && <ActivityIndicator color={colors.accent.ink} style={{ marginTop: spacing.sm }} />}
-        </Panel>
-      </View>
-    </SafeAreaView>
-    </WashBackground>
+    <View style={{ flex: 1 }} testID="connection-screen">
+      <PageHeader title="Connection" back={navigation.canGoBack() ? { label: 'Back', onPress: () => navigation.goBack() } : undefined}
+        state={[{ text: isConnected ? `Connected to ${server}` : 'Not connected', tone: isConnected ? 'ok' : 'attention' }, pairingRequired ? { text: 'not paired', tone: 'attention' } : null]} />
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Field label="Server address" hint="The mucli GUI address, e.g. http://192.168.1.20:30311. The saved address only changes after it answers.">
+          <TextField value={url} onChangeText={setUrl} placeholder="http://192.168.1.20:30311" autoCapitalize="none" autoCorrect={false} keyboardType="url" testID="connection-url" />
+        </Field>
+        {error ? <Banner tone="danger" title="Couldn't connect" testID="connection-error">{error}</Banner> : null}
+        <Button label={testing ? 'Testing…' : 'Test and connect'} variant="primary" onPress={() => void testConnection()} disabled={testing} loading={testing} testID="connection-test" />
+        <Rows>
+          <Row title="Pair with mucli" status={pairingRequired ? 'waiting' : undefined} sub="Sign this phone in with the code from Settings → Devices on the computer" onPress={() => navigation.navigate('Pair', undefined)} />
+        </Rows>
+      </ScrollView>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  content: { padding: spacing.base, gap: spacing.base, paddingBottom: spacing['2xl'] },
+});

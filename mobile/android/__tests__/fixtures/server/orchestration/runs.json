@@ -1,0 +1,87 @@
+{
+ "runs": [
+  {
+   "approved_by": "policy:Operator read-only runs need no extra confirmation",
+   "blast_radius": "2 nodes (prod) in 2 batches",
+   "check_mode": false,
+   "created_at": 1792491810.905049,
+   "decision": {
+    "level": "allow",
+    "rule": "Operator read-only runs need no extra confirmation",
+    "summary": "allowed by rule \u201cOperator read-only runs need no extra confirmation\u201d"
+   },
+   "effect": "read_only",
+   "effect_style": {
+    "label": "read-only",
+    "semantic": "ok"
+   },
+   "finished_at": 1792491810.905049,
+   "id": "r_fd98e12fc9d8",
+   "kind": "tool",
+   "nodes": 2,
+   "paused_reason": "",
+   "proposed_by": "operator",
+   "reason": "all nodes succeeded",
+   "started_at": 1792491810.905049,
+   "state": "succeeded",
+   "style": {
+    "glyph": "\u2713",
+    "label": "succeeded",
+    "semantic": "ok",
+    "status": "done"
+   },
+   "summary": {
+    "batch": 1,
+    "batches": 2,
+    "evaluated_batch": 1,
+    "executions": {
+     "succeeded": 2
+    },
+    "failed_states": [],
+    "nodes": {
+     "active": 0,
+     "done": 2,
+     "failed": 0,
+     "pending": 0
+    },
+    "total_nodes": 2
+   },
+   "target": "demo.echo@1",
+   "title": "Say hello"
+  },
+  {
+   "approved_by": "",
+   "blast_radius": "2 nodes (prod) in 2 batches",
+   "check_mode": false,
+   "created_at": 1792491810.905049,
+   "decision": {
+    "level": "confirm",
+    "rule": "Anything that changes a system is confirmed",
+    "summary": "needs confirmation by rule \u201cAnything that changes a system is confirmed\u201d"
+   },
+   "effect": "mutating",
+   "effect_style": {
+    "label": "mutating",
+    "semantic": "attention"
+   },
+   "finished_at": null,
+   "id": "r_fd7f720abb75",
+   "kind": "tool",
+   "nodes": 2,
+   "paused_reason": "",
+   "proposed_by": "operator",
+   "reason": "",
+   "started_at": null,
+   "state": "proposed",
+   "style": {
+    "glyph": "\u25c6",
+    "label": "awaiting approval",
+    "semantic": "attention",
+    "status": "waiting"
+   },
+   "summary": {},
+   "target": "demo.restart@1",
+   "title": "Restart web"
+  }
+ ]
+}

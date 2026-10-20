@@ -107,9 +107,15 @@ export function Banner({ tone = 'attention', glyph, title, children, right, acti
           </Pressable>
         ) : null}
       </View>
-      {children}
+      {isTextOnly(children) ? <Text variant="body" style={{ color: colors.ink2 }}>{children}</Text> : children}
     </View>
   );
+}
+
+/** Plain text children (a string, or strings and numbers mixed by JSX) must sit inside <Text>. */
+function isTextOnly(children: React.ReactNode): boolean {
+  const list = React.Children.toArray(children);
+  return list.length > 0 && list.every(c => typeof c === 'string' || typeof c === 'number');
 }
 
 export type EmptyStateProps = {

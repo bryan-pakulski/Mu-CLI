@@ -16,7 +16,7 @@ import { glassStyle, useGlass } from './Glass';
 
 export type MarkdownVariant = 'chat' | 'compact' | 'document';
 
-export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'chat', options: { solid?: boolean } = {}) {
+export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'chat', options: { solid?: boolean; strength?: number } = {}) {
   const bodyType = variant === 'chat' ? typeStyle('body-lg') : variant === 'compact' ? typeStyle('caption') : typeStyle('body');
   const mono = { fontFamily: fonts.mono, fontSize: typeStyle('mono').fontSize, lineHeight: typeStyle('mono').lineHeight };
   const heading = (name: 'title-2' | 'title-3' | 'body-lg') => ({ ...typeStyle(name), color: colors.plum, marginTop: spacing.md, marginBottom: spacing.sm });
@@ -36,7 +36,7 @@ export function markdownStyles(colors: WashColors, variant: MarkdownVariant = 'c
     em: { fontStyle: 'italic' },
     link: { color: colors.accent.ink, textDecorationLine: 'underline' },
     // borderLeftWidth 0 overrides the renderer's default 4px grey side rule (G§3.4).
-    blockquote: { ...glassStyle('subtle', colors, { solid: options.solid }), borderLeftWidth: 0, borderColor: 'transparent', borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginLeft: 0, marginVertical: spacing.sm },
+    blockquote: { ...glassStyle('subtle', colors, { solid: options.solid, strength: options.strength }), borderLeftWidth: 0, borderColor: 'transparent', borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginLeft: 0, marginVertical: spacing.sm },
     code_inline: { ...mono, color: colors.syntax.keyword, backgroundColor: colors.sunken, borderRadius: radii.xs, paddingHorizontal: spacing.xs },
     code_block: { ...mono, color: colors.ink, backgroundColor: colors.code, borderRadius: radii.sm, padding: spacing.base },
     fence: { ...mono, color: colors.ink, backgroundColor: colors.code, borderRadius: radii.sm, padding: spacing.base },
@@ -80,8 +80,8 @@ const Renderer = React.memo(MarkdownRenderer);
 
 export function Markdown({ children, variant = 'chat' }: { children: string; variant?: MarkdownVariant }) {
   const { colors } = useTheme();
-  const { solid } = useGlass();
-  const style = useMemo(() => markdownStyles(colors, variant, { solid }), [colors, variant, solid]);
+  const { solid, strength } = useGlass();
+  const style = useMemo(() => markdownStyles(colors, variant, { solid, strength }), [colors, variant, solid, strength]);
   const rules = useMemo(() => markdownRules(colors), [colors]);
   // Safe link handler: only http(s) URLs reach the OS.
   const onLinkPress = useCallback((url: string) => {

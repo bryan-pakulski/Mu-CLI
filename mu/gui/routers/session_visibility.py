@@ -49,6 +49,7 @@ async def list_user_sessions(request: Request):
 
     loaded = {name for name in state.sessions.keys() if _visible(state, name)}
     busy = {name for name in legacy._busy_session_names(request) if _visible(state, name)}
+    awaiting = {name for name in legacy._awaiting_session_names(request) if _visible(state, name)}
     current_name = state.current_session_name
     current = current_name if current_name and _visible(state, current_name) else None
 
@@ -57,12 +58,15 @@ async def list_user_sessions(request: Request):
         "active": current is not None,
         "loaded": sorted(loaded),
         "busy": sorted(busy),
+        # Sessions with a pending prompt: they need the person (◆ in every client).
+        "awaiting_input": sorted(awaiting),
         "sessions": [
             legacy._summarize(
                 path,
                 current=current,
                 loaded=loaded,
                 busy_names=busy,
+                awaiting_names=awaiting,
             )
             for path in paths
         ],

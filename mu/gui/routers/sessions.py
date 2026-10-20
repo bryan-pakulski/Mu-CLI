@@ -474,6 +474,7 @@ def _summarize(
     current: Optional[str],
     loaded: set[str],
     busy_names: set[str],
+    awaiting_names: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
     name = os.path.basename(os.path.dirname(path))
     try:
@@ -521,6 +522,8 @@ def _summarize(
         "is_current": name == current,
         "is_loaded": name in loaded,
         "is_busy": name in busy_names,
+        # A prompt (approval, question) is waiting for the person in this session.
+        "awaiting_input": name in (awaiting_names or set()),
         "modified_at": datetime.datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
         "modified_unix": mtime,
         "session_type": normalize_session_type(variables.get("session_type")),
@@ -781,6 +784,14 @@ def _suggest_workspace_paths(raw_path: str, limit: int) -> Dict[str, Any]:
         "exists": os.path.isdir(resolved),
         "suggestions": suggestions[:limit],
     }
+
+
+def _awaiting_session_names(request: Request) -> set[str]:
+    """Sessions with a pending prompt (mu/gui/prompts.PromptStore), i.e. that need the person."""
+    store = getattr(request.app.state, "prompts", None)
+    if store is None:
+        return set()
+    return {str(p["session_name"]) for p in store.pending() if p.get("session_name")}
 
 
 def _busy_session_names(request: Request) -> set[str]:

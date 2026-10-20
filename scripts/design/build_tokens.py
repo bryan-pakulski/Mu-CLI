@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from mu.design import (  # noqa: E402
-    SEMANTICS, STEPS, THEMES, TOKENS_PATH, VOCABULARY_PATH, load_tokens, load_vocabulary, palettes,
+    SEMANTICS, STEPS, THEMES, TOKENS_PATH, VOCABULARY_PATH, destinations, load_tokens, load_vocabulary, palettes,
 )
 
 CSS_OUT = ROOT / "mu/gui/static/css/wash/tokens.css"
@@ -144,6 +144,23 @@ def _palette_block(name: str, mode: str) -> list[str]:
     return lines
 
 
+def _destination_css() -> str:
+    """The shell's per-destination accent and ambient scene: [data-mode] sets --mu-accent(-ink/-wash)
+    and --mu-ambient-art / --mu-ambient-tint (shell.css animates and paints them)."""
+    out = []
+    dest = destinations()
+    default = dest.get("insights") or next(iter(dest.values()))
+    def block(spec):
+        pig, scene = spec["accent"], spec["ambient"]
+        return (f"  --mu-accent: var(--wash-{pig}-pigment);\n  --mu-accent-ink: var(--wash-{pig}-ink);\n"
+                f"  --mu-accent-wash: var(--wash-{pig}-wash);\n  --mu-ambient-art: var(--wash-art-scene-{scene});\n"
+                f"  --mu-ambient-tint: var(--wash-{pig}-wash);\n")
+    out.append(":root {\n" + block(default) + "}\n")
+    for name, spec in dest.items():
+        out.append(f'[data-mode="{name}"] {{\n' + block(spec) + "}\n")
+    return "\n/* destinations: accent + ambient scene (tokens.json destination) */\n" + "".join(out)
+
+
 def _palette_css() -> str:
     """Every palette × mode as one block keyed on html[data-palette] + [data-theme]."""
     out = []
@@ -228,6 +245,7 @@ def build_css() -> str:
         + "@media (prefers-color-scheme: dark) {\n  :root:not([data-theme]) {\n"
         + "\n".join("  " + line for line in _theme_block("dusk")) + "\n  }\n}\n"
         + _palette_css()
+        + _destination_css()
         + "}\n"
     )
 
@@ -313,9 +331,10 @@ def _payload(*, web: bool = True) -> dict:
         "glass": {theme: tokens["themes"][theme]["glass"] for theme in THEMES},
         "glassEffect": tokens["glass"],
         "vocabulary": load_vocabulary(),
-        **({"palettes": {name: {"label": spec["label"], "note": spec["note"],
-                                "paper": _flat(spec["light"]), "dusk": _flat(spec["dark"])}
-                         for name, spec in palettes().items()}} if web else {}),
+        "palettes": {name: {"label": spec["label"], "note": spec["note"],
+                            "paper": _flat(spec["light"]), "dusk": _flat(spec["dark"])}
+                     for name, spec in palettes().items()},
+        "destination": destinations(),
     }
 
 

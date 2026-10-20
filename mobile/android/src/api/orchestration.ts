@@ -37,6 +37,22 @@ export interface OrchFactsSummary {
   os: string; kernel: string; arch: string; cpus: number | null; hostname: string;
   memory_gb: number | null; memory_used_pct: number | null; max_disk_used_pct: number | null;
   uptime_days: number | null; load: number | null; systemd: unknown; services: number; provides: string[];
+  reboot_required?: boolean | null; reboot_reasons?: string[];
+}
+
+/** vm.node_presence: right after the master starts, a node not heard from yet is `connecting`. */
+export type OrchPresence = 'online' | 'connecting' | 'offline' | string;
+
+/** vm.node_busy: work in flight on a node (the run, its tool, running or queued). */
+export interface OrchBusy {
+  run_id: string; title: string; tool: string; step_name?: string; state: 'running' | 'queued' | string;
+  check_mode?: boolean; since?: number | null; count: number; queued: number;
+}
+
+/** node_policy.status: whether policy.yaml can be edited from the master, and the last edit. */
+export interface OrchRemotePolicy {
+  allowed: boolean; supported?: boolean; reason?: string; text?: string; sha256?: string;
+  pending?: { state: 'pending' | 'applied' | 'refused' | 'expired' | string; by?: string; at?: number; applied_at?: number; reason?: string } | null;
 }
 
 export interface OrchNode {
@@ -45,6 +61,7 @@ export interface OrchNode {
   agent_version: string; address: string; facts_at: number | null; summary: OrchFactsSummary;
   groups: string[]; policy: Record<string, unknown>; sandbox: string; policy_errors: string[];
   actions: OrchAction[]; created_at: number; accepted_at?: number | null; agent?: OrchAgentStatus;
+  presence?: OrchPresence; busy?: OrchBusy | null;
 }
 
 export interface OrchExecution {
@@ -59,6 +76,19 @@ export interface OrchExecution {
 export interface OrchNodeDetail extends OrchNode {
   facts: Record<string, unknown>;
   recent_executions: OrchExecution[];
+  remote_policy?: OrchRemotePolicy;
+}
+
+/** GET /nodes/{id}/maintenance (mu/orchestration/maintenance.py): the node page's control panel. */
+export interface OrchMaintenanceAction {
+  key: string; label: string; help: string; tool: string; effect: string; danger: boolean;
+  available: boolean; check_available: boolean; installed: boolean; reason: string; needs?: string; params?: Record<string, unknown>;
+}
+export interface OrchOpenRun extends OrchRunBrief { actions: OrchAction[]; here: string; progress: string }
+export interface OrchMaintenance {
+  node_id: string; name: string; os?: string; kernel?: string; uptime_days: number | null; installed?: boolean;
+  reboot: { required: boolean | null; reasons?: string[] }; pending_updates: { count: number; at: number } | null;
+  services: string[]; actions: OrchMaintenanceAction[]; open_runs: OrchOpenRun[]; recent: OrchExecution[];
 }
 
 export interface OrchRunDecision { level: string | null; summary: string | null; rule: string | null }
@@ -105,12 +135,93 @@ export interface OrchOverview {
   catalog: { published: number; drafts: number; in_review: number };
   attention: OrchAttention; recent_runs: OrchRunBrief[]; approvals: OrchRunBrief[];
   paused: OrchRunBrief[]; unreachable: OrchExecution[]; dispatch_paused: boolean; time: number;
+  /** Nodes that report a pending reboot. */
+  reboot?: { count: number; nodes: Array<{ node_id: string; name: string; reasons?: string[] }> };
+  /** The node endpoint; no `bind` means nodes can't enrol yet. */
+  network?: { bind: string; port: number; advertise?: string };
 }
 
 export interface OrchApprovals {
-  runs: OrchRunDetail[]; paused: OrchRunBrief[]; reviews: OrchReviewItem[];
-  runbook_reviews: OrchReviewItem[]; nodes: OrchNode[];
+  runs: OrchRunDetail[]; paused: Array<OrchRunBrief & { actions?: OrchAction[] }>; reviews: OrchReviewItem[];
+  runbook_reviews: Array<OrchReviewItem & { actions?: OrchAction[]; problems?: string[]; steps?: unknown[] }>; nodes: OrchNode[];
 }
+
+/* ------------------------------------------------------------ catalog */
+
+export interface OrchNote { text: string; at: number; actor?: string; action?: string; tone?: string }
+export interface OrchLint { ok: boolean; current: boolean; stale: boolean; counts: Record<string, number> }
+export interface OrchLintFinding { severity: 'error' | 'warning' | 'info' | string; rule: string; message: string; file?: string; line?: number }
+export interface OrchTests { count: number; passed: number; last: { passed: boolean; run_id?: string; at?: number } | null }
+export interface OrchVersionRef { version: number; ref: string; status: string; style: OrchStyle }
+
+/** A tool version as the catalog lists it (vm.tool_brief). */
+export interface OrchToolBrief {
+  tool_id: string; version: number; ref: string; title: string; summary: string; category: string; status: string;
+  style: OrchStyle; effect: OrchEffect; effect_style: OrchEffectStyle; stage: string; intent: string;
+  lint: OrchLint; tests: OrchTests; created_by: string; updated_at: number; session_name?: string; actions: OrchAction[];
+}
+/** GET /tools/{id}/{v} (vm.tool_detail). */
+export interface OrchToolDetail extends OrchToolBrief {
+  manifest: Record<string, any>; manifest_yaml: string; files: Record<string, string>; blobs: Record<string, string>;
+  lint_result: { findings: OrchLintFinding[]; at?: number; stale?: boolean } | null; review: { headline?: string; risks?: string[]; notes?: string; submitted_by?: string; submitted_at?: number } | null;
+  previous: string; diff: string; versions: OrchVersionRef[]; notes: OrchNote[]; usage: OrchRunBrief[];
+  run_as: string; check_mode: boolean; idempotent: boolean; rollback: string; secrets: unknown[]; origin: string; created_at: number; published_at: number | null;
+}
+
+export interface OrchProblem { path: string; message: string; severity?: 'error' | 'warning' | string; line?: number; column?: number }
+
+export interface OrchRunbookBrief {
+  runbook_id: string; version: number; ref: string; title: string; summary: string; status: string; style: OrchStyle;
+  effect: OrchEffect; effect_style: OrchEffectStyle; steps: Array<Record<string, any>>; problems: string[]; parses?: boolean;
+  created_by?: string; updated_at?: number; actions?: OrchAction[];
+}
+/** GET /runbooks/{id}/{v} (vm.runbook_vm detail). */
+export interface OrchRunbookDetail extends OrchRunbookBrief {
+  spec: Record<string, any>; spec_yaml: string; source: string; digest: string; inputs: Record<string, any>;
+  problem_details: OrchProblem[]; warnings: unknown[]; actions: OrchAction[]; tests: OrchTests & { runs?: OrchRunBrief[] };
+  versions: OrchVersionRef[]; notes: OrchNote[]; usage: OrchRunBrief[]; previous: string; diff: string; parses: boolean;
+}
+
+/** validateRunbook: the editor's live checks (nothing is stored). */
+export interface OrchRunbookValidation {
+  ok: boolean; parses: boolean; yaml_error: { message: string; line?: number; column?: number } | null;
+  spec: Record<string, any> | null; yaml: string; problems: OrchProblem[]; effect: OrchEffect | null;
+  effect_style?: OrchEffectStyle; decision: { level: string; summary?: string } | null; digest?: string;
+  steps_info: Array<{ ok?: boolean; effect?: string; effect_style?: OrchEffectStyle }>;
+}
+
+/* ------------------------------------------------------------ results */
+
+export interface OrchResultColumn { key: string; label: string; kind: string; format: string }
+export interface OrchResultRow {
+  exec_id: string; run_id: string; node: string; node_id: string; state: string;
+  labels: Record<string, string>; values: Record<string, unknown>; finished_at?: number;
+}
+export interface OrchResultTable {
+  key: string; label: string; per: 'node' | 'item' | string; columns: OrchResultColumn[];
+  metric: string | null; order: 'asc' | 'desc' | string; rows: OrchResultRow[];
+}
+/** A run's results ({steps}) or a tool's latest results ({tables}). */
+export interface OrchResults {
+  steps?: Array<{ step: number; step_name: string; tool: string; tables: OrchResultTable[] }>;
+  tables?: OrchResultTable[]; oldest?: number;
+}
+
+/* ------------------------------------------------------------ settings */
+
+export interface OrchAccessRule { name: string; match: Record<string, unknown>; decision: string | Record<string, unknown> }
+export interface OrchSettings {
+  network: { bind: string; port: number; advertise?: string };
+  endpoint: { bind: string; port: number; running: boolean; error: string; url: string; kind: string; fingerprint: string };
+  access_policy: { rules: OrchAccessRule[]; default: boolean; yaml: string; version: number };
+  keys: Record<string, { key_id: string; public_key: string }>;
+  secrets: { locked: boolean; names: string[]; passphrase: boolean };
+  agent_updates: { auto: boolean; current: string };
+  defaults: { strategy: Record<string, unknown> };
+  schedules: Array<Record<string, any>>; groups: Array<Record<string, any>>;
+  trusted_keys: Array<Record<string, any>>; dispatch_paused: boolean;
+}
+export interface OrchAuditEntry { seq: number; at: number; actor: string; action: string; subject: string }
 
 /** Fleet agent summary on GET /api/orchestration/nodes. */
 export interface OrchAgentsSummary { current: string; auto: boolean; outdated: number; updatable: number; open_run: string }
@@ -138,18 +249,25 @@ async function csrfToken(fresh = false): Promise<{ token: string; header: string
   return csrf;
 }
 
-/** POST /api/orchestration/cmd with the CSRF header; one token refetch + retry on 403. */
-async function command(type: OrchCommand | string, args: Record<string, unknown> = {}): Promise<OrchCommandResult> {
-  const body = { type, args };
+/** POST to a CSRF-protected orchestration route; one token refetch + retry on 403. */
+async function securePost<T>(path: string, body: unknown): Promise<T> {
   let token = await csrfToken();
   try {
-    return await api.post<OrchCommandResult>('/api/orchestration/cmd', body, { headers: { [token.header]: token.token } });
+    return await api.post<T>(path, body, { headers: { [token.header]: token.token } });
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 403) throw err;
     token = await csrfToken(true);
-    return api.post<OrchCommandResult>('/api/orchestration/cmd', body, { headers: { [token.header]: token.token } });
+    return api.post<T>(path, body, { headers: { [token.header]: token.token } });
   }
 }
+
+/** POST /api/orchestration/cmd {type, args}. */
+function command(type: OrchCommand | string, args: Record<string, unknown> = {}): Promise<OrchCommandResult> {
+  return securePost<OrchCommandResult>('/api/orchestration/cmd', { type, args });
+}
+
+/** A chat session the orchestration routes open (fleet chat, discovery chat); 400 = choose a model. */
+export interface OrchChatSession { session_name: string; provider?: string; model?: string; busy?: boolean; url?: string }
 
 const enc = encodeURIComponent;
 
@@ -165,7 +283,21 @@ export const orchestrationApi = {
   }),
   run: (id: string) => api.get<OrchRunDetail>(`/api/orchestration/runs/${enc(id)}`),
   execution: (id: string) => api.get<OrchExecution>(`/api/orchestration/executions/${enc(id)}`),
+  maintenance: (nodeId: string) => api.get<OrchMaintenance>(`/api/orchestration/nodes/${enc(nodeId)}/maintenance`),
+  runResults: (runId: string) => api.get<OrchResults>(`/api/orchestration/runs/${enc(runId)}/results`),
+  runResultsCsv: (runId: string, step: number, view: string) => api.get<string>(`/api/orchestration/runs/${enc(runId)}/results.csv`, { query: { step, view } }),
+  tools: () => api.get<{ tools: OrchToolBrief[]; runbooks: OrchRunbookBrief[] }>('/api/orchestration/tools', { query: { all: true } }),
+  tool: (toolId: string, version: number | string) => api.get<OrchToolDetail>(`/api/orchestration/tools/${enc(toolId)}/${enc(String(version))}`),
+  toolResults: (toolId: string) => api.get<OrchResults>(`/api/orchestration/tools/${enc(toolId)}/results`),
+  toolResultsCsv: (toolId: string, view: string) => api.get<string>(`/api/orchestration/tools/${enc(toolId)}/results.csv`, { query: { view } }),
+  runbook: (runbookId: string, version: number | string) => api.get<OrchRunbookDetail>(`/api/orchestration/runbooks/${enc(runbookId)}/${enc(String(version))}`),
+  settings: () => api.get<OrchSettings>('/api/orchestration/settings'),
+  audit: (limit = 10) => api.get<{ entries: OrchAuditEntry[] }>('/api/orchestration/audit', { query: { limit } }),
   command,
+  /** The fleet chat (mu/gui/routers/orchestration.py fleet_chat_session): `fresh` starts over and deletes the old one. */
+  chatSession: (body: { fresh?: boolean; provider?: string; model?: string } = {}) => securePost<OrchChatSession>('/api/orchestration/chat/session', body),
+  /** The Studio discovery chat for a draft ('' = a new tool). */
+  studioSession: (body: { ref: string; provider?: string; model?: string }) => securePost<OrchChatSession>('/api/orchestration/studio/session', body),
   approveRun: (runId: string, typed?: string) => command('approveRun', typed ? { run_id: runId, typed } : { run_id: runId }),
   rejectRun: (runId: string, reason?: string) => command('rejectRun', reason ? { run_id: runId, reason } : { run_id: runId }),
   continueRun: (runId: string) => command('continueRun', { run_id: runId }),
@@ -221,7 +353,7 @@ export function attentionNotification(event: OrchAttentionEvent): { title: strin
     return { title: 'Orchestration: node awaits acceptance', body: `Node ${event.node_id} enrolled and waits for you.`, data: { orchNodeId: event.node_id } };
   }
   if (detail === 'orchestration_review' && event.ref) {
-    return { title: 'Orchestration: tool submitted for review', body: `${event.ref} · review it on the web.`, data: { orchRef: event.ref } };
+    return { title: 'Orchestration: tool submitted for review', body: `${event.ref} waits for your review.`, data: { orchRef: event.ref } };
   }
   if (event.run_id && (event.state === 'paused' || event.state === 'failed')) {
     const what = event.state === 'paused' ? 'Run paused' : 'Run failed';

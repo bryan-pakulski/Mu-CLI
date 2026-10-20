@@ -134,6 +134,9 @@ python3 -m pytest tests/ -q
   capabilities); its result is committed as a job-scoped image. Interactive
   chat keeps its approval gates.
 - Keep tool capability, bounds, secret-path, and result-scrubbing checks intact.
+- Non-loopback GUI clients must be paired devices (`mu/gui/devices.py` `DeviceGate`, bearer
+  token, 401/1008 otherwise; `documentation/security.md` §8). Pairing and device revocation are
+  operator-only: never tools, never reachable by the AI.
 - Orchestration (`documentation/orchestration.md`): every mutation goes through
   `mu/orchestration/commands.dispatch`; the AI (`ai:*` actors) is limited to
   `AI_COMMANDS` and can never publish, approve, dispatch, discard, or touch policy

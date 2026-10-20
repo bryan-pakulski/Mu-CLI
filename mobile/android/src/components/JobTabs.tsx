@@ -9,18 +9,53 @@ import { JobPlanEditor, PlanCriteriaCards } from './JobPlanEditor';
 import { planProse } from './planMarkdown';
 import { actionLabel } from './JobActions';
 import {
+  JOB_TABS, JOB_TAB_LABELS, NOTE_STAGE, type JobTab,
   FILE_STATUS_LABEL, countOf, isUnrunnable, listOf, parsePatch, runCounts, runOutcome, runVerification, runtimeStatus, sessionItems, suiteCounts, suiteStatus,
   type DiffFile, type SessionItem,
 } from './jobViews';
 import { useTheme } from '../theme/ThemeContext';
-import { fontWeights, fonts, radii, spacing, toneInk, touchTarget } from '../theme/tokens';
+import { fontWeights, fonts, radii, spacing, toneInk, toSemantic, touchTarget } from '../theme/tokens';
 import {
-  COVERAGE, SEVERITY, SEVERITY_ORDER, STATUS, duration, money, repairOutcome, stateStatus, stripAnsi, verdictStyle, when,
+  COVERAGE, SEVERITY, SEVERITY_ORDER, STATUS, duration, money, repairOutcome, stateLabel, stateStatus, stripAnsi, verdictStyle, when,
 } from '../theme/status';
-import { Banner, Button, CheckRow, CountBadge, Empty, Markdown, Meter, Panel, Pill, Pre, Pressable, ResultBar, Segmented, Sparkline, StatusIcon, StatusPill, Text, TextField } from '../ui';
+import { Banner, Button, CheckRow, CountBadge, Empty, Markdown, Meter, Panel, Pill, Pre, Pressable, ResultBar, Row, Rows, Segmented, Sparkline, StatusIcon, StatusPill, Text, TextField } from '../ui';
+import { ArtifactBrowser, EvidenceList } from '../ui/ArtifactViewer';
 import { useGlass } from '../ui/Glass';
 
 type Invoke = (idOrAction: string | JobAction, extra?: Record<string, unknown>) => void;
+
+/* ================================================================ Notes */
+
+/** What happened, in plain English (mu/jobs/core/notes.py), oldest first; a note links to its tab. */
+export function NotesTab({ job, onTab }: { job: JobVM; onTab: (tab: JobTab) => void }) {
+  const notes = job.notes || [];
+  const live = stateStatus(job.state) === 'active';
+  return (
+    <View style={styles.col} testID="job-notes">
+      <Text variant="caption" tone="ink3">What happened, in plain English. The Session tab has the full agent transcript.</Text>
+      <Rows label="Job notes" empty="No notes yet.">
+        {notes.map(n => (
+          <Row key={n.id} testID={`note-${n.id}`}
+            status={n.tone === 'danger' ? 'failed' : n.tone === 'attention' ? 'waiting' : n.tone === 'ok' ? 'done' : 'pending'}
+            title={<Text variant="body"><Text variant="label" tone="ink3">{`${NOTE_STAGE[n.stage] || n.stage}  `}</Text>{n.title}{n.count > 1 ? <Text variant="caption" tone="ink3">{`  ×${n.count}`}</Text> : null}</Text>}
+            when={when(n.at).slice(5, 16)}
+            sub={(
+              <View style={styles.noteBody}>
+                {n.meta ? <Text variant="caption" tone="ink3">{n.meta}</Text> : null}
+                {n.headline ? <Text variant="body" tone="ink2">{n.headline}</Text> : null}
+                {(n.bullets || []).map((b, i) => <Text key={i} variant={/^\$ /.test(b) ? 'monoSm' : 'caption'} tone="ink2">{/^\$ /.test(b) ? b : `• ${b}`}</Text>)}
+              </View>
+            )}
+            actions={n.tab && (JOB_TABS as readonly string[]).includes(n.tab)
+              ? <Button small variant="ghost" navigates label={JOB_TAB_LABELS[n.tab as JobTab]} onPress={() => onTab(n.tab as JobTab)} testID={`note-${n.id}-tab`} />
+              : undefined}
+          />
+        ))}
+        {live ? <Row key="live" status="active" title={`${stateLabel(job.state)}…`} /> : null}
+      </Rows>
+    </View>
+  );
+}
 
 /* ================================================================ Session */
 
@@ -37,11 +72,11 @@ export function SessionTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; 
     <View style={styles.col}>
       <View style={styles.wrap}>
         {job.state === 'needs_input'
-          ? <Text variant="xs" style={{ color: colors.attention.ink }}>◆ waiting for you</Text>
-          : live ? <Text variant="xs" style={{ color: colors.running.ink }}>● live session · the agent is working</Text>
-            : <Text variant="xs" style={{ color: colors.ink3 }}>{stage ? `transcript of the ${stage} stage` : 'recent stage activity'}</Text>}
-        <View style={{ flex: 1 }} />
-        <Text variant="xs" style={{ color: colors.ink3 }}>{items.length} items</Text>
+          ? <Text variant="xs" tone="attention">◆ waiting for you</Text>
+          : live ? <Text variant="xs" tone="running">● live session · the agent is working</Text>
+            : <Text variant="xs" tone="ink3">{stage ? `transcript of the ${stage} stage` : 'recent stage activity'}</Text>}
+        <View style={styles.flex} />
+        <Text variant="xs" tone="ink3">{items.length} items</Text>
       </View>
       <Segmented
         accessibilityLabel="Session source"
@@ -49,18 +84,18 @@ export function SessionTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; 
         onChange={setStage}
         options={[{ value: '', label: 'Live' }, { value: 'plan', label: 'Plan' }, { value: 'implement', label: 'Implement' }, { value: 'review', label: 'Review' }]}
       />
-      {status ? <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]} numberOfLines={2}>› {status}</Text> : null}
+      {status ? <Text variant="xs" tone="ink3" style={styles.mono} numberOfLines={2}>› {status}</Text> : null}
       <View accessibilityRole="list" accessibilityLabel="Agent session" style={styles.transcript} testID="job-transcript">
         {items.length ? items.map((it, i) => <TranscriptItem key={i} item={it} />) : <Empty>No session output yet.</Empty>}
       </View>
       {msg?.enabled ? (
         <View style={styles.composer}>
-          <View style={{ flex: 1 }}>
-            <TextField accessibilityLabel="Message the agent" placeholder="Message the agent…" value={text} onChangeText={setText} multiline style={{ minHeight: 44 }} />
+          <View style={styles.flex}>
+            <TextField accessibilityLabel="Message the agent" placeholder="Message the agent…" value={text} onChangeText={setText} multiline style={styles.composerField} />
           </View>
           <Button primary label="Send" disabled={busy || !text.trim()} onPress={() => { invoke('message', { text: text.trim() }); setText(''); }} testID="job-send-message" />
         </View>
-      ) : <Text variant="xs" style={{ color: colors.ink3 }}>Messaging unavailable{msg?.reason ? `: ${msg.reason}` : ''}.</Text>}
+      ) : <Text variant="xs" tone="ink3">Messaging unavailable{msg?.reason ? `: ${msg.reason}` : ''}.</Text>}
     </View>
   );
 }
@@ -96,8 +131,8 @@ export function TranscriptItem({ item }: { item: SessionItem }) {
             onPress={() => setOpen(v => !v)}
             style={({ pressed }) => [styles.fold, { backgroundColor: pressed ? colors.sunken : 'transparent' }]}
           >
-            <Text variant="xs" style={{ color: colors.ink3, width: 12 }}>{multi ? (open ? '▾' : '▸') : ''}</Text>
-            <Text variant="xs" style={[styles.mono, { color: item.kind === 'tool' ? colors.ink : colors.ink3, flex: 1 }]} numberOfLines={1}>
+            <Text variant="xs" tone="ink3" style={styles.glyph}>{multi ? (open ? '▾' : '▸') : ''}</Text>
+            <Text variant="xs" tone={item.kind === 'tool' ? 'ink' : 'ink3'} style={styles.monoFlex} numberOfLines={1}>
               {item.kind === 'tool' ? '› ' : '↳ '}{item.summary}
             </Text>
           </Pressable>
@@ -118,17 +153,17 @@ export function TranscriptItem({ item }: { item: SessionItem }) {
             onPress={() => setOpen(v => !v)}
             style={({ pressed }) => [styles.fold, { backgroundColor: pressed ? colors.sunken : 'transparent' }]}
           >
-            <Text variant="xs" importantForAccessibility="no" style={{ color: toneInk(colors, st.tone), width: 12 }}>{st.icon}</Text>
-            <Text variant="xs" style={[styles.mono, { color: colors.ink, flex: 1 }]} numberOfLines={1}>{item.summary}</Text>
-            <Text variant="xs" style={{ color: toneInk(colors, st.tone) }}>{item.label}</Text>
+            <Text variant="xs" importantForAccessibility="no" tone={toSemantic(st.tone)} style={styles.glyph}>{st.icon}</Text>
+            <Text variant="xs" style={styles.monoFlex} numberOfLines={1}>{item.summary}</Text>
+            <Text variant="xs" tone={toSemantic(st.tone)}>{item.label}</Text>
           </Pressable>
           {open && multi ? <Pre>{item.text}</Pre> : null}
         </View>
       );
     }
     case 'workbench': return <Pill tone="accent" glyph="⬢">{item.text}</Pill>;
-    case 'error': return <Text variant="xs" style={{ color: colors.danger.ink }}>✗ {item.text}</Text>;
-    default: return <Text variant="xs" style={{ color: colors.ink3 }}>{item.text}</Text>;
+    case 'error': return <Text variant="xs" tone="danger">✗ {item.text}</Text>;
+    default: return <Text variant="xs" tone="ink3">{item.text}</Text>;
   }
 }
 
@@ -157,7 +192,7 @@ export function PlanTab({ job, editing, draft, dirty, historyVersion, busy, onEd
   const markdown = historyVersion === undefined ? (plan?.markdown || '') : (plan?.markdown || '');
   return (
     <View style={styles.col}>
-      <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>
+      <Text variant="xs" tone="ink3" style={styles.num}>
         Version {plan?.version || 0} · approved v{plan?.approved_version || 0}{dirty ? ' · Unsaved edits' : ''}
       </Text>
       {(plan?.versions || []).length > 1 ? (
@@ -169,8 +204,8 @@ export function PlanTab({ job, editing, draft, dirty, historyVersion, busy, onEd
           ))}
         </View>
       ) : null}
-      {plan?.draft ? <Text variant="xs" style={{ color: colors.attention.ink }}>◆ unsaved draft — edit the plan to continue or save it</Text>
-        : job.state === 'plan_review' ? <Text variant="xs" style={{ color: colors.attention.ink }}>◆ waiting for your approval</Text> : null}
+      {plan?.draft ? <Text variant="xs" tone="attention">◆ unsaved draft — edit the plan to continue or save it</Text>
+        : job.state === 'plan_review' ? <Text variant="xs" tone="attention">◆ waiting for your approval</Text> : null}
       {editing ? (
         <>
           <JobPlanEditor value={draft} onChange={onChangeDraft} />
@@ -202,7 +237,7 @@ function Collapsible({ title, children, initiallyOpen = false }: { title: string
   return (
     <View>
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(v => !v)} style={styles.disclosure}>
-        <Text variant="xs" style={{ color: colors.ink3 }}>{open ? '▾' : '▸'} {title}</Text>
+        <Text variant="xs" tone="ink3">{open ? '▾' : '▸'} {title}</Text>
       </Pressable>
       {open ? children : null}
     </View>
@@ -219,11 +254,15 @@ export type DiffTabProps = {
   /** File to reveal (Jump to diff). */
   focus?: { file: string; line: number | null; seq: number } | null;
   onFileLayout?: (path: string, y: number) => void;
+  /** Open the full-screen review mode (absent inside it). */
+  onReview?: () => void;
+  /** Lines shown per file (more in review mode). */
+  maxLines?: number;
 };
 
 const MAX_LINES = 400;
 
-export function DiffTab({ job, viewed, onViewed, onFix, focus, onFileLayout }: DiffTabProps) {
+export function DiffTab({ job, viewed, onViewed, onFix, focus, onFileLayout, onReview, maxLines = MAX_LINES }: DiffTabProps) {
   const { colors } = useTheme();
   // While a job is active the server sends the current worktree diff (diff.live);
   // finished jobs show the checkpointed diff.patch.
@@ -237,9 +276,9 @@ export function DiffTab({ job, viewed, onViewed, onFix, focus, onFileLayout }: D
   const liveHead = live ? (
     <View style={styles.wrap} testID="diff-live">
       <Pill tone="running" glyph="●" accessibilityLabel="live worktree diff">Live</Pill>
-      <Text variant="xs" style={{ color: colors.ink3 }}>worktree vs base {live.base_sha.slice(0, 10)} · updated {when(live.generated_at)}</Text>
-      {live.untracked_total || live.untracked.length ? <Text variant="xs" style={{ color: colors.ink3 }} testID="diff-live-untracked">{live.untracked_total ?? live.untracked.length} new file{(live.untracked_total ?? live.untracked.length) === 1 ? '' : 's'}</Text> : null}
-      {live.truncated ? <Text variant="xs" style={{ color: colors.attention.ink }} testID="diff-live-truncated">truncated · showing the first {Math.round(live.patch.length / 1000)} KB</Text> : null}
+      <Text variant="xs" tone="ink3">worktree vs base {live.base_sha.slice(0, 10)} · updated {when(live.generated_at)}</Text>
+      {live.untracked_total || live.untracked.length ? <Text variant="xs" tone="ink3" testID="diff-live-untracked">{live.untracked_total ?? live.untracked.length} new file{(live.untracked_total ?? live.untracked.length) === 1 ? '' : 's'}</Text> : null}
+      {live.truncated ? <Text variant="xs" tone="attention" testID="diff-live-truncated">truncated · showing the first {Math.round(live.patch.length / 1000)} KB</Text> : null}
     </View>
   ) : null;
   if (!files.length) return <View style={styles.col}>{liveHead}<Empty>{live ? 'No changes in the worktree yet.' : 'No diff yet. The implementer’s changes appear here.'}</Empty></View>;
@@ -250,17 +289,18 @@ export function DiffTab({ job, viewed, onViewed, onFix, focus, onFileLayout }: D
     <View style={styles.col}>
       {liveHead}
       <View style={styles.wrap}>
-        <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{files.length} file{files.length === 1 ? '' : 's'}</Text>
-        <Text variant="xs" style={{ color: colors.ok.ink }}>+{totalA}</Text>
-        <Text variant="xs" style={{ color: colors.danger.ink }}>−{totalR}</Text>
-        <View style={{ flex: 1 }} />
-        {live ? null : <Text variant="xs" style={{ color: colors.ink3 }} testID="diff-viewed-count">{files.filter(f => viewed.has(f.path)).length}/{files.length} viewed</Text>}
+        <Text variant="sm" style={styles.strong}>{files.length} file{files.length === 1 ? '' : 's'}</Text>
+        <Text variant="xs" tone="ok">+{totalA}</Text>
+        <Text variant="xs" tone="danger">−{totalR}</Text>
+        <View style={styles.flex} />
+        {live ? null : <Text variant="xs" tone="ink3" testID="diff-viewed-count">{files.filter(f => viewed.has(f.path)).length}/{files.length} viewed</Text>}
+        {onReview ? <Button small variant="ghost" icon="maximize-2" label="Review" accessibilityLabel="Review mode: the diff full screen" onPress={onReview} testID="diff-review" /> : null}
       </View>
       <Panel flush accessibilityLabel="Changed files">
         {files.map(f => (
           <View key={f.path} style={[styles.treeRow, { borderBottomColor: colors.hairline }]}>
             <FileStatus status={f.status} />
-            <Text variant="xs" style={[styles.mono, { flex: 1, color: viewed.has(f.path) ? colors.ink3 : colors.ink }]} numberOfLines={1}>{f.path}</Text>
+            <Text variant="xs" tone={viewed.has(f.path) ? 'ink3' : 'ink'} style={styles.monoFlex} numberOfLines={1}>{f.path}</Text>
             <ChangeBar added={f.added} removed={f.removed} />
           </View>
         ))}
@@ -270,20 +310,20 @@ export function DiffTab({ job, viewed, onViewed, onFix, focus, onFileLayout }: D
         const at = new Map<number, Finding[]>();
         findings.filter(x => x.file === f.path).forEach(x => { const k = Number(x.line_start || 0); at.set(k, [...(at.get(k) || []), x]); });
         const fileFindings = findings.filter(x => x.file === f.path);
-        const shown = f.lines.slice(0, MAX_LINES);
+        const shown = f.lines.slice(0, maxLines);
         return (
           <View key={f.path} testID={`diff-file-${f.path}`} onLayout={e => onFileLayout?.(f.path, e.nativeEvent.layout.y)}
             style={[styles.diffFile, { borderColor: focus?.file === f.path ? colors.accent.ink : colors.hairline, backgroundColor: colors.surface }]}>
             <View style={[styles.diffHead, { borderBottomColor: closed ? 'transparent' : colors.hairline }]}>
               <Pressable accessibilityRole="button" accessibilityState={{ expanded: !closed }} accessibilityLabel={`${f.path}, ${FILE_STATUS_LABEL[f.status]}`}
-                onPress={() => setCollapsed(c => ({ ...c, [f.path]: !closed }))} style={[styles.row, { flex: 1, minHeight: touchTarget }]}>
-                <Text variant="xs" style={{ color: colors.ink3 }}>{closed ? '▸' : '▾'}</Text>
+                onPress={() => setCollapsed(c => ({ ...c, [f.path]: !closed }))} style={[styles.rowTouch, styles.flex]}>
+                <Text variant="xs" tone="ink3">{closed ? '▸' : '▾'}</Text>
                 <FileStatus status={f.status} />
-                <Text variant="xs" style={[styles.mono, { flex: 1 }]} numberOfLines={2}>{f.path}</Text>
+                <Text variant="xs" style={styles.monoFlex} numberOfLines={2}>{f.path}</Text>
               </Pressable>
-              <Text variant="xs" style={{ color: colors.ok.ink }}>+{f.added}</Text>
-              <Text variant="xs" style={{ color: colors.danger.ink }}>−{f.removed}</Text>
-              {fileFindings.length ? <Text variant="xs" style={{ color: colors.attention.ink }} accessibilityLabel={`${fileFindings.length} review findings`}>⚑ {fileFindings.length}</Text> : null}
+              <Text variant="xs" tone="ok">+{f.added}</Text>
+              <Text variant="xs" tone="danger">−{f.removed}</Text>
+              {fileFindings.length ? <Text variant="xs" tone="attention" accessibilityLabel={`${fileFindings.length} review findings`}>⚑ {fileFindings.length}</Text> : null}
               {live ? null : <CheckRow label="Viewed" accessibilityLabel={`Viewed ${f.path}`} checked={viewed.has(f.path)} disabled={markViewed ? !markViewed.enabled : false}
                 onChange={v => { setCollapsed(c => { const n = { ...c }; delete n[f.path]; return n; }); onViewed(f.path, v); }} testID={`viewed-${f.path}`} />}
             </View>
@@ -291,21 +331,21 @@ export function DiffTab({ job, viewed, onViewed, onFix, focus, onFileLayout }: D
               <View>
                 {shown.map((l, i) => {
                   if (l.kind === 'hunk') return <Text key={i} variant="xs" style={[styles.mono, styles.hunk, { color: colors.running.ink, backgroundColor: colors.running.wash }]}>{l.text}</Text>;
-                  if (l.kind === 'note') return <Text key={i} variant="xs" style={[styles.mono, styles.codeLine, { color: colors.ink3 }]}>{l.text}</Text>;
+                  if (l.kind === 'note') return <Text key={i} variant="xs" tone="ink3" style={[styles.mono, styles.codeLine]}>{l.text}</Text>;
                   const c = l.kind === 'add' ? colors.ok.ink : l.kind === 'del' ? colors.danger.ink : null;
                   const here = l.kind !== 'del' && l.newNo != null ? at.get(l.newNo) : undefined;
                   return (
                     <React.Fragment key={i}>
                       <View style={[styles.codeRow, c ? { backgroundColor: l.kind === 'add' ? colors.ok.wash : colors.danger.wash } : null]}>
-                        <Text variant="xs" style={[styles.mono, styles.lineNo, { color: colors.ink3 }]}>{l.kind === 'del' ? l.oldNo : l.newNo}</Text>
+                        <Text variant="xs" tone="ink3" style={[styles.mono, styles.lineNo]}>{l.kind === 'del' ? l.oldNo : l.newNo}</Text>
                         <Text variant="xs" accessibilityLabel={l.kind === 'add' ? 'added' : l.kind === 'del' ? 'removed' : undefined} style={[styles.mono, styles.sign, { color: c || colors.ink3 }]}>{l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</Text>
-                        <Text variant="xs" selectable style={[styles.mono, styles.code, { color: colors.ink }]}>{l.text}</Text>
+                        <Text variant="xs" selectable style={[styles.mono, styles.code]}>{l.text}</Text>
                       </View>
                       {here?.map(x => <InlineFinding key={x.id} finding={x} fixEnabled={!!fix?.enabled} fixReason={fix?.reason} onFix={() => onFix(x.id)} />)}
                     </React.Fragment>
                   );
                 })}
-                {f.lines.length > MAX_LINES ? <Text variant="xs" style={{ color: colors.ink3, padding: spacing.sm }}>{f.lines.length - MAX_LINES} more lines not shown on mobile.</Text> : null}
+                {f.lines.length > maxLines ? <Text variant="xs" tone="ink3" style={styles.padSm}>{f.lines.length - maxLines} more lines not shown{onReview ? '; open Review for more' : ''}.</Text> : null}
                 {(at.get(0) || []).map(x => <InlineFinding key={x.id} finding={x} fixEnabled={!!fix?.enabled} fixReason={fix?.reason} onFix={() => onFix(x.id)} />)}
               </View>
             )}
@@ -349,12 +389,12 @@ function InlineFinding({ finding, fixEnabled, fixReason, onFix }: { finding: Fin
     <View accessibilityRole="summary" accessibilityLabel={`Review finding: ${finding.severity}: ${finding.title}`}
       style={[styles.inlineFinding, glass.style(2)]}>
       <View style={[styles.wrap, styles.inlineFindingHead, { backgroundColor: glass.tint(tone) }]}>
-        <Text variant="xs" style={{ color: toneInk(colors, tone) }}>⚑</Text>
+        <Text variant="xs" tone={toSemantic(tone)}>⚑</Text>
         <Pill tone={tone}>{finding.severity}</Pill>
-        <Text variant="xs" style={{ flex: 1, fontWeight: fontWeights.semibold }}>{finding.title}</Text>
+        <Text variant="xs" style={styles.flexStrong}>{finding.title}</Text>
       </View>
       {finding.detail ? <Text variant="xs">{finding.detail}</Text> : null}
-      {finding.suggestion ? <Text variant="xs" style={{ color: colors.ink3 }}>Suggestion: {finding.suggestion}</Text> : null}
+      {finding.suggestion ? <Text variant="xs" tone="ink3">Suggestion: {finding.suggestion}</Text> : null}
       <View style={styles.row}>
         <Button small label="Fix this" disabled={!fixEnabled} accessibilityHint={fixEnabled ? 'Run a targeted implement pass that fixes only this finding' : fixReason} onPress={onFix} testID={`fix-this-${finding.id}`} />
       </View>
@@ -390,14 +430,14 @@ export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, on
     <View style={styles.col}>
       <View style={styles.wrap}>
         <Pill tone={vTone} testID="review-verdict">{vLabel}</Pill>
-        <Text variant="xs" style={{ color: colors.ink3 }}>merge readiness</Text>
-        <View style={{ flex: 1, minWidth: 80 }}><Meter value={readiness} max={100} tone={readiness >= 80 ? 'ok' : readiness >= 50 ? 'warn' : 'danger'} accessibilityLabel={`Merge readiness ${readiness} of 100`} /></View>
-        <Text variant="sm" style={[styles.num, { fontWeight: fontWeights.bold }]}>{readiness}/100</Text>
+        <Text variant="xs" tone="ink3">merge readiness</Text>
+        <View style={styles.meterCell}><Meter value={readiness} max={100} tone={readiness >= 80 ? 'ok' : readiness >= 50 ? 'warn' : 'danger'} accessibilityLabel={`Merge readiness ${readiness} of 100`} /></View>
+        <Text variant="sm" style={styles.numBold}>{readiness}/100</Text>
       </View>
-      {Object.keys(report.counts || {}).length ? <Text variant="xs" style={{ color: colors.ink3 }}>{Object.entries(report.counts).map(([s, c]) => `${c} ${s}`).join(' · ')}</Text> : null}
+      {Object.keys(report.counts || {}).length ? <Text variant="xs" tone="ink3">{Object.entries(report.counts).map(([s, c]) => `${c} ${s}`).join(' · ')}</Text> : null}
       {findings.length ? (
         <View style={styles.col}>
-          <Text variant="xs" style={{ color: colors.ink3 }}>Pick findings to fix in one targeted implement run (checks and review follow); the plan stays as it is.</Text>
+          <Text variant="xs" tone="ink3">Pick findings to fix in one targeted implement run (checks and review follow); the plan stays as it is.</Text>
           <View style={styles.row}>
             <Button primary label={`Fix ${selected.length || ''} selected`} disabled={busy || !fix?.enabled || !selected.length}
               accessibilityHint={fix?.enabled ? 'Fix the selected findings' : fix?.reason || 'not available'} onPress={onFixSelected} testID="review-fix-selected" />
@@ -411,8 +451,8 @@ export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, on
         {(report.plan_coverage || []).length ? report.plan_coverage.map(c => (
           <View key={c.criterion_id} style={styles.coverage}>
             <StatusIcon status={COVERAGE[c.status] || 'pending'} label={c.status} />
-            <Text variant="xs" style={[styles.mono, { fontWeight: fontWeights.semibold }]}>{c.criterion_id}</Text>
-            <Text variant="xs" style={{ flex: 1 }}>{c.evidence || c.status}</Text>
+            <Text variant="xs" style={styles.monoStrong}>{c.criterion_id}</Text>
+            <Text variant="xs" style={styles.flex}>{c.evidence || c.status}</Text>
           </View>
         )) : <Empty>No acceptance criteria were assessed.</Empty>}
       </Panel>
@@ -429,7 +469,7 @@ export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, on
         return (
           <View key={sev} style={styles.col} testID={`review-severity-${sev}`}>
             <View style={styles.row}>
-              <Text variant="sm" accessibilityRole="header" style={{ color: toneInk(colors, tone), fontWeight: fontWeights.semibold, textTransform: 'capitalize' }}>{sev}</Text>
+              <Text variant="sm" accessibilityRole="header" tone={toSemantic(tone)} style={styles.sevHead}>{sev}</Text>
               <CountBadge tone={tone}>{list.length}</CountBadge>
             </View>
             {list.map(f => {
@@ -440,15 +480,15 @@ export function ReviewTab({ job, selected, onToggle, onFixSelected, onFixOne, on
                   <View style={[styles.wrap, styles.findingHead, { backgroundColor: glass.tint(tone) }]}>
                     <CheckRow label="" accessibilityLabel={`select “${f.title}” for fixing`} checked={picked} disabled={closed} onChange={() => onToggle(f.id)} />
                     <Pill tone={tone}>{f.severity}</Pill>
-                    <Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.semibold }}>{f.title}</Text>
+                    <Text variant="sm" style={styles.flexStrong}>{f.title}</Text>
                   </View>
-                  <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]}>{f.file || 'no file'}{f.line_start ? `:${f.line_start}` : ''}{f.category ? ` · ${f.category}` : ''}{f.confidence != null ? ` · confidence ${f.confidence}` : ''}</Text>
+                  <Text variant="xs" tone="ink3" style={styles.mono}>{f.file || 'no file'}{f.line_start ? `:${f.line_start}` : ''}{f.category ? ` · ${f.category}` : ''}{f.confidence != null ? ` · confidence ${f.confidence}` : ''}</Text>
                   {f.detail ? <Markdown variant="document">{f.detail}</Markdown> : null}
-                  {f.suggestion ? <View><Text variant="xs" style={{ color: colors.ink3 }}>Suggestion</Text><Markdown variant="document">{f.suggestion}</Markdown></View> : null}
+                  {f.suggestion ? <View><Text variant="xs" tone="ink3">Suggestion</Text><Markdown variant="document">{f.suggestion}</Markdown></View> : null}
                   <View style={styles.wrap}>
                     {f.file && files.has(f.file)
                       ? <Button small label="◎ Jump to diff" onPress={() => onJump(f)} testID={`jump-${f.id}`} />
-                      : <Text variant="xs" style={{ color: colors.ink3 }}>not in diff</Text>}
+                      : <Text variant="xs" tone="ink3">not in diff</Text>}
                     <Button small label="Fix" disabled={busy || !fix?.enabled || closed} accessibilityHint={fix?.enabled ? 'Fix only this finding' : fix?.reason} onPress={() => onFixOne(f.id)} testID={`fix-${f.id}`} />
                   </View>
                   <Segmented
@@ -474,9 +514,17 @@ const REPAIR_TITLE: Record<string, string> = {
   unresolved: 'Environment repaired · checks still can’t run',
 };
 
-/** Environment repair (job_templates.md §7), read-only: outcome, commands and error of the latest attempt.
- * The template actions are offered on the web job page. */
-function RepairSummary({ repairs }: { repairs: EnvironmentRepair[] }) {
+/** The repair card's actions (web view.js repairButtons): non-blocking, never required, kept out of
+ * the action bar; shown once there is a committed repair (or with the server's other reason). */
+const REPAIR_ACTIONS = ['addRepairToTemplate', 'saveRepairedTemplate'];
+export function repairActions(actions: JobAction[]): JobAction[] {
+  return REPAIR_ACTIONS.map(id => actions.find(a => a.id === id))
+    .filter((a): a is JobAction => !!a && (a.enabled || a.reason !== 'no committed environment repair'));
+}
+
+/** Environment repair (job_templates.md §7): outcome, commands and error of the latest attempt, and
+ * the template actions the server offers for it. */
+function RepairSummary({ repairs, actions, invoke, busy }: { repairs: EnvironmentRepair[]; actions: JobAction[]; invoke: Invoke; busy: boolean }) {
   const { colors } = useTheme();
   const last = repairs[repairs.length - 1];
   const outcome = repairOutcome(last.outcome);
@@ -484,12 +532,20 @@ function RepairSummary({ repairs }: { repairs: EnvironmentRepair[] }) {
   const meta = [`attempt ${last.attempt || repairs.length}`, where, last.cost_usd ? money(last.cost_usd) : ''].filter(Boolean).join(' · ');
   return (
     <Panel title={REPAIR_TITLE[last.outcome] || 'Repair failed'} right={<StatusPill status={outcome.status} label={outcome.label} testID="checks-repair-status" />} testID="checks-repair">
-      <Text variant="xs" style={{ color: colors.ink3 }}>{meta}</Text>
+      <Text variant="xs" tone="ink3">{meta}</Text>
       {(last.commands || []).map((c, i) => (
         <Text key={`${i}-${c}`} variant="xs" style={styles.mono} testID={`checks-repair-command-${i}`}>$ {c}</Text>
       ))}
-      {last.error ? <Text variant="xs" style={{ color: toneInk(colors, STATUS[outcome.status].tone) }}>{last.error}{outcome.status === 'failed' ? ' The job continued unverified.' : ''}</Text> : null}
-      {(last.reverted_files || []).length ? <Text variant="xs" style={{ color: colors.ink3 }}>Reverted tracked files: {(last.reverted_files || []).slice(0, 6).join(', ')}</Text> : null}
+      {last.error ? <Text variant="xs" tone={toSemantic(STATUS[outcome.status].tone)}>{last.error}{outcome.status === 'failed' ? ' The job continued unverified.' : ''}</Text> : null}
+      {(last.reverted_files || []).length ? <Text variant="xs" tone="ink3">Reverted tracked files: {(last.reverted_files || []).slice(0, 6).join(', ')}</Text> : null}
+      {actions.length ? (
+        <View style={styles.wrap} testID="checks-repair-actions">
+          {actions.map(a => (
+            <Button key={a.id} small variant="secondary" label={actionLabel(a)} disabled={busy} ariaDisabled={!a.enabled} accessibilityHint={a.reason}
+              onPress={() => invoke(a)} testID={`checks-repair-${a.id}`} />
+          ))}
+        </View>
+      ) : null}
     </Panel>
   );
 }
@@ -512,26 +568,26 @@ export function ChecksTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; b
   const repairs = job.checks?.repairs || [];
   return (
     <View style={styles.col}>
-      {repairs.length ? <RepairSummary repairs={repairs} /> : null}
+      {repairs.length ? <RepairSummary repairs={repairs} actions={repairActions(job.actions)} invoke={invoke} busy={busy} /> : null}
       {runs[0] && !verification.verified ? (
         <Banner tone={unverified.tone} glyph={unverified.icon} role="alert" testID="checks-unverified-banner"
           title={`Unverified: ${verification.unrunnable} check${verification.unrunnable === 1 ? '' : 's'} couldn't run`}>
-          <Text variant="xs" style={{ color: colors.ink2 }}>These results are not failures and were not triaged as pre-existing. Fix the environment, then re-run the checks.</Text>
+          <Text variant="xs" tone="ink2">These results are not failures and were not triaged as pre-existing. Fix the environment, then re-run the checks.</Text>
           {verification.suites.map(s => (
-            <View key={s.suite} style={{ gap: 2 }} testID={`checks-unverified-${s.suite}`}>
-              <Text variant="xs"><Text variant="xs" style={[styles.mono, { fontWeight: fontWeights.semibold }]}>{s.unrunnable?.tool || s.suite}</Text>{s.unrunnable?.cause ? `: ${s.unrunnable.cause}` : ''}</Text>
-              {s.unrunnable?.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>Fix: {s.unrunnable.hint}</Text> : null}
+            <View key={s.suite} style={styles.tight} testID={`checks-unverified-${s.suite}`}>
+              <Text variant="xs"><Text variant="xs" style={styles.monoStrong}>{s.unrunnable?.tool || s.suite}</Text>{s.unrunnable?.cause ? `: ${s.unrunnable.cause}` : ''}</Text>
+              {s.unrunnable?.hint ? <Text variant="xs" tone="ink3">Fix: {s.unrunnable.hint}</Text> : null}
             </View>
           ))}
         </Banner>
       ) : null}
       <View style={styles.wrap}>
-        <View style={{ flex: 1, minWidth: 160 }}>
+        <View style={styles.wideCell}>
           <Text variant="sm">
-            {running ? <Text variant="sm" style={{ color: colors.running.ink }}>● running · </Text> : null}
+            {running ? <Text variant="sm" tone="running">● running · </Text> : null}
             {runs[0] ? `last: run ${runs[0].run} ${runOutcome(runs[0]).label}` : 'No checks have run yet.'}
           </Text>
-          <Text variant="xs" style={{ color: colors.ink3 }}>fix attempts {job.fix_attempts || 0} · checks come from the approved plan</Text>
+          <Text variant="xs" tone="ink3">fix attempts {job.fix_attempts || 0} · checks come from the approved plan</Text>
         </View>
         {recheck ? <Button label={actionLabel(recheck)} disabled={busy} ariaDisabled={!recheck.enabled} accessibilityHint={recheck.reason} onPress={() => invoke(recheck)} testID="checks-recheck" /> : null}
       </View>
@@ -552,18 +608,18 @@ export function ChecksTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; b
                 onPress={() => setSelectedRun(r.run)} testID={`checks-run-${r.run}`}
                 style={({ pressed }) => [styles.runRow, { borderBottomColor: colors.hairline, backgroundColor: on ? colors.accent.wash : pressed ? colors.sunken : 'transparent' }]}>
                 <View style={styles.row}>
-                  <Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>Run {r.run}</Text>
+                  <Text variant="sm" style={styles.strong}>Run {r.run}</Text>
                   <StatusPill status={outcome.status} label={outcome.label} />
                   {r.trigger ? <Pill tone="muted">{r.trigger}</Pill> : null}
-                  <View style={{ flex: 1 }} />
-                  <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{r.duration_ms != null ? duration(r.duration_ms) : ''}</Text>
+                  <View style={styles.flex} />
+                  <Text variant="xs" tone="ink3" style={styles.num}>{r.duration_ms != null ? duration(r.duration_ms) : ''}</Text>
                 </View>
                 <View style={styles.row}>
-                  <View style={{ flex: 1 }}><ResultBar passed={k.passed} failed={k.failed} skipped={k.skipped} /></View>
-                  <Text variant="xs" style={styles.num}>{k.passed}✓ {k.failed ? <Text variant="xs" style={{ color: colors.danger.ink }}>{k.failed}✗</Text> : null}</Text>
+                  <View style={styles.flex}><ResultBar passed={k.passed} failed={k.failed} skipped={k.skipped} /></View>
+                  <Text variant="xs" style={styles.num}>{k.passed}✓ {k.failed ? <Text variant="xs" tone="danger">{k.failed}✗</Text> : null}</Text>
                 </View>
-                <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>
-                  <Text variant="xs" style={{ color: nf ? colors.danger.ink : colors.ink3 }}>{nf} new</Text> · {countOf(r.preexisting_failures)} pre-existing{r.head_sha ? ` · ${r.head_sha.slice(0, 12)}` : ''}{r.started_at ? ` · ${when(r.started_at)}` : ''}
+                <Text variant="xs" tone="ink3" style={styles.num}>
+                  <Text variant="xs" tone={nf ? 'danger' : 'ink3'}>{nf} new</Text> · {countOf(r.preexisting_failures)} pre-existing{r.head_sha ? ` · ${r.head_sha.slice(0, 12)}` : ''}{r.started_at ? ` · ${when(r.started_at)}` : ''}
                 </Text>
               </Pressable>
             );
@@ -578,17 +634,25 @@ export function ChecksTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; b
           <Panel title={`Run ${selected.run}`} right={<StatusPill status={runOutcome(selected).status} label={runOutcome(selected).label} />} testID="checks-selected-run">
             <ResultBar large passed={k.passed} failed={k.failed} skipped={k.skipped} />
             <View style={styles.wrap}>
-              <Text variant="xs" style={{ color: colors.ok.ink }}>✓ {k.passed} passed</Text>
-              <Text variant="xs" style={{ color: k.failed ? colors.danger.ink : colors.ink3 }}>✗ {k.failed} failed</Text>
-              {k.skipped ? <Text variant="xs" style={{ color: colors.ink3 }}>– {k.skipped} skipped</Text> : null}
-              <Text variant="xs" style={{ color: colors.ink3 }}>of {k.total}</Text>
+              <Text variant="xs" tone="ok">✓ {k.passed} passed</Text>
+              <Text variant="xs" tone={k.failed ? 'danger' : 'ink3'}>✗ {k.failed} failed</Text>
+              {k.skipped ? <Text variant="xs" tone="ink3">– {k.skipped} skipped</Text> : null}
+              <Text variant="xs" tone="ink3">of {k.total}</Text>
             </View>
-            {newList.length ? <View><Text variant="xs" style={{ color: colors.danger.ink, fontWeight: fontWeights.semibold }}>New failures ({newList.length})</Text>{newList.map((f, i) => <Text key={i} variant="xs" style={[styles.mono, { color: colors.danger.ink }]}>✗ {f}</Text>)}</View> : null}
-            {pre.length ? <View><Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>Pre-existing on the base commit ({pre.length})</Text><Text variant="xs" style={{ color: colors.ink3 }}>These also fail before the change, so they are reported to the reviewer and not sent back to the implementer.</Text>{pre.map((f, i) => <Text key={i} variant="xs" style={[styles.mono, { color: colors.ink3 }]}>{f}</Text>)}</View> : null}
+            {newList.length ? <View><Text variant="xs" tone="danger" style={styles.strong}>New failures ({newList.length})</Text>{newList.map((f, i) => <Text key={i} variant="xs" tone="danger" style={styles.mono}>✗ {f}</Text>)}</View> : null}
+            {pre.length ? <View><Text variant="xs" style={styles.strong}>Pre-existing on the base commit ({pre.length})</Text><Text variant="xs" tone="ink3">These also fail before the change, so they are reported to the reviewer and not sent back to the implementer.</Text>{pre.map((f, i) => <Text key={i} variant="xs" tone="ink3" style={styles.mono}>{f}</Text>)}</View> : null}
             {(selected.suites || []).map(s => <SuiteRow key={s.suite} suite={s} />)}
+            <Text variant="label" accessibilityRole="header">Artifacts</Text>
+            <ArtifactBrowser jobId={job.id} run={selected.run} testID={`artifacts-run-${selected.run}`} />
           </Panel>
         );
       })() : null}
+      {(job.checks?.evidence || []).length ? (
+        <Panel title="Evidence" badge={(job.checks?.evidence || []).length} testID="checks-evidence">
+          <Text variant="caption" tone="ink3">What the agents captured while testing, newest first.</Text>
+          <EvidenceList jobId={job.id} items={job.checks?.evidence || []} />
+        </Panel>
+      ) : null}
       {job.checks?.failed_cases ? (
         <Panel title="Failed test cases" badge={(job.checks.failed_cases || []).length} badgeTone={(job.checks.failed_cases || []).length ? 'danger' : ''} testID="checks-failed-cases">
           <TextField accessibilityLabel="Filter failed test cases" placeholder="Filter cases…" value={caseFilter} onChangeText={setCaseFilter} autoCapitalize="none" autoCorrect={false} />
@@ -599,14 +663,14 @@ export function ChecksTab({ job, invoke, busy }: { job: JobVM; invoke: Invoke; b
       ) : null}
       {Object.keys(history).length ? (
         <Panel title="Duration history" testID="checks-history">
-          <Text variant="xs" style={{ color: colors.ink3 }}>Last {Math.max(...Object.values(history).map(h => h.length))} runs per suite, oldest → newest. Green passed, red failed.</Text>
+          <Text variant="xs" tone="ink3">Last {Math.max(...Object.values(history).map(h => h.length))} runs per suite, oldest → newest. Green passed, red failed.</Text>
           {Object.entries(history).map(([suite, points]) => {
             const last = points[points.length - 1];
             return (
               <View key={suite} style={styles.historyRow}>
                 <View style={styles.row}>
-                  <Text variant="xs" style={[styles.mono, { flex: 1 }]} numberOfLines={1}>{suite}</Text>
-                  <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{last?.duration_ms != null ? duration(last.duration_ms) : '—'}</Text>
+                  <Text variant="xs" style={styles.monoFlex} numberOfLines={1}>{suite}</Text>
+                  <Text variant="xs" tone="ink3" style={styles.num}>{last?.duration_ms != null ? duration(last.duration_ms) : '—'}</Text>
                 </View>
                 <Sparkline
                   height={28}
@@ -630,11 +694,11 @@ function FailedCaseRow({ c }: { c: { suite: string; name: string; id: string; me
   return (
     <View style={[styles.caseRow, { borderColor: colors.hairline }]}>
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${c.name || c.id} in ${c.suite}${c.new ? ', new failure' : ''}`}
-        onPress={() => setOpen(v => !v)} style={[styles.row, { minHeight: touchTarget }]}>
-        <Text variant="xs" style={{ color: colors.danger.ink }}>✗</Text>
-        <View style={{ flex: 1 }}>
+        onPress={() => setOpen(v => !v)} style={styles.rowTouch}>
+        <Text variant="xs" tone="danger">✗</Text>
+        <View style={styles.flex}>
           <Text variant="xs" style={styles.mono} numberOfLines={open ? undefined : 1}>{c.name || c.id}</Text>
-          <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={1}>{c.suite}{c.classname ? ` · ${c.classname}` : ''}</Text>
+          <Text variant="xs" tone="ink3" numberOfLines={1}>{c.suite}{c.classname ? ` · ${c.classname}` : ''}</Text>
         </View>
         {c.new ? <Pill tone="danger">new</Pill> : <Pill tone="muted">pre-existing</Pill>}
       </Pressable>
@@ -653,24 +717,24 @@ function SuiteRow({ suite }: { suite: CheckSuite }) {
   return (
     <View style={[styles.suite, { borderTopColor: colors.hairline }]}>
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${suite.suite}, ${st.label}`} testID={`suite-${suite.suite}`}
-        onPress={() => setOpen(v => !v)} style={[styles.row, { minHeight: touchTarget }]}>
+        onPress={() => setOpen(v => !v)} style={styles.rowTouch}>
         <StatusIcon status={st.status} label={st.label} />
-        <Text variant="sm" style={{ fontWeight: fontWeights.semibold, flex: 1 }} numberOfLines={1}>{suite.suite}</Text>
+        <Text variant="sm" style={styles.flexStrong} numberOfLines={1}>{suite.suite}</Text>
         {suite.environment ? <Pill tone="accent" glyph="⬢" accessibilityLabel={`build environment ${suite.environment}`} testID={`suite-env-${suite.suite}`}>{suite.environment}</Pill> : null}
         {unrunnable ? <StatusPill status="unverified" testID={`suite-unverified-${suite.suite}`} /> : null}
         {!unrunnable && (suite.preexisting_failures || []).length ? <Pill tone="muted">pre-existing failures</Pill> : null}
-        <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{c.passed}/{c.total}{suite.duration_ms != null ? ` · ${duration(suite.duration_ms)}` : ''}</Text>
+        <Text variant="xs" tone="ink3" style={styles.num}>{c.passed}/{c.total}{suite.duration_ms != null ? ` · ${duration(suite.duration_ms)}` : ''}</Text>
       </Pressable>
       <ResultBar passed={c.passed} failed={c.failed} skipped={c.skipped} />
       {open ? (
-        <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
+        <View style={styles.subList}>
           {suite.command ? <Text variant="xs" style={styles.mono} selectable>{suite.command}</Text> : null}
           {unrunnable ? (
-            <View style={{ gap: 2 }} testID={`suite-unrunnable-${suite.suite}`}>
-              <Text variant="xs" style={{ color: toneInk(colors, STATUS.unverified.tone) }}>
+            <View style={styles.tight} testID={`suite-unrunnable-${suite.suite}`}>
+              <Text variant="xs" tone={toSemantic(STATUS.unverified.tone)}>
                 {STATUS.unverified.icon} Couldn't run{suite.unrunnable?.tool ? <Text variant="xs" style={styles.mono}> {suite.unrunnable.tool}</Text> : null}{suite.unrunnable?.cause ? `: ${suite.unrunnable.cause}` : ''}
               </Text>
-              {suite.unrunnable?.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>Fix: {suite.unrunnable.hint}</Text> : null}
+              {suite.unrunnable?.hint ? <Text variant="xs" tone="ink3">Fix: {suite.unrunnable.hint}</Text> : null}
             </View>
           ) : null}
           <Pre>{out.trim() ? out.slice(-12000) : 'No output.'}</Pre>
@@ -681,6 +745,21 @@ function SuiteRow({ suite }: { suite: CheckSuite }) {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  monoFlex: { fontFamily: fonts.mono, flex: 1 },
+  monoStrong: { fontFamily: fonts.mono, fontWeight: fontWeights.semibold },
+  numBold: { fontVariant: ['tabular-nums'], fontWeight: fontWeights.bold },
+  rowTouch: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: touchTarget },
+  strong: { fontWeight: fontWeights.semibold },
+  flexStrong: { flex: 1, fontWeight: fontWeights.semibold },
+  sevHead: { fontWeight: fontWeights.semibold, textTransform: 'capitalize' },
+  glyph: { width: 12 },
+  padSm: { padding: spacing.sm },
+  tight: { gap: 2 },
+  subList: { gap: spacing.xs, marginTop: spacing.xs },
+  meterCell: { flex: 1, minWidth: 80 },
+  wideCell: { flex: 1, minWidth: 160 },
+  composerField: { minHeight: touchTarget },
   col: { gap: spacing.md },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
@@ -714,4 +793,5 @@ const styles = StyleSheet.create({
   caseRow: { borderTopWidth: 1, paddingTop: spacing.xs },
   historyRow: { gap: 2 },
   suite: { borderTopWidth: 1, paddingTop: spacing.xs, gap: spacing.xs },
+  noteBody: { gap: 2 },
 });

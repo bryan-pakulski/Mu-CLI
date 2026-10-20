@@ -19,23 +19,6 @@ export interface InspectorBrowseResponse {
   entries: InspectorBrowseEntry[];
 }
 
-export interface InspectorMemoryEntry {
-  id: number;
-  content: string;
-  tags: string[];
-  source: string;
-  kind: string;
-  created_at: number;
-  updated_at: number;
-  hits: number;
-  status: string;
-}
-
-export interface InspectorMemoryResponse {
-  task_memory: InspectorMemoryEntry[];
-  scratchpad: InspectorMemoryEntry[];
-}
-
 export interface InspectorStats {
   active: boolean;
   name?: string;
@@ -76,11 +59,6 @@ export const inspectorApi = {
   removeWorkspace: (path: string) => api.delete<{ ok: boolean; removed: string; folders: string[] }>('/api/workspace', { query: { path } }),
   browse: (path?: string) => api.get<InspectorBrowseResponse>('/api/browse', { query: { path } }),
   mkdir: (path: string, name: string) => api.post<{ ok: boolean; path: string }>('/api/browse/mkdir', { path, name }),
-  getMemory: () => api.get<InspectorMemoryResponse>('/api/memory'),
-  searchMemory: (q: string, limit?: number) =>
-    api.get<{ results: InspectorMemoryEntry[] }>('/api/memory/search', { query: { q, limit } }),
-  deleteMemory: (entryId: number) => api.delete<{ ok: boolean; removed: number }>(`/api/memory/${entryId}`),
-  clearMemory: () => api.post<{ ok: boolean }>('/api/memory/clear'),
   getStats: () => api.get<InspectorStats>('/api/stats'),
   // MUCLI_MOBILE_RECONNECT_YOLO_V1: session-scoped variables. POST
   // requests previously mutated whichever session the web daemon had focused.

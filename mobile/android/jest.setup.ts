@@ -38,3 +38,45 @@ jest.mock('react-native-safe-area-context', () => {
     withSafeAreaInsets: (C: unknown) => C,
   };
 });
+
+// expo-secure-store: an in-memory keychain (device tokens, api/auth.ts).
+jest.mock('expo-secure-store', () => {
+  const store = new Map<string, string>();
+  return {
+    __store: store,
+    getItemAsync: jest.fn(async (key: string) => (store.has(key) ? store.get(key)! : null)),
+    setItemAsync: jest.fn(async (key: string, value: string) => { store.set(key, value); }),
+    deleteItemAsync: jest.fn(async (key: string) => { store.delete(key); }),
+  };
+});
+
+// expo-camera: the QR scanner renders a plain view; tests fire onBarcodeScanned themselves.
+jest.mock('expo-camera', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return {
+    CameraView: (props: Record<string, unknown>) => React.createElement(View, { testID: 'camera-view', ...props }),
+    useCameraPermissions: () => [{ granted: true, canAskAgain: true }, jest.fn(async () => ({ granted: true }))],
+  };
+});
+
+// expo-av: recording is stubbed (the mic records nothing under jest).
+jest.mock('expo-av', () => {
+  class Recording {
+    prepareToRecordAsync = jest.fn(async () => undefined);
+    startAsync = jest.fn(async () => undefined);
+    stopAndUnloadAsync = jest.fn(async () => undefined);
+    getURI = jest.fn(() => 'file:///tmp/recording.m4a');
+    getStatusAsync = jest.fn(async () => ({ isRecording: false, durationMillis: 0 }));
+    setOnRecordingStatusUpdate = jest.fn();
+  }
+  return {
+    Audio: {
+      Recording,
+      requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
+      getPermissionsAsync: jest.fn(async () => ({ granted: true })),
+      setAudioModeAsync: jest.fn(async () => undefined),
+      RecordingOptionsPresets: { HIGH_QUALITY: {} },
+    },
+  };
+});

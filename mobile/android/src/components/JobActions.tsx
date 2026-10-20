@@ -1,9 +1,8 @@
-// Job actions — the Wash ActionVM flow shared by the dashboard, the jobs
-// list and the job page. Every button comes from `job.actions` (availability
-// is decided once, on the server; disabled commands are re-checked there and
-// answer 409). Tone, confirm text, input prompts, the push dialog and hidden
-// actions follow CONTRACT §7, with the Wash defaults when an older server
-// omits them.
+// Job actions, shared by the Now board, the jobs list and the job page. Every button comes from
+// `job.actions` (availability is decided once, on the server; disabled commands are re-checked
+// there and answer 409). Confirm text and input prompts go through the kit's server-action dialog
+// (src/ui/Mu.tsx useServerActions), the push dialog is its own sheet; tone and hidden actions
+// follow CONTRACT §7, with defaults when an older server omits them.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -13,7 +12,7 @@ import { JobPushDialog } from './JobPushDialog';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, spacing } from '../theme/tokens';
 import { ACTION_LABEL, ACTION_TONE } from '../theme/status';
-import { Banner, Button, Field, Pre, Sheet, Text, TextField, type Tone, useToast } from '../ui';
+import { ActionBar, Banner, Button, Field, Pre, Text, TextField, type ServerAction, type Tone, useServerActions, useToast } from '../ui';
 
 /** Actions kept out of action bars (CONTRACT §4/§7) and the ones the approval banner owns. */
 export const BAR_HIDDEN = new Set(['markFindings', 'markViewed', 'approveTool', 'denyTool',
@@ -79,10 +78,19 @@ export function inputArgs(id: string, value: string, spec?: InputSpec | null): R
   }
 }
 
-type Pending =
-  | { kind: 'confirm'; action: JobAction; text: string; args: Record<string, unknown> }
-  | { kind: 'input'; action: JobAction; spec: InputSpec; args: Record<string, unknown> }
-  | { kind: 'push'; action: JobAction };
+/** A job action in the kit's server-action shape (confirm / input / danger / reason). */
+export function toServerAction(a: JobAction, overrides: Partial<ServerAction> = {}): ServerAction {
+  const spec = inputSpec(a);
+  return {
+    id: a.id, label: actionLabel(a), enabled: a.enabled, primary: a.primary, hidden: a.hidden, reason: a.reason,
+    danger: actionTone(a) === 'danger', confirm: confirmText(a) || undefined, args: a.args,
+    input: spec ? {
+      arg: spec.arg || Object.keys(inputArgs(a.id, 'x', spec))[0] || 'guidance',
+      label: spec.label, optional: spec.optional, multiline: spec.multiline, value: spec.value, hint: spec.hint,
+    } : undefined,
+    ...overrides,
+  };
+}
 
 export type JobCommandOptions = {
   jobId: string;
@@ -104,13 +112,14 @@ export type JobCommandOptions = {
 };
 
 /**
- * Runs job commands with the Wash flow: disabled → toast with the reason;
- * confirm → confirm sheet; input → prompt sheet; push → push dialog; then
- * POST /api/jobs/cmd. Returns `invoke` plus the sheets to render.
+ * Runs job commands: disabled → toast with the reason; confirm / input → the kit's server-action
+ * dialog (one dialog for both); push → the push dialog; then POST /api/jobs/cmd. Returns `invoke`
+ * plus the dialogs to render.
  */
 export function useJobCommands(opts: JobCommandOptions) {
   const toast = useToast();
-  const [pending, setPending] = useState<Pending | null>(null);
+  const dialog = useServerActions();
+  const [pushing, setPushing] = useState<JobAction | null>(null);
   const [busy, setBusy] = useState(false);
   /** Last failed command (e.g. a 400 for an unparseable limit amount) so banners can show it inline. */
   const [lastError, setLastError] = useState<{ actionId: string; message: string } | null>(null);
@@ -124,7 +133,7 @@ export function useJobCommands(opts: JobCommandOptions) {
     busyRef.current = true; setBusy(true); setLastError(null);
     try {
       const result = await jobCoreApi.command(o.jobId, action.id, { ...(action.args || {}), ...args });
-      setPending(null);
+      setPushing(null);
       toast(`${actionLabel(action)}: done`, 'ok');
       await o.onDone?.(result, action.id);
     } catch (err) {
@@ -155,141 +164,51 @@ export function useJobCommands(opts: JobCommandOptions) {
       if (!o.selectedFindings?.length) { const msg = 'Select findings for the implementer.'; toast(msg, 'warn'); o.onError?.(msg); o.onNeedFindings?.(); return; }
       args = { ...args, finding_ids: o.selectedFindings };
     }
-    if (action.dialog === 'push' || action.id === 'push') { setPending({ kind: 'push', action }); return; }
+    if (action.dialog === 'push' || action.id === 'push') { setPushing(action); return; }
     // Never send setEnvironments without bindings: an empty list would clear the job's override.
     if ((action.dialog === 'environments' || action.id === 'setEnvironments') && !('environments' in extra)) { o.onEditEnvironments?.(); return; }
-    const spec = inputSpec(action);
-    if (spec && !Object.keys(inputArgs(action.id, 'x', spec)).some(k => k in extra)) { setPending({ kind: 'input', action, spec, args }); return; }
-    const text = confirmText(action);
-    if (text) { setPending({ kind: 'confirm', action, text, args }); return; }
-    void send(action, args);
-  }, [send, toast]);
+    const server = toServerAction(action);
+    // Args the caller already supplied (e.g. the limit banner's amount) skip the prompt.
+    const prefilled = server.input && server.input.arg in extra;
+    const ask = prefilled ? { ...server, input: undefined } : server;
+    if (!ask.confirm && !ask.input) { void send(action, args); return; }
+    void dialog.ask(ask).then(result => {
+      if (!result) return;
+      // The dialog echoes the action's args; keep only what was typed (which may override one).
+      const typed: Record<string, unknown> = { ...result };
+      for (const key of Object.keys(action.args || {})) if (key !== ask.input?.arg) delete typed[key];
+      void send(action, { ...args, ...typed });
+    });
+  }, [send, toast, dialog]);
 
-  const close = useCallback(() => { if (!busyRef.current) setPending(null); }, []);
   const jobId = opts.jobId;
-
   const sheets = (
     <>
-      <PromptSheet
-        pending={pending?.kind === 'input' ? pending : null}
-        busy={busy}
-        onClose={close}
-        onSubmit={value => {
-          if (pending?.kind !== 'input') return;
-          const next = { ...pending.args, ...inputArgs(pending.action.id, value, pending.spec) };
-          const text = confirmText(pending.action);
-          if (text) setPending({ kind: 'confirm', action: pending.action, text, args: next });
-          else void send(pending.action, next);
-        }}
-      />
-      <ConfirmSheet pending={pending?.kind === 'confirm' ? pending : null} busy={busy} onClose={close} onConfirm={() => { if (pending?.kind === 'confirm') void send(pending.action, pending.args); }} />
+      {dialog.element}
       <JobPushDialog
-        visible={pending?.kind === 'push'}
+        visible={!!pushing}
         jobId={jobId}
-        action={pending?.kind === 'push' ? pending.action : null}
+        action={pushing}
         busy={busy}
-        onClose={close}
-        onSubmit={(args: PushArgs) => { if (pending?.kind === 'push') void send(pending.action, args as Record<string, unknown>); }}
+        onClose={() => { if (!busyRef.current) setPushing(null); }}
+        onSubmit={(args: PushArgs) => { if (pushing) void send(pushing, args as Record<string, unknown>); }}
       />
     </>
   );
-  return { invoke, busy, sheets, pending, lastError };
+  return { invoke, busy, sheets, pushing, lastError };
 }
 
-function PromptSheet({ pending, busy, onClose, onSubmit }: { pending: Extract<Pending, { kind: 'input' }> | null; busy: boolean; onClose: () => void; onSubmit: (value: string) => void }) {
-  const [value, setValue] = useState('');
-  const [error, setError] = useState('');
-  useEffect(() => { setValue(pending?.spec.value ?? ''); setError(''); }, [pending]);
-  const spec = pending?.spec;
-  const action = pending?.action;
-  return (
-    <Sheet visible={!!pending} onClose={onClose} title={action ? actionLabel(action) : ''}>
-      {spec && action ? (
-        <View style={styles.sheet} testID="job-action-prompt">
-          <Field label={spec.label} hint={spec.hint} optional={spec.optional && !/optional/i.test(spec.label)} error={error}>
-            <TextField accessibilityLabel={spec.label} value={value} onChangeText={t => { setValue(t); setError(''); }} multiline={spec.multiline} autoFocus invalid={!!error}
-              {...(spec.type === 'amount' ? { autoCapitalize: 'none' as const, autoCorrect: false, keyboardType: 'default' as const } : {})} testID="job-action-prompt-input" />
-          </Field>
-          <View style={styles.actions}>
-            <Button label="Cancel" onPress={onClose} />
-            <Button
-              primary
-              tone={actionTone(action)}
-              loading={busy}
-              label={actionLabel(action)}
-              testID="job-action-prompt-submit"
-              onPress={() => {
-                if (!spec.optional && !value.trim()) { setError('Required.'); return; }
-                onSubmit(value);
-              }}
-            />
-          </View>
-        </View>
-      ) : null}
-    </Sheet>
-  );
-}
-
-function ConfirmSheet({ pending, busy, onClose, onConfirm }: { pending: Extract<Pending, { kind: 'confirm' }> | null; busy: boolean; onClose: () => void; onConfirm: () => void }) {
-  const action = pending?.action;
-  return (
-    <Sheet visible={!!pending} onClose={onClose} title={action ? actionLabel(action) : 'Confirm'}>
-      {pending && action ? (
-        <View style={styles.sheet} testID="job-action-confirm">
-          <Text variant="sm">{pending.text}</Text>
-          <View style={styles.actions}>
-            <Button label="Cancel" onPress={onClose} />
-            <Button primary tone={actionTone(action) || 'danger'} loading={busy} label={actionLabel(action)} onPress={onConfirm} testID="job-action-confirm-submit" />
-          </View>
-        </View>
-      ) : null}
-    </Sheet>
-  );
-}
-
-/** Wash action bar: enabled primary first, then the rest, plus an "N unavailable" expander with reasons. */
-export function JobActionBar({ actions, onInvoke, busy, exclude = [], planDirty }: { actions: JobAction[]; onInvoke: (a: JobAction) => void; busy?: boolean; exclude?: string[]; planDirty?: boolean }) {
-  const { colors } = useTheme();
-  const [showUnavailable, setShowUnavailable] = useState(false);
+/**
+ * The job's action bar (kit ActionBar): enabled primary actions as buttons, everything else under
+ * More, disabled ones with their reason. Banner-owned and hidden actions stay out.
+ */
+export function JobActionBar({ actions, onInvoke, exclude = [], planDirty, testID = 'job-action' }: { actions: JobAction[]; onInvoke: (a: JobAction) => void; busy?: boolean; exclude?: string[]; planDirty?: boolean; testID?: string }) {
   const list = actions.filter(a => !a.hidden && !BAR_HIDDEN.has(a.id) && !exclude.includes(a.id));
-  const enabled = [...list.filter(a => a.enabled && a.primary), ...list.filter(a => a.enabled && !a.primary)];
-  const disabled = list.filter(a => !a.enabled);
+  const server = list.map(a => toServerAction(a, a.id === 'approvePlan' && planDirty ? { enabled: false, reason: 'Save or cancel your plan edits first' } : {}));
+  if (!list.length) return null;
   return (
-    <View accessibilityRole="toolbar" accessibilityLabel="Job actions" style={styles.bar} testID="job-action-bar">
-      <View style={styles.wrap}>
-        {enabled.length ? enabled.map(a => (
-          <Button
-            key={a.id}
-            testID={`job-action-${a.id}`}
-            label={actionLabel(a)}
-            tone={actionTone(a)}
-            primary={a.primary}
-            disabled={busy || (a.id === 'approvePlan' && planDirty)}
-            accessibilityHint={a.id === 'approvePlan' && planDirty ? 'Save or cancel your plan edits first' : a.reason || undefined}
-            onPress={() => onInvoke(a)}
-          />
-        )) : <Text variant="xs" style={{ color: colors.ink3 }}>Nothing to do right now.</Text>}
-        {disabled.length ? (
-          <Button
-            ghost
-            small
-            testID="job-actions-unavailable-toggle"
-            label={showUnavailable ? '▴ fewer' : `▾ ${disabled.length} unavailable`}
-            accessibilityLabel={showUnavailable ? 'Hide unavailable actions' : `${disabled.length} unavailable actions`}
-            onPress={() => setShowUnavailable(v => !v)}
-          />
-        ) : null}
-      </View>
-      {showUnavailable && disabled.length ? (
-        <View accessibilityLabel="Unavailable actions" style={styles.unavailable}>
-          {disabled.map(a => (
-            <View key={a.id} style={styles.unavailableRow}>
-              <Button small ariaDisabled label={actionLabel(a)} tone={actionTone(a)} onPress={() => onInvoke(a)} accessibilityHint={a.reason} />
-              <Text variant="xs" style={{ color: colors.ink3, flex: 1 }}>{a.reason || 'not available now'}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
+    <View accessibilityLabel="Job actions" testID="job-action-bar">
+      <ActionBar testID={testID} actions={server} onAction={s => { const a = list.find(x => x.id === s.id); if (a) onInvoke(a); }} />
     </View>
   );
 }
@@ -304,11 +223,11 @@ export function ApprovalBanner({ approval, actions, onInvoke, busy }: { approval
   return (
     <Banner tone="warn" glyph="◆" role="alert" testID="job-approval-banner" title={<Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.semibold }}>The agent asks to use <Text variant="sm" style={{ fontFamily: fonts.mono, color: colors.ink }}>{approval.tool_name || 'a tool'}</Text></Text>}>
       <Pre numberOfLines={12}>{args}</Pre>
-      {approval.reason || approval.detail ? <Text variant="xs" style={{ color: colors.ink3 }}>{approval.reason || approval.detail}</Text> : null}
+      {approval.reason || approval.detail ? <Text variant="xs" tone="ink3">{approval.reason || approval.detail}</Text> : null}
       <View style={styles.wrap}>
         {approve ? <Button primary={approve.enabled} tone="warn" disabled={busy || !approve.enabled} label={actionLabel(approve)} onPress={() => onInvoke(approve)} testID="job-approve-tool" /> : null}
         {deny ? <Button tone="danger" disabled={busy || !deny.enabled} label={actionLabel(deny)} onPress={() => onInvoke(deny)} testID="job-deny-tool" /> : null}
-        {approve && !approve.enabled && approve.reason ? <Text variant="xs" style={{ color: colors.ink3 }}>{approve.reason}</Text> : null}
+        {approve && !approve.enabled && approve.reason ? <Text variant="xs" tone="ink3">{approve.reason}</Text> : null}
       </View>
     </Banner>
   );
@@ -335,10 +254,10 @@ export function EnvironmentApprovalBanner({ approval, actions, onInvoke, busy }:
   return (
     <Banner tone="warn" glyph="◆" role="alert" testID="job-environment-approval" title={<Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.semibold }}>{approval.kind === 'egress' ? 'The repository asks for network egress (stages run without it until approved)' : `The repository asks to ${approval.kind === 'build' ? 'build and use' : 'use'} its own build environment`}</Text>}>
       {environmentApprovalLines(approval).map(([k, v]) => (
-        <Text key={k} variant="xs"><Text variant="xs" style={{ color: colors.ink3 }}>{k}: </Text><Text variant="xs" style={{ fontFamily: fonts.mono }} selectable>{v}</Text></Text>
+        <Text key={k} variant="xs"><Text variant="xs" tone="ink3">{k}: </Text><Text variant="xs" style={{ fontFamily: fonts.mono }} selectable>{v}</Text></Text>
       ))}
-      {approval.kind === 'build' ? <Text variant="xs" style={{ color: colors.attention.ink }}>Building runs the Dockerfile's RUN steps on your container engine with network access; review it first.</Text> : null}
-      {approval.message ? <Text variant="xs" style={{ color: colors.ink3 }}>{approval.message}</Text> : null}
+      {approval.kind === 'build' ? <Text variant="xs" tone="attention">Building runs the Dockerfile's RUN steps on your container engine with network access; review it first.</Text> : null}
+      {approval.message ? <Text variant="xs" tone="ink3">{approval.message}</Text> : null}
       <View style={styles.wrap}>
         {approve ? <Button primary={approve.enabled} tone="warn" disabled={busy || !approve.enabled} label={actionLabel(approve)} onPress={() => onInvoke(approve)} testID="job-approve-environment" /> : null}
         {reject ? <Button tone="danger" disabled={busy || !reject.enabled} label={actionLabel(reject)} onPress={() => onInvoke(reject)} testID="job-reject-environment" /> : null}
@@ -369,7 +288,7 @@ export function LimitBanner({ limit, actions, onInvoke, busy, error }: { limit: 
   const shown = invalid || error || '';
   return (
     <Banner tone="warn" glyph="◆" role="alert" testID="job-limit-banner" title={<Text variant="sm" style={{ flex: 1, fontWeight: fontWeights.semibold }}>{limit.message || limit.summary}</Text>}>
-      {limit.summary && limit.message ? <Text variant="xs" style={{ color: colors.ink3 }}>{limit.summary}</Text> : null}
+      {limit.summary && limit.message ? <Text variant="xs" tone="ink3">{limit.summary}</Text> : null}
       {raise ? (
         <Field label={label} hint={spec?.hint} error={shown}>
           <TextField accessibilityLabel={label} value={amount} onChangeText={t => { setAmount(t); setInvalid(''); }} autoCapitalize="none" autoCorrect={false}
@@ -385,7 +304,7 @@ export function LimitBanner({ limit, actions, onInvoke, busy, error }: { limit: 
             }} />
         ) : null}
         {cancel ? <Button tone="danger" disabled={busy || !cancel.enabled} label={actionLabel(cancel)} onPress={() => onInvoke(cancel)} testID="job-limit-cancel" /> : null}
-        {raise && !raise.enabled && raise.reason ? <Text variant="xs" style={{ color: colors.ink3 }}>{raise.reason}</Text> : null}
+        {raise && !raise.enabled && raise.reason ? <Text variant="xs" tone="ink3">{raise.reason}</Text> : null}
       </View>
     </Banner>
   );
@@ -396,8 +315,4 @@ export type { JobPart };
 const styles = StyleSheet.create({
   bar: { gap: spacing.sm },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
-  unavailable: { gap: spacing.xs },
-  unavailableRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  sheet: { gap: spacing.sm },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm, marginTop: spacing.sm },
 });

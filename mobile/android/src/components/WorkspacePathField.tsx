@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { fontSizes, radii, spacing, touchTarget, typography } from '../theme/tokens';
-import { Pressable, Text, Icon } from '../ui';
+import { Pressable, Text, Icon, InkDrop, TextField } from '../ui';
 
 export type WorkspacePathFieldProps = {
   value: string;
@@ -60,9 +60,9 @@ export function WorkspacePathField({
 
   return (
     <View>
-      <View style={[styles.inputShell, { backgroundColor: colors.canvas, borderColor: colors.hairline }]}>
+      <View style={styles.inputShell}>
         <Icon name="folder" size="md" color={colors.ink3} />
-        <TextInput
+        <TextField
           value={value}
           onChangeText={onChangeText}
           onFocus={() => setFocused(true)}
@@ -72,11 +72,10 @@ export function WorkspacePathField({
           autoCapitalize="none"
           autoCorrect={false}
           placeholder={placeholder}
-          placeholderTextColor={colors.ink3}
-          style={[styles.input, { color: colors.ink }]}
+          style={styles.input}
         />
         {loading ? (
-          <ActivityIndicator size="small" color={colors.accent.ink} />
+          <InkDrop />
         ) : value.trim() && exists ? (
           <Icon name="circle-check" size="md" color={colors.ok.ink} />
         ) : null}
@@ -115,19 +114,11 @@ export function WorkspacePathField({
 const styles = StyleSheet.create({
   inputShell: {
     minHeight: 48,
-    borderWidth: 1,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
-  input: {
-    flex: 1,
-    minHeight: 48,
-    paddingVertical: spacing.md,
-    fontSize: fontSizes.base,
-  },
+  input: { flex: 1 },
   suggestions: {
     marginTop: spacing.sm,
     borderRadius: radii.sm,

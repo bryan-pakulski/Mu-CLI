@@ -843,6 +843,14 @@ kbd {
  * One card per theme; each shows its light and dark side as a tiny page (canvas,
  * a surface bar, two ink lines and the semantic pigments). Colours come from the
  * tokens through custom properties on the markup (templates/settings.html). */
+/* Settings → Devices: the pairing QR beside its code (settings_devices.js). */
+.mu-pair { display: flex; flex-wrap: wrap; gap: var(--wash-space-5); align-items: flex-start; margin-bottom: var(--wash-space-4); }
+.mu-pair[hidden] { display: none; }
+.mu-pair__qr svg { display: block; width: 180px; height: auto; border-radius: var(--wash-radius-md); }
+.mu-pair__info { display: flex; flex-direction: column; gap: var(--wash-space-2); min-width: 0; flex: 1 1 220px; }
+.mu-pair__info p { margin: 0; }
+.mu-pair__code { font: var(--wash-type-title-2-size) / 1.2 var(--wash-font-mono); letter-spacing: 0.08em; color: var(--wash-ink); }
+
 .w-themes {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));

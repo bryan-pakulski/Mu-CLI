@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 import os
 import tempfile
@@ -25,129 +24,21 @@ router = APIRouter()
 
 
 def _require_local_client(connection, *, allow_private_network: bool = True) -> None:
-    """Restrict host-container controls to loopback or an explicitly exposed LAN.
+    """Host-container controls: this machine (loopback) or a paired device.
 
-    The mobile application reaches the GUI over a private address, so lifecycle
-    APIs may be used from RFC1918/ULA clients when the operator has bound MuCLI
-    to the LAN. Interactive shell access remains loopback-only.
+    Non-loopback clients only get this far with a paired device's token (mu/gui/devices.py
+    ``DeviceGate``); being on the local network is not enough. ``allow_private_network`` is kept for
+    callers' signatures and no longer widens access.
     """
+    from mu.gui.devices import is_loopback, request_device
     client = getattr(connection, "client", None)
     host = str(getattr(client, "host", "") or "")
-    if not host or host in {"127.0.0.1", "::1", "localhost", "testclient"}:
+    if is_loopback(host) or request_device(connection) is not None:
         return
-    if allow_private_network:
-        try:
-            if ipaddress.ip_address(host).is_private:
-                return
-        except ValueError:
-            pass
-    scope = "localhost" if not allow_private_network else "localhost or a private network"
     raise HTTPException(
         status_code=403,
-        detail=f"Container management access is restricted to {scope}.",
+        detail="Container management is restricted to this computer and paired devices.",
     )
-
-
-def _environment_jobs(request: Request) -> dict[str, dict[str, Any]]:
-    jobs = getattr(request.app.state, "container_environment_jobs", None)
-    if jobs is None:
-        jobs = {}
-        request.app.state.container_environment_jobs = jobs
-    return jobs
-
-
-def _set_environment_job(
-    request: Request, job_id: str, *, state: str, stage: str, message: str,
-    detail: str | None = None, container: dict[str, Any] | None = None,
-) -> None:
-    jobs = _environment_jobs(request)
-    current = jobs.setdefault(job_id, {"logs": [], "next_log_seq": 1})
-    current.update({
-        "job_id": job_id, "state": state, "stage": stage,
-        "message": message, "updated_at": time.time(),
-    })
-    if detail is not None:
-        current["detail"] = detail
-    if container is not None:
-        current["container"] = container
-
-
-def _append_environment_log(request: Request, job_id: str, stream: str, text: str) -> None:
-    value = str(text or "").rstrip("\r\n")
-    if not value:
-        return
-    jobs = _environment_jobs(request)
-    current = jobs.setdefault(job_id, {"logs": [], "next_log_seq": 1})
-    seq = int(current.get("next_log_seq") or 1)
-    current.setdefault("logs", []).append({
-        "seq": seq, "stream": stream, "text": value[:12000], "at": time.time(),
-    })
-    if len(current["logs"]) > 1200:
-        del current["logs"][:-1200]
-    current["next_log_seq"] = seq + 1
-    current["updated_at"] = time.time()
-
-
-async def _run_environment_creation(request: Request, job_id: str, payload: dict[str, Any]) -> None:
-    def progress(stage: str, message: str) -> None:
-        _set_environment_job(
-            request, job_id, state="running", stage=stage, message=message
-        )
-
-    def output(stream: str, text: str) -> None:
-        _append_environment_log(request, job_id, stream, text)
-
-    try:
-        operation = str(payload.get("operation") or "create")
-        method = (
-            request.app.state.container_supervisor.reconfigure_environment
-            if operation == "reconfigure"
-            else request.app.state.container_supervisor.create_environment
-        )
-        call_kwargs = {
-            "dockerfile": payload.get("dockerfile"),
-            "template_name": str(payload.get("template_name") or "") or None,
-            "mounts": [item for item in (payload.get("mounts") or []) if isinstance(item, dict)],
-            "gpu_request": payload.get("gpu_request"),  # MUCLI_CONTAINER_HARDWARE_V1
-            "devices": [item for item in (payload.get("devices") or []) if isinstance(item, dict)],
-            "egress_allow": payload.get("egress_allow"),
-            "egress_deny": payload.get("egress_deny"),
-            "supervisor_url": f"http://host.docker.internal:{request.app.state.port}",
-            "start": bool(payload.get("start", True)),
-            "progress": progress,
-            "output": output,
-        }
-        if operation == "reconfigure":
-            ref = await asyncio.to_thread(
-                method,
-                str(payload.get("name") or ""),
-                **call_kwargs,
-            )
-        else:
-            ref = await asyncio.to_thread(
-                method,
-                container_name=str(payload.get("name") or ""),
-                **call_kwargs,
-            )
-        _set_environment_job(
-            request, job_id, state="ready", stage="ready",
-            message=(
-                "Container environment was updated."
-                if str(payload.get("operation") or "create") == "reconfigure"
-                else "Container environment is ready."
-            ),
-            container=ref.to_dict(include_secret=False),
-        )
-    except Exception as exc:
-        detail = str(exc)
-        output("stderr", detail)
-        _set_environment_job(
-            request, job_id, state="error", stage="failed",
-            message="Container environment creation failed.", detail=detail,
-        )
-    finally:
-        tasks = getattr(request.app.state, "container_environment_tasks", {})
-        tasks.pop(job_id, None)
 
 
 @router.get("/containers", response_class=HTMLResponse)
@@ -515,16 +406,14 @@ done < <(compgen -cdfa -- "$prefix" 2>/dev/null | LC_ALL=C sort -u | head -200)
 
 @router.websocket("/api/containers/{name}/shell")
 async def managed_container_shell(websocket: WebSocket, name: str):
-    # MUCLI_SHELL_QOL_V1
-    # Interactive shell is LOOPBACK-ONLY (codex round-6 F6): an
-    # unauthenticated private-network client must not get a bash inside
-    # the container. Empty host = uvicorn without client info (in-process
-    # tests / unix socket) — keep allowed; anything remote is rejected
-    # before accept().
+    # The interactive shell is for this machine (loopback) or a paired device only: an
+    # unauthenticated network client must never get a bash inside the container. Anything else is
+    # rejected before accept().
+    from mu.gui.devices import is_loopback, request_device
     client = getattr(websocket, "client", None)
     host = str(getattr(client, "host", "") or "")
-    if host and host not in {"127.0.0.1", "::1", "localhost", "testclient"}:
-        await websocket.close(code=1008, reason="Container shell is restricted to localhost")
+    if not is_loopback(host) and request_device(websocket) is None:
+        await websocket.close(code=1008, reason="Container shell is restricted to this computer and paired devices")
         return
     await websocket.accept()
     supervisor = websocket.app.state.container_supervisor
@@ -574,6 +463,21 @@ async def managed_container_shell(websocket: WebSocket, name: str):
             await websocket.send_text(tail)
 
     output_task = asyncio.create_task(pump_output())
+
+    async def revoke_watch() -> None:
+        """A revoked device loses its shell at once (mu/gui/devices.py)."""
+        from mu.gui.devices import still_paired
+        while process.returncode is None:
+            await asyncio.sleep(2.0)
+            if not still_paired(websocket):
+                try:
+                    await websocket.close(code=1008, reason="This device was signed out")
+                finally:
+                    if process.returncode is None:
+                        process.kill()
+                return
+
+    watch_task = asyncio.create_task(revoke_watch())
     try:
         while process.returncode is None:
             data = await websocket.receive_text()
@@ -613,7 +517,8 @@ async def managed_container_shell(websocket: WebSocket, name: str):
             process.terminate()
         await process.wait()
         output_task.cancel()
-        await asyncio.gather(output_task, return_exceptions=True)
+        watch_task.cancel()
+        await asyncio.gather(output_task, watch_task, return_exceptions=True)
 
 
 

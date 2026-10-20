@@ -1,4 +1,22 @@
-# Accessibility audit — Android client 0.5.0 (Wash)
+# Accessibility audit — Android client
+
+## 0.6 (Mu parity), 2026-10-20
+
+| Check | Done? |
+|---|---|
+| Contrast for every theme the phone offers (Wash and each palette, light and dark): text on every surface, semantic ink on its wash, on-ink, control borders, focus ring — computed on the colours the app renders (`__tests__/ui/palette-contrast.test.ts`) | Yes, all pass |
+| Glass: every text-bearing level stays at or above the opacity floor at any glass strength (`__tests__/wash-glass.test.tsx`) | Yes |
+| Status is never colour alone: every status sign carries its label (`StatusSign`, kit tests) | Yes |
+| Server actions: disabled actions say why; destructive ones need typed confirmation (`__tests__/ui/mu-kit.test.tsx`) | Yes |
+| TalkBack walkthrough of the six destinations | **No.** No device or emulator (no KVM) was available. |
+| Font scale 200% on a device | **No.** Code path only (`maxFontSizeMultiplier={2}` on `Text`). |
+| Composited contrast over the watercolour at low glass strengths | **No.** Only token contrast plus the opacity floor. |
+
+The "No" rows are open for 0.6: run them with `make install` on a phone before release.
+
+---
+
+## 0.5.0 (Wash)
 
 Date: 2026-10-15. Scope: `mobile/android/src` after the Wash migration
 (spec §5, M1–M3). Checklist: `documentation/design/wash_design_guide.md` §11.

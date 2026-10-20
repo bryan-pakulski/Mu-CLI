@@ -2,7 +2,7 @@
 
 mucli's tests validate the product's core requirements. They are grouped by pillar, one folder each, and every test exercises behaviour. This page lists what each pillar must prove and the files that prove it. AGENTS.md has the rules in short.
 
-**Size:** 1,528 tests in 100 files, plus 8 node tests in `tests/gui/frontend/`. A full run takes about 7 minutes: ~6.1 min is the Docker suites, the rest ~67 s.
+**Size:** 1,535 tests in 101 files, plus 8 node tests in `tests/gui/frontend/`. A full run takes about 7 minutes: ~6.1 min is the Docker suites, the rest ~67 s.
 
 ```bash
 python3 -m pytest tests/ -q                 # everything (Docker required)
@@ -36,7 +36,7 @@ NODE_PATH=mobile/android/node_modules node --test tests/gui/frontend/*.cjs
 | Modes & commands | `tests/modes/` | 9 | 178 | 1 s |
 | Containers | `tests/containers/` | 4 | 31 | 0 s |
 | Engineering jobs | `tests/jobs/` | 20 | 396 | 370 s |
-| Orchestration | `tests/orchestration/` | 11 | 192 | 36 s |
+| Orchestration | `tests/orchestration/` | 12 | 199 | 37 s |
 | Web GUI | `tests/gui/` | 4 | 52 | 3 s |
 | Design system | `tests/design/` | 3 | 13 | 1 s |
 | Terminal UI | `tests/terminal/` | 5 | 79 | 6 s |
@@ -216,6 +216,7 @@ Must prove:
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
+| `test_fleet_chat.py` | 7 | 1.3 s | The fleet chat: never takes the main chat's focus, never listed with sessions, temporary (a new one deletes the old) |
 | `test_fleet_tools.py` | 6 | 0.3 s | Fleet results from every part of μcli: read-only fleet_* tools for any interactive session, |
 | `test_orch_container_nodes.py` | 1 | 7.6 s | Disposable container test nodes (plan §6.8): needs Docker (mandatory) and pulls an image |
 | `test_orch_crypto.py` | 25 | 0.2 s | Vendored Ed25519 verification and signed envelopes (orchestration plan §6.3) |

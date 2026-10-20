@@ -642,8 +642,9 @@ async def stream_events(request: Request, session: str | None = None):
                         }
                     ),
                 }
+            from mu.gui.devices import still_paired
             while True:
-                if await request.is_disconnected():
+                if await request.is_disconnected() or not still_paired(request):
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=15.0)

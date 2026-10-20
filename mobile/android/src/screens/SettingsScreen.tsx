@@ -1,195 +1,152 @@
-// Settings as a real screen under More (G§8.3), replacing the long settings
-// sheet that used to hang off the chat header. Groups are sunken cards
-// (G§9.3); rows are 44dp+ with a Wash icon, label and detail.
-//
-// Behaviour is unchanged from the sheet: auto-approve toggles still queue
-// offline with If-Match and roll back on failure; plan mode uses the same
-// hook; appearance now offers System / Paper / Dusk (persisted) and Reduce
-// decoration.
+// Settings (documentation/plans/mobile_parity.md §6 Settings), the web's settings page on a phone:
+//   Appearance  theme cards (Wash and the palettes, each with a light and a dark side), light or
+//               dark, glass strength (Wash only), Reduce decoration
+//   Devices     this phone's pairing (the computer lists and revokes devices)
+//   Areas       each area keeps its own settings beside its work
+// Session-level settings (mode, model, effort, plan, auto-approve, variables) live with the
+// conversation: the composer foot and the Chat ⋯ menu.
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
-import { useNavigation, useIsFocused } from '@react-navigation/native';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { devicesApi, type PairedDevice } from '../api/devices';
+import { useConnectionStore } from '../store/connection';
 import { useTheme, type ThemePreference } from '../theme/ThemeContext';
-import { queueIfOffline, useConnectionStore } from '../store/connection';
-import { inspectorApi } from '../api/inspector';
-import { AdvancedSettingsSheet } from '../components/AdvancedSettingsSheet';
-import { ContainerManagerSheet } from '../components/ContainerManagerSheet';
-import { EffortControl } from '../components/EffortControl';
-import { usePlanMode } from '../components/PlanModeIndicator';
-import { spacing } from '../theme/tokens';
-import { Banner, Card, Icon, Pressable, Segmented, Switch, Text, type IconName } from '../ui';
+import { PALETTES, paletteLabel, paletteNote, radii, spacing, washColors, type PaletteName } from '../theme/tokens';
+import { PageHeader, Pressable, Row, Rows, Segmented, Slider, SwitchRow, Text } from '../ui';
+
+const GLASS_STOPS = [0, 20, 40, 60, 80, 100].map(v => ({ value: String(v), label: v === 0 ? 'Off' : `${v}%` }));
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
-  const focused = useIsFocused();
-  const { colors, preference, setPreference, reduceDecoration, setReduceDecoration } = useTheme();
-  const activeSessionName = useConnectionStore(s => s.activeSessionName);
-  const activeProvider = useConnectionStore(s => s.activeProvider);
-  const activeModel = useConnectionStore(s => s.activeModel);
-  const isConnected = useConnectionStore(s => s.isConnected);
-  const yolo = useConnectionStore(s => s.yolo);
-  const setYolo = useConnectionStore(s => s.setYolo);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [containersOpen, setContainersOpen] = useState(false);
-  const [yoloSyncing, setYoloSyncing] = useState(false);
-  const plan = usePlanMode();
-
-  const refreshYolo = useCallback(async () => {
-    if (!isConnected || !activeSessionName) return;
-    try {
-      const response = await inspectorApi.getVariables(activeSessionName);
-      for (const group of response.groups || []) {
-        const variable = (group.variables || []).find(item => item.key === 'yolo');
-        if (variable) {
-          setYolo(Boolean(variable.value));
-          return;
-        }
-      }
-    } catch {
-      // Preserve the last known value during a transient disconnect.
-    }
-  }, [activeSessionName, isConnected, setYolo]);
+  const { colors, preference, setPreference, reduceDecoration, setReduceDecoration, palette, setPalette, glass, setGlass } = useTheme();
+  const { baseUrl, isConnected, pairingRequired } = useConnectionStore();
+  const [me, setMe] = useState<PairedDevice | null>(null);
+  const server = baseUrl.replace(/^https?:\/\//, '');
 
   useEffect(() => {
-    if (focused) void refreshYolo();
-  }, [focused, refreshYolo]);
+    let cancelled = false;
+    if (!isConnected || pairingRequired) { setMe(null); return () => { cancelled = true; }; }
+    devicesApi.whoami(baseUrl).then(d => { if (!cancelled) setMe(d); }).catch(() => { if (!cancelled) setMe(null); });
+    return () => { cancelled = true; };
+  }, [baseUrl, isConnected, pairingRequired]);
 
-  const updateYolo = useCallback(async (next: boolean) => {
-    if (!activeSessionName || yoloSyncing) return;
-    // Offline toggles join the outbound queue and replay with If-Match on
-    // reconnect — the optimistic local value stays visible. The last-known
-    // session revision provides CAS protection.
-    if (await queueIfOffline('set_variable', { key: 'yolo', value: next }, {
-      sessionName: activeSessionName,
-      ifMatch: useConnectionStore.getState().sessionRevision ?? undefined,
-    })) {
-      setYolo(next);
-      return;
-    }
-    const previous = yolo;
-    setYolo(next);
-    setYoloSyncing(true);
-    try {
-      const response = await inspectorApi.setVariable('yolo', next, activeSessionName);
-      setYolo(Boolean(response.value));
-    } catch (error) {
-      setYolo(previous);
-      Alert.alert('Could not update auto-approve', String(error));
-    } finally {
-      setYoloSyncing(false);
-    }
-  }, [activeSessionName, setYolo, yolo, yoloSyncing]);
-
-  const go = (name: string) => () => navigation.navigate(name);
-  const needsSession = (name: string) => () => (activeSessionName ? navigation.navigate(name) : navigation.navigate('Tabs', { screen: 'Chat' }));
+  // The nearest stop, so a web-set 65% still shows a selection.
+  const glassStop = String(Math.round(glass / 20) * 20);
+  const go = (name: string, params?: object) => () => navigation.navigate(name, params);
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: 'transparent' }} contentContainerStyle={styles.content} testID="settings-screen">
-      {!isConnected ? (
-        <Banner tone="danger" glyph="✗" title="Not connected to Mucli" action={{ label: 'Connect', onPress: go('Connection') }} />
-      ) : null}
+    <View style={{ flex: 1 }} testID="settings-screen">
+      <PageHeader title="Settings" back={navigation.canGoBack?.() ? { label: 'More', onPress: () => navigation.goBack() } : undefined} state={[{ text: `${paletteLabel(palette)} theme`, tone: '' }, { text: isConnected ? `connected to ${server}` : 'not connected', tone: isConnected ? 'quiet' : 'attention' }]} />
+      <ScrollView contentContainerStyle={styles.content}>
+        <Section title="Appearance" lede="How μcli looks on this phone.">
+          <View style={styles.themes} accessibilityRole="radiogroup" accessibilityLabel="Theme">
+            {([null, ...PALETTES] as Array<PaletteName | null>).map(name => (
+              <ThemeCard key={name ?? 'wash'} name={name} selected={palette === name} onPress={() => setPalette(name)} />
+            ))}
+          </View>
+          <View style={styles.setting}>
+            <Text variant="label">Light or dark</Text>
+            <Text variant="caption" tone="ink3">System follows the phone. Every theme has both.</Text>
+            <Segmented<ThemePreference>
+              accessibilityLabel="Light or dark"
+              testID="theme-preference"
+              value={preference}
+              onChange={setPreference}
+              options={[
+                { value: 'system', label: 'System', testID: 'theme-system' },
+                { value: 'paper', label: 'Light', testID: 'theme-paper' },
+                { value: 'dusk', label: 'Dark', testID: 'theme-dusk' },
+              ]}
+            />
+          </View>
+          {palette == null ? (
+            <View style={styles.setting} testID="glass-setting">
+              <Text variant="label">Glass</Text>
+              <Text variant="caption" tone="ink3">How much of the watercolour shows through the page. Text stays readable at every setting.</Text>
+              <Slider stops={GLASS_STOPS} value={glassStop} onChange={v => setGlass(Number(v))} accessibilityLabel="Glass" disabled={reduceDecoration} />
+            </View>
+          ) : null}
+          <SwitchRow label="Reduce decoration" hint="A flat colour instead of the watercolour around the page."
+            value={reduceDecoration} onValueChange={setReduceDecoration} testID="reduce-decoration" />
+        </Section>
 
-      {yolo ? (
-        <Banner tone="caution" glyph="◆" title="Auto-approve is on — Mucli will run tools without asking"
-          action={{ label: 'Turn off', onPress: () => { void updateYolo(false); } }} />
-      ) : null}
+        <Section title="Devices" lede="Anything not on the computer running μcli signs in by pairing.">
+          <Rows>
+            <Row testID="settings-pair" status={pairingRequired ? 'waiting' : me ? 'done' : undefined}
+              title={me ? `This phone: ${me.name}` : pairingRequired ? 'This phone needs pairing' : 'Pair with mucli'}
+              sub={me ? 'Signed in. Sign out here, or revoke it from Settings → Devices on the computer.' : 'Scan the code from Settings → Devices on the computer.'}
+              onPress={go('Pair')} />
+          </Rows>
+        </Section>
 
-      <Section title="Session">
-        <Row icon="sliders-horizontal" label="Mode" detail="Choose the active agent strategy" onPress={needsSession('Modes')} />
-        <Row icon="git-branch" label="Agent threads"
-          detail={activeSessionName ? 'Switch conversations and review coordination activity' : 'Load a session to see its threads'} onPress={needsSession('Threads')} />
-        <Row icon="cpu" label="Provider and model" detail={[activeProvider, activeModel].filter(Boolean).join(' · ') || 'Not selected'} onPress={go('Providers')} />
-        <EffortControl variant="row" />
-        <Row icon="network" label="Connection" detail={isConnected ? 'Connected to Mucli' : 'Not connected'} onPress={go('Connection')} />
-        <Row icon="paperclip" label="Session files"
-          detail={activeSessionName ? 'Visualizations, model artifacts, and uploads' : 'Load a session to view files'} onPress={needsSession('Artifacts')} />
-      </Section>
-
-      <Section title="Safety">
-        <ToggleRow icon="zap" label="Auto-approve writes" detail={yoloSyncing ? 'Updating session…' : 'Run tools without asking in this session'}
-          value={yolo} onValueChange={next => { void updateYolo(next); }} disabled={!isConnected || !activeSessionName || yoloSyncing} />
-        <ToggleRow icon="lock" label="Plan mode (read-only)" detail={plan.busy ? 'Updating session…' : 'Block file edits, shell writes and other write tools'}
-          value={plan.planMode} onValueChange={next => { void plan.setPlanMode(next); }} disabled={!plan.canToggle} />
-      </Section>
-
-      <Section title="Runtime">
-        <Row icon="box" label="Containers" detail="Create, inspect, start, stop, and remove containers" onPress={() => setContainersOpen(true)} />
-        <Row icon="sliders-horizontal" label="Session variables"
-          detail={activeSessionName ? 'Grouped runtime overrides for this session' : 'Load a session to edit variables'} onPress={() => setAdvancedOpen(true)} />
-      </Section>
-
-      <Section title="Appearance">
-        <View style={styles.appearance}>
-          <Text variant="label" tone="ink2">Theme</Text>
-          <Segmented<ThemePreference>
-            accessibilityLabel="Theme"
-            testID="theme-preference"
-            value={preference}
-            onChange={setPreference}
-            options={[
-              { value: 'system', label: 'System', testID: 'theme-system' },
-              { value: 'paper', label: 'Paper', testID: 'theme-paper' },
-              { value: 'dusk', label: 'Dusk', testID: 'theme-dusk' },
-            ]}
-          />
-        </View>
-        <ToggleRow icon="sparkles" label="Reduce decoration" detail="Replace watercolour art with a flat wash"
-          value={reduceDecoration} onValueChange={setReduceDecoration} testID="reduce-decoration" />
-      </Section>
-
-      <AdvancedSettingsSheet visible={advancedOpen} onClose={() => setAdvancedOpen(false)} />
-      <ContainerManagerSheet visible={containersOpen} onClose={() => setContainersOpen(false)} />
-    </ScrollView>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Text variant="label" tone="ink3" accessibilityRole="header" style={styles.sectionTitle}>{title}</Text>
-      <Card variant="sunken" bodyStyle={styles.sectionBody}>{children}</Card>
+        <Section title="Areas" lede="Each area keeps its own settings beside its work.">
+          <Rows>
+            <Row testID="area-chat" title="Chat and workspace" sub="Provider, model, tools and the workspace for the open session" onPress={go('Tabs', { screen: 'Chat', params: { openSettings: Date.now() } })} />
+            <Row testID="area-work" title="Work" sub="Job rules, agents, checks and environments" onPress={go('JobSettings')} />
+            <Row testID="area-orchestration" title="Orchestration" sub="Access policy, schedules, secrets and the network" onPress={go('Tabs', { screen: 'Orchestration', params: { tab: 'settings' } })} />
+            <Row testID="area-pricing" title="Model pricing" sub="Prices used for cost estimates" onPress={go('Tabs', { screen: 'Insights', params: { tab: 'costs' } })} />
+            <Row testID="area-connection" title="Connection" sub={server} onPress={go('Connection')} />
+            <Row testID="area-providers" title="Provider and model" sub="The model for this session" onPress={go('Providers')} />
+          </Rows>
+        </Section>
+        <Text variant="caption" tone="ink3" style={{ paddingHorizontal: spacing.xs }}>{colors.name === 'dusk' ? 'Dark' : 'Light'} · {paletteNote(palette)}</Text>
+      </ScrollView>
     </View>
   );
 }
 
-function Row({ icon, label, detail, onPress }: { icon: IconName; label: string; detail: string; onPress: () => void }) {
-  const { colors } = useTheme();
+function Section({ title, lede, children }: { title: string; lede: string; children: React.ReactNode }) {
   return (
-    <Pressable onPress={onPress} accessibilityLabel={label} accessibilityHint={detail} scale={false}
-      style={({ pressed }) => [styles.row, pressed ? { backgroundColor: colors.hairline } : null]}>
-      <Icon name={icon} color={colors.ink3} />
-      <View style={styles.copy}>
-        <Text variant="body" style={{ fontWeight: '500' }}>{label}</Text>
-        <Text variant="caption" tone="ink3" numberOfLines={2}>{detail}</Text>
+    <View style={styles.section}>
+      <View style={styles.sectionHead}>
+        <Text variant="title3" accessibilityRole="header">{title}</Text>
+        <Text variant="caption" tone="ink3">{lede}</Text>
       </View>
-      <Icon name="chevron-right" size="sm" color={colors.ink3} />
+      {children}
+    </View>
+  );
+}
+
+/** A theme card: both sides (light and dark) as a tiny page, the label and the note (web .w-themecard). */
+function ThemeCard({ name, selected, onPress }: { name: PaletteName | null; selected: boolean; onPress: () => void }) {
+  const { colors } = useTheme();
+  const label = paletteLabel(name);
+  return (
+    <Pressable onPress={onPress} scale={false} accessibilityRole="radio" accessibilityLabel={`${label} theme`} accessibilityHint={paletteNote(name)}
+      accessibilityState={{ selected, checked: selected }} testID={`palette-${name ?? 'wash'}`}
+      style={[styles.card, { borderColor: selected ? colors.ink : colors.hairline, borderWidth: selected ? 2 : 1, backgroundColor: colors.surface }]}>
+      <View style={styles.sides} importantForAccessibility="no-hide-descendants">
+        {(['paper', 'dusk'] as const).map(side => {
+          const c = washColors(side, name);
+          return (
+            <View key={side} style={[styles.side, { backgroundColor: c.canvas, borderColor: c.hairline }]}>
+              <View style={[styles.bar, { backgroundColor: c.surface }]} />
+              <View style={[styles.line, { width: '80%', backgroundColor: c.ink }]} />
+              <View style={[styles.line, { width: '50%', backgroundColor: c.ink3 }]} />
+              <View style={styles.dots}>
+                {[c.accent, c.ok, c.attention, c.danger, c.plan].map((t, i) => <View key={i} style={[styles.dot, { backgroundColor: t.pigment }]} />)}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+      <Text variant="label" numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
 
-function ToggleRow({ icon, label, detail, value, onValueChange, disabled, testID }: {
-  icon: IconName; label: string; detail: string; value: boolean; onValueChange: (v: boolean) => void; disabled?: boolean; testID?: string;
-}) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.row}>
-      <Icon name={icon} color={colors.ink3} />
-      <View style={styles.copy}>
-        <Text variant="body" style={{ fontWeight: '500' }}>{label}</Text>
-        <Text variant="caption" tone="ink3">{detail}</Text>
-      </View>
-      <Switch testID={testID} label={label} value={value} onValueChange={onValueChange} disabled={disabled} />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  content: { padding: spacing.base, paddingBottom: spacing['2xl'], gap: spacing.md },
-  section: { gap: spacing.sm },
-  sectionTitle: { marginLeft: spacing.xs },
-  sectionBody: { paddingVertical: spacing.xs, paddingHorizontal: spacing.md, gap: 0 },
-  row: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm, borderRadius: 10 },
-  copy: { flex: 1 },
-  appearance: { gap: spacing.sm, paddingVertical: spacing.sm },
+  content: { padding: spacing.base, paddingBottom: spacing['2xl'], gap: spacing.xl },
+  section: { gap: spacing.md },
+  sectionHead: { gap: spacing.xs },
+  setting: { gap: spacing.xs },
+  themes: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  card: { width: '31%', minWidth: 100, flexGrow: 1, borderRadius: radii.md, padding: spacing.sm, gap: spacing.xs },
+  sides: { flexDirection: 'row', gap: spacing.xs },
+  side: { flex: 1, height: 52, borderRadius: radii.sm, borderWidth: 1, padding: spacing.xs, gap: 3 },
+  bar: { height: 8, borderRadius: radii.xs },
+  line: { height: 3, borderRadius: radii.xs },
+  dots: { flexDirection: 'row', gap: 2, marginTop: 'auto' },
+  dot: { width: 5, height: 5, borderRadius: 3 },
 });

@@ -1,16 +1,16 @@
 // Shared orchestration views for the phone: vocabulary chips, the live
-// change subscription, node health rows and execution cards. Status is never
+// change subscription and execution cards. Status is never
 // colour alone: every glyph travels with its vocabulary label.
 
 import React, { useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { ApiError } from '../api/client';
-import { subscribeToOrchestrationChanges, type OrchChange, type OrchEffectStyle, type OrchExecution, type OrchNode, type OrchStyle } from '../api/orchestration';
+import { subscribeToOrchestrationChanges, type OrchChange, type OrchEffectStyle, type OrchExecution, type OrchStyle } from '../api/orchestration';
 import { useTheme } from '../theme/ThemeContext';
 import { fonts, spacing, toneOf } from '../theme/tokens';
 import { STATUS, orchEffect, orchState, type OrchTable } from '../theme/status';
-import { Chip, KV, Pre, Pressable, StatusChip, Text } from '../ui';
+import { Chip, KV, Pre, StatusChip, Text } from '../ui';
 
 export const ORCH_REFRESH_DEBOUNCE_MS = 300;
 export const LOG_TAIL_LINES = 40;
@@ -70,38 +70,6 @@ export function labelList(labels: Record<string, string> | null | undefined): st
   return Object.entries(labels || {}).map(([k, v]) => (v === '' || v == null ? k : `${k}=${v}`));
 }
 
-/** Node health row: status chip, online, last seen, OS, max disk %, memory %, labels. */
-export function NodeHealthRow({ node, onPress }: { node: OrchNode; onPress: () => void }) {
-  const { colors } = useTheme();
-  const sum = node.summary || ({} as OrchNode['summary']);
-  const labels = labelList(node.labels);
-  return (
-    <Pressable testID={`orch-node-${node.id}`} accessibilityRole="button"
-      accessibilityLabel={`${node.name}, ${orchState('orch_node_status', node.status, node.style).label}, ${node.online ? 'online' : 'offline'}`}
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, { borderBottomColor: colors.hairline, backgroundColor: pressed ? colors.sunken : 'transparent' }]}>
-      <View style={styles.rowTop}>
-        <Text variant="sm" style={{ fontWeight: '600', flexShrink: 1 }} numberOfLines={1}>{node.name || node.id}</Text>
-        {node.canary ? <Chip variant="meta">canary</Chip> : null}
-        <View style={{ flex: 1 }} />
-        <OrchStateChip table="orch_node_status" value={node.status} style={node.style} />
-      </View>
-      <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={1}>
-        {node.online ? 'online' : 'not reporting'} · seen {node.last_seen_ago || 'never'}{sum.os ? ` · ${sum.os}` : ''}
-      </Text>
-      <Text variant="xs" style={{ color: colors.ink2, fontFamily: fonts.mono }} numberOfLines={1} testID={`orch-node-${node.id}-health`}>
-        disk {pct(sum.max_disk_used_pct)} · mem {pct(sum.memory_used_pct)}
-      </Text>
-      {labels.length ? (
-        <View style={styles.wrap}>
-          {labels.slice(0, 6).map(l => <Chip key={l} variant="meta">{l}</Chip>)}
-          {labels.length > 6 ? <Text variant="xs" style={{ color: colors.ink3 }}>+{labels.length - 6}</Text> : null}
-        </View>
-      ) : null}
-    </Pressable>
-  );
-}
-
 /** Last `lines` lines of a log. */
 export function logTail(text: string | null | undefined, lines = LOG_TAIL_LINES): string {
   const all = String(text ?? '').replace(/\s+$/, '').split('\n');
@@ -156,9 +124,7 @@ export function ExecutionCard({ ex, testID }: { ex: OrchExecution; testID?: stri
 }
 
 const styles = StyleSheet.create({
-  row: { paddingHorizontal: spacing.base, paddingVertical: spacing.md, gap: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.xs },
   glyph: { minWidth: 20, alignItems: 'center' },
   exec: { gap: spacing.xs, paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
 });

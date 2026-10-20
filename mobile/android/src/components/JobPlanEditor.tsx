@@ -1,124 +1,73 @@
-import React, { useMemo, useState } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
-import { useTheme } from '../theme/ThemeContext';
-import type { ThemeColors } from '../theme/tokens';
-import {
-  type PlanRow, type PlanSection, planProse, replaceRows, rowsFrom,
-} from './planMarkdown';
-import { fontSizes, fontWeights, fonts, radii, spacing, touchTarget } from '../theme/tokens';
-import { Markdown, Pressable, Text } from '../ui';
+// The plan editor (job page → Plan): Markdown first (preview or raw edit), then the acceptance
+// criteria and checks as editable rows. Every part edits the same draft Markdown.
+
+import React, { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { type PlanRow, type PlanSection, planProse, replaceRows, rowsFrom } from './planMarkdown';
+import { spacing } from '../theme/tokens';
+import { Button, Markdown, Panel, Segmented, Text, TextField } from '../ui';
 
 const PLAN_SECTIONS: PlanSection[] = ['Acceptance criteria', 'Checks'];
 
-type Btn = { label: string; onPress: () => void; disabled?: boolean; tone?: 'accent' | 'danger' | 'quiet'; a11y?: string };
-
-function PlanButton({ label, onPress, disabled, tone = 'quiet', a11y }: Btn) {
-  const { colors } = useTheme();
-  const fg = tone === 'danger' ? colors.danger.ink : tone === 'accent' ? colors.onInk : colors.ink;
-  return <Pressable accessibilityRole="button" accessibilityLabel={a11y} accessibilityState={{ disabled: !!disabled }}
-    disabled={disabled} onPress={onPress} android_ripple={{ color: colors.sunken }}
-    style={({ pressed }) => [styles.button, {
-      borderColor: tone === 'accent' ? colors.accent.ink : tone === 'danger' ? colors.danger.ink : colors.hairline,
-      backgroundColor: tone === 'accent'
-        ? (pressed ? colors.accent.ink : colors.accent.ink)
-        : pressed ? (tone === 'danger' ? colors.danger.wash : colors.sunken) : colors.raised,
-      opacity: disabled ? 0.5 : 1,
-    }]}>
-    <Text variant="sm" style={{ color: fg, fontWeight: fontWeights.medium }}>{label}</Text>
-  </Pressable>;
-}
-
-/** Read-only, wrapping cards for criteria and checks. */
+/** Read-only criteria and checks. */
 export function PlanCriteriaCards({ markdown }: { markdown: string }) {
-  const { colors } = useTheme();
-  return <View style={styles.root}>{PLAN_SECTIONS.map(title => {
+  return <View style={styles.col}>{PLAN_SECTIONS.map(title => {
     const rows = rowsFrom(markdown, title);
     if (!rows.length) return null;
-    return <View key={title} style={styles.root}>
-      <SectionTitle title={title} count={rows.length} colors={colors} />
-      {rows.map((row, i) => <View key={i} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
-        <Text variant="xs" style={[styles.badge, { color: colors.ink2, backgroundColor: colors.sunken }]}>{row.key}</Text>
-        <Text selectable variant="sm" style={[styles.wrap, title === 'Checks' && styles.mono]}>{row.text || '—'}</Text>
-      </View>)}
-    </View>;
+    return <Panel key={title} title={title} badge={rows.length}>
+      {rows.map((row, i) => (
+        <View key={i} style={styles.row}>
+          <Text variant="monoSm" tone="ink3">{row.key}</Text>
+          <Text selectable variant={title === 'Checks' ? 'monoSm' : 'body'} style={styles.grow}>{row.text || '—'}</Text>
+        </View>
+      ))}
+    </Panel>;
   })}</View>;
 }
 
-function SectionTitle({ title, count, colors }: { title: string; count: number; colors: ThemeColors }) {
-  return <View style={styles.sectionTitle}>
-    <Text style={{ color: colors.ink, fontWeight: fontWeights.semibold }}>{title}</Text>
-    <Text variant="xs" dim style={styles.count}>{count}</Text>
-  </View>;
-}
-
-/** Markdown first (preview / raw edit), then structured criteria + checks. All edit the same draft. */
 export function JobPlanEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const { colors } = useTheme();
   const [mode, setMode] = useState<'preview' | 'edit'>('preview');
-  const input = { color: colors.ink, borderColor: colors.hairline, backgroundColor: colors.canvas };
   const prose = planProse(value);
-  return <View style={styles.root}>
-    <View style={styles.row}>
-      <SectionTitle title="Plan" count={value.split('\n').length} colors={colors} />
-      <View style={[styles.segment, { borderColor: colors.hairline }]}>
-        {(['preview', 'edit'] as const).map(m => <Pressable key={m} accessibilityRole="button" accessibilityState={{ selected: mode === m }}
-          onPress={() => setMode(m)} style={({ pressed }) => [styles.segmentItem, {
-            backgroundColor: mode === m ? colors.raised : pressed ? colors.sunken : 'transparent' }]}>
-          <Text variant="sm" style={{ color: mode === m ? colors.ink : colors.ink3, fontWeight: mode === m ? fontWeights.semibold : fontWeights.medium }}>
-            {m === 'preview' ? 'Preview' : 'Edit Markdown'}</Text>
-        </Pressable>)}
-      </View>
-    </View>
+  return <View style={styles.col}>
+    <Segmented<'preview' | 'edit'> accessibilityLabel="Plan view" value={mode} onChange={setMode}
+      options={[{ value: 'preview', label: 'Preview' }, { value: 'edit', label: 'Edit Markdown' }]} />
     {mode === 'preview'
-      ? <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
-          <Markdown variant="document">{prose || '_No plan text yet._'}</Markdown></View>
-      : <TextInput accessibilityLabel="Plan Markdown" multiline value={value} onChangeText={onChange} autoCapitalize="none"
-          style={[styles.editor, input]} />}
+      ? <Panel><Markdown variant="document">{prose || '_No plan text yet._'}</Markdown></Panel>
+      : <TextField accessibilityLabel="Plan Markdown" multiline mono value={value} onChangeText={onChange} autoCapitalize="none" autoCorrect={false} style={styles.editor} />}
     {PLAN_SECTIONS.map(title => <RowsEditor key={title} title={title} value={value} onChange={onChange} />)}
   </View>;
 }
 
 function RowsEditor({ title, value, onChange }: { title: PlanSection; value: string; onChange: (v: string) => void }) {
-  const { colors } = useTheme();
   const rows = rowsFrom(value, title);
-  const input = { color: colors.ink, borderColor: colors.hairline, backgroundColor: colors.canvas };
   const update = (next: PlanRow[]) => onChange(replaceRows(value, title, next));
   const change = (index: number, patch: Partial<PlanRow>) => update(rows.map((row, i) => i === index ? { ...row, ...patch } : row));
   const move = (index: number, offset: number) => { const next = [...rows]; [next[index], next[index + offset]] = [next[index + offset], next[index]]; update(next); };
-  return <View style={styles.root}>
-    <SectionTitle title={title} count={rows.length} colors={colors} />
-    {rows.map((row, index) => <View key={index} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.hairline }]}>
-      <TextInput accessibilityLabel={`${title} ${index + 1} identifier`} value={row.key} onChangeText={key => change(index, { key })}
-        autoCapitalize="none" style={[styles.keyInput, { color: colors.ink, borderColor: colors.hairline, backgroundColor: colors.canvas }]} />
-      <TextInput accessibilityLabel={`${title} ${index + 1} text`} value={row.text} onChangeText={text => change(index, { text: text.replace(/\n/g, ' ') })}
-        autoCapitalize="none" multiline scrollEnabled={false} style={[styles.input, input, title === 'Checks' && styles.mono]} />
+  const noun = title === 'Checks' ? 'check' : 'criterion';
+  return <Panel title={title} badge={rows.length}>
+    {rows.map((row, index) => <View key={index} style={styles.item}>
+      <TextField accessibilityLabel={`${title} ${index + 1} identifier`} value={row.key} onChangeText={key => change(index, { key })} autoCapitalize="none" autoCorrect={false} mono style={styles.key} />
+      <TextField accessibilityLabel={`${title} ${index + 1} text`} value={row.text} onChangeText={text => change(index, { text: text.replace(/\n/g, ' ') })}
+        autoCapitalize="none" multiline scrollEnabled={false} mono={title === 'Checks'} />
       <View style={styles.row}>
-        <PlanButton label="↑" a11y={`Move ${title} ${index + 1} up`} onPress={() => move(index, -1)} disabled={index === 0} />
-        <PlanButton label="↓" a11y={`Move ${title} ${index + 1} down`} onPress={() => move(index, 1)} disabled={index === rows.length - 1} />
-        <PlanButton label="Remove" a11y={`Remove ${title} ${index + 1}`} tone="danger" onPress={() => update(rows.filter((_, i) => i !== index))} />
+        <Button small variant="secondary" label="↑" accessibilityLabel={`Move ${title} ${index + 1} up`} onPress={() => move(index, -1)} disabled={index === 0} />
+        <Button small variant="secondary" label="↓" accessibilityLabel={`Move ${title} ${index + 1} down`} onPress={() => move(index, 1)} disabled={index === rows.length - 1} />
+        <Button small variant="ghost" tone="danger" label="Remove" accessibilityLabel={`Remove ${title} ${index + 1}`} onPress={() => update(rows.filter((_, i) => i !== index))} />
       </View>
     </View>)}
-    <PlanButton label={`Add ${title === 'Checks' ? 'check' : 'criterion'}`} a11y={`Add ${title === 'Checks' ? 'check' : 'criterion'}`} tone="accent" onPress={() => {
+    <Button small variant="secondary" icon="plus" label={`Add ${noun}`} accessibilityLabel={`Add ${noun}`} onPress={() => {
       let number = 1; const prefix = title === 'Checks' ? 'check' : 'AC-';
       while (rows.some(row => row.key === prefix + number)) number++;
       update([...rows, { key: prefix + number, text: '' }]);
     }} />
-  </View>;
+  </Panel>;
 }
 
 const styles = StyleSheet.create({
-  root: { gap: spacing.sm, alignSelf: 'stretch' },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, alignItems: 'center', justifyContent: 'space-between' },
-  card: { gap: spacing.sm, borderWidth: 1, borderRadius: radii.panel, padding: spacing.md, alignSelf: 'stretch' },
-  wrap: { flexShrink: 1, flexWrap: 'wrap' },
-  mono: { fontFamily: fonts.mono, fontSize: fontSizes.sm },
-  badge: { alignSelf: 'flex-start', fontFamily: fonts.mono, fontWeight: fontWeights.medium, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: 2, overflow: 'hidden' },
-  keyInput: { alignSelf: 'flex-start', minWidth: 72, minHeight: touchTarget, borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, fontFamily: fonts.mono, fontSize: fontSizes.xs },
-  input: { borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, minHeight: touchTarget, textAlignVertical: 'top', flexShrink: 1 },
-  button: { borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.base, paddingVertical: spacing.sm, minHeight: touchTarget, minWidth: touchTarget, alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-start' },
-  editor: { borderWidth: 1, borderRadius: radii.sm, padding: spacing.md, minHeight: 320, textAlignVertical: 'top', fontFamily: fonts.mono, fontSize: fontSizes.sm },
-  sectionTitle: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  count: { fontVariant: ['tabular-nums'] },
-  segment: { flexDirection: 'row', borderWidth: 1, borderRadius: radii.sm, overflow: 'hidden' },
-  segmentItem: { minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  col: { gap: spacing.sm, alignSelf: 'stretch' },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, alignItems: 'center' },
+  grow: { flex: 1 },
+  item: { gap: spacing.xs, paddingBottom: spacing.sm },
+  key: { alignSelf: 'flex-start', minWidth: 96 },
+  editor: { minHeight: 320 },
 });

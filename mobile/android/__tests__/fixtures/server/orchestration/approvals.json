@@ -1,0 +1,463 @@
+{
+ "nodes": [
+  {
+   "accepted_at": null,
+   "actions": [
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "acceptNode",
+     "input": null,
+     "label": "Accept",
+     "primary": true,
+     "reason": "",
+     "shortcut": "",
+     "tone": "ok"
+    },
+    {
+     "args": {},
+     "confirm": "Quarantine this node? It keeps reporting but receives no work until released.",
+     "danger": false,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "quarantineNode",
+     "input": {
+      "arg": "reason",
+      "label": "Reason (optional)",
+      "multiline": false,
+      "optional": true
+     },
+     "label": "Quarantine",
+     "primary": false,
+     "reason": "",
+     "shortcut": "",
+     "tone": "warn"
+    },
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": false,
+     "hidden": false,
+     "id": "unquarantineNode",
+     "input": null,
+     "label": "Release quarantine",
+     "primary": false,
+     "reason": "node is not quarantined",
+     "shortcut": "",
+     "tone": ""
+    },
+    {
+     "args": {},
+     "confirm": "Revoke this node? Its credential is deleted and live executions become unreachable. It must enrol again with a new join token.",
+     "danger": true,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "revokeNode",
+     "input": null,
+     "label": "Revoke",
+     "primary": false,
+     "reason": "",
+     "shortcut": "",
+     "tone": "danger"
+    },
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": "labels",
+     "enabled": true,
+     "hidden": false,
+     "id": "setNodeLabels",
+     "input": null,
+     "label": "Edit labels",
+     "primary": false,
+     "reason": "",
+     "shortcut": "",
+     "tone": ""
+    },
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "setNodeCanary",
+     "input": null,
+     "label": "Mark canary",
+     "primary": false,
+     "reason": "",
+     "shortcut": "",
+     "tone": ""
+    },
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": false,
+     "hidden": false,
+     "id": "rotateCredential",
+     "input": null,
+     "label": "Rotate credential",
+     "primary": false,
+     "reason": "only active nodes rotate credentials",
+     "shortcut": "",
+     "tone": ""
+    },
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "refreshFacts",
+     "input": null,
+     "label": "Refresh facts",
+     "primary": false,
+     "reason": "",
+     "shortcut": "",
+     "tone": ""
+    }
+   ],
+   "address": "",
+   "agent": {
+    "current": "1.2.0",
+    "outdated": true,
+    "reason": "agent test can't update itself: update it once by hand",
+    "updatable": false,
+    "version": "test"
+   },
+   "agent_version": "test",
+   "busy": null,
+   "canary": false,
+   "created_at": 1792491810.905049,
+   "facts_at": 1792491810.905049,
+   "groups": [],
+   "id": "n_7678830af2",
+   "kind": "host",
+   "labels": {
+    "env": "prod",
+    "role": "db"
+   },
+   "last_seen": 1792491810.905049,
+   "last_seen_ago": "0s ago",
+   "name": "db-new",
+   "online": true,
+   "policy": {},
+   "policy_errors": [],
+   "presence": "online",
+   "remote_policy": {
+    "allowed": false,
+    "pending": null,
+    "reason": "the node hasn't reported its policy yet",
+    "sha256": "",
+    "supported": false,
+    "text": ""
+   },
+   "sandbox": "",
+   "status": "pending",
+   "style": {
+    "glyph": "\u25c6",
+    "label": "awaiting acceptance",
+    "semantic": "attention",
+    "status": "waiting"
+   },
+   "summary": {
+    "arch": "",
+    "cpus": 2,
+    "hostname": "",
+    "kernel": "6.1.0",
+    "load": null,
+    "max_disk_used_pct": null,
+    "memory_gb": null,
+    "memory_used_pct": null,
+    "os": "Debian 12",
+    "provides": [
+     "systemd",
+     "ss",
+     "openssl"
+    ],
+    "reboot_reasons": [],
+    "reboot_required": null,
+    "services": 0,
+    "systemd": true,
+    "uptime_days": null
+   }
+  }
+ ],
+ "paused": [],
+ "reviews": [],
+ "runbook_reviews": [],
+ "runs": [
+  {
+   "actions": [
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "approveRun",
+     "input": null,
+     "label": "Approve and start",
+     "primary": true,
+     "reason": "",
+     "shortcut": "",
+     "tone": "ok"
+    },
+    {
+     "args": {},
+     "confirm": "Reject this proposed run?",
+     "danger": true,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "rejectRun",
+     "input": {
+      "arg": "reason",
+      "label": "Reason (optional)",
+      "multiline": false,
+      "optional": true
+     },
+     "label": "Reject",
+     "primary": false,
+     "reason": "",
+     "shortcut": "",
+     "tone": "danger"
+    },
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": false,
+     "hidden": false,
+     "id": "continueRun",
+     "input": null,
+     "label": "Continue",
+     "primary": true,
+     "reason": "run is not paused",
+     "shortcut": "",
+     "tone": "ok"
+    },
+    {
+     "args": {},
+     "confirm": null,
+     "danger": false,
+     "dialog": null,
+     "enabled": false,
+     "hidden": false,
+     "id": "pauseRun",
+     "input": null,
+     "label": "Pause",
+     "primary": false,
+     "reason": "run is not running",
+     "shortcut": "",
+     "tone": "warn"
+    },
+    {
+     "args": {},
+     "confirm": "Roll back this run? Every completed change with a rollback tool is undone, newest first.",
+     "danger": false,
+     "dialog": null,
+     "enabled": false,
+     "hidden": false,
+     "id": "rollbackRun",
+     "input": null,
+     "label": "Roll back",
+     "primary": false,
+     "reason": "run cannot roll back now",
+     "shortcut": "",
+     "tone": "warn"
+    },
+    {
+     "args": {},
+     "confirm": "Cancel this run? Queued work is dropped and nodes are told to stop running executions.",
+     "danger": true,
+     "dialog": null,
+     "enabled": true,
+     "hidden": false,
+     "id": "cancelRun",
+     "input": null,
+     "label": "Cancel",
+     "primary": false,
+     "reason": "",
+     "shortcut": "",
+     "tone": "danger"
+    }
+   ],
+   "approved_by": "",
+   "batches": [
+    [
+     "n_a1105c121a"
+    ],
+    [
+     "n_ebaad05f6a"
+    ]
+   ],
+   "blast_radius": "2 nodes (prod) in 2 batches",
+   "check_mode": false,
+   "created_at": 1792491810.905049,
+   "decision": {
+    "level": "confirm",
+    "rule": "Anything that changes a system is confirmed",
+    "summary": "needs confirmation by rule \u201cAnything that changes a system is confirmed\u201d"
+   },
+   "decision_full": {
+    "level": "confirm",
+    "per_node": [
+     {
+      "level": "confirm",
+      "node_id": "n_a1105c121a",
+      "rule": "Anything that changes a system is confirmed"
+     },
+     {
+      "level": "confirm",
+      "node_id": "n_ebaad05f6a",
+      "rule": "Anything that changes a system is confirmed"
+     }
+    ],
+    "reasons": [],
+    "rule": "Anything that changes a system is confirmed",
+    "summary": "needs confirmation by rule \u201cAnything that changes a system is confirmed\u201d"
+   },
+   "effect": "mutating",
+   "effect_style": {
+    "label": "mutating",
+    "semantic": "attention"
+   },
+   "excluded": [],
+   "finished_at": null,
+   "grid": [
+    {
+     "batch": 0,
+     "cells": [
+      {
+       "attempts": 0,
+       "exec": null,
+       "name": "main",
+       "step": 0,
+       "style": {
+        "glyph": "\u25cb",
+        "label": "not started",
+        "semantic": "neutral",
+        "status": "pending"
+       }
+      }
+     ],
+     "failed": false,
+     "labels": {
+      "env": "prod",
+      "role": "web"
+     },
+     "name": "web-1",
+     "node_id": "n_a1105c121a",
+     "online": true,
+     "progress": "ready",
+     "rollbacks": []
+    },
+    {
+     "batch": 1,
+     "cells": [
+      {
+       "attempts": 0,
+       "exec": null,
+       "name": "main",
+       "step": 0,
+       "style": {
+        "glyph": "\u25cb",
+        "label": "not started",
+        "semantic": "neutral",
+        "status": "pending"
+       }
+      }
+     ],
+     "failed": false,
+     "labels": {
+      "env": "prod",
+      "role": "web"
+     },
+     "name": "web-2",
+     "node_id": "n_ebaad05f6a",
+     "online": true,
+     "progress": "ready",
+     "rollbacks": []
+    }
+   ],
+   "id": "r_fd7f720abb75",
+   "kind": "tool",
+   "nodes": 2,
+   "notes": [
+    {
+     "action": "run.propose",
+     "actor": "operator",
+     "at": 1792491810.905049,
+     "seq": 78,
+     "text": "Proposed by operator",
+     "tone": "info"
+    }
+   ],
+   "params": {
+    "message": "hi"
+   },
+   "paused_reason": "",
+   "proposed_by": "operator",
+   "reason": "",
+   "rollback_available": false,
+   "secrets": [],
+   "selector": {
+    "labels": "role=web"
+   },
+   "started_at": null,
+   "state": "proposed",
+   "steps": [
+    {
+     "effect": "mutating",
+     "name": "main",
+     "nodes": "",
+     "on_failure": "stop",
+     "params": {
+      "message": "hi"
+     },
+     "precondition": false,
+     "rollback": "",
+     "test": false,
+     "title": "Tool demo.restart",
+     "tool_id": "demo.restart",
+     "version": 1,
+     "when": ""
+    }
+   ],
+   "strategy": {
+    "batch": 10,
+    "canary": 1,
+    "failure_threshold": 10.0,
+    "max_parallel": 10,
+    "pause_between_s": 0
+   },
+   "style": {
+    "glyph": "\u25c6",
+    "label": "awaiting approval",
+    "semantic": "attention",
+    "status": "waiting"
+   },
+   "summary": {},
+   "target": "demo.restart@1",
+   "title": "Restart web",
+   "warnings": [
+    "no rollback tool: changes cannot be undone automatically"
+   ]
+  }
+ ]
+}

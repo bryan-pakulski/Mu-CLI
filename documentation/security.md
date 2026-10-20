@@ -21,6 +21,7 @@ workflow (finding vulnerabilities *in your code*) see
 | Sub-agent depth cap | `spawn_agent` recursion | Max 2 levels | Not configurable |
 | Custom denials | Any tool | Off | `.mu/hooks.json` |
 | Security audit workflow | Workspace vulnerabilities | Opt-in | `/mode security` |
+| Device pairing | Non-loopback GUI clients (phones) | On, always | None; revoke with `mucli gui devices revoke` |
 
 ## 1. Workspace sandboxing
 
@@ -326,6 +327,35 @@ configuration. The trade-off is that **YOLO is your seatbelt**;
 turning it on removes the single biggest user-facing checkpoint, so do
 it deliberately.
 
+## 8. Remote devices (pairing)
+
+The GUI has no user accounts. It binds to `127.0.0.1` and anything on the computer may use it.
+Binding elsewhere needs `MUCLI_GUI_ALLOW_REMOTE=1` (`mu/gui/launcher.py`), and once it can be
+reached, **every non-loopback client must be a paired device**:
+
+- **Pairing.** On the computer, Settings → Devices → Pair a device (or `mucli gui pair`) shows a
+  QR code and an 8-character code, valid for 10 minutes and for one use. The phone sends
+  `POST /api/devices/pair {code, device_name}` and receives a device token (32 random bytes). The
+  server keeps only its SHA-256 hash, with the name, creation and last-seen times and address, in
+  `$MUCLI_HOME/devices.json` (mode 0600). Codes are compared in constant time, attempts are
+  rate-limited (per client and globally), and a wrong code never reveals whether a pairing is
+  pending. Starting or cancelling a pairing is local-only (loopback plus CSRF).
+- **Every request.** `DeviceGate` (`mu/gui/devices.py`), the outermost middleware, answers 401
+  `{pairing_required: true}` to a non-loopback HTTP request without a valid
+  `Authorization: Bearer` token, and closes such a WebSocket with 1008. The only open paths are
+  `/healthz` and the pairing endpoint. Loopback clients are unaffected.
+- **CSRF.** Bearer-authenticated requests are exempt: a browser can't attach `Authorization`
+  cross-site without a preflight, which the GUI never allows. Browser sessions keep CSRF.
+- **Terminal and lifecycle.** The container shell WebSocket and the container lifecycle routes
+  accept loopback or a paired device. This replaced the old private-network allowance.
+- **Revocation.** Settings → Devices → Revoke, `mucli gui devices revoke NAME`, or the phone's own
+  sign-out take effect immediately: live SSE streams end on their next tick and an open shell is
+  closed within about two seconds.
+- **Not for the AI.** No pairing or device action is a tool. Like node policy, these are
+  operator-only.
+
+Tests: `tests/gui/test_device_pairing.py`, `tests/containers/test_container_access_scope.py`.
+
 ## Implementation index
 
 | Defense | Source |
@@ -339,6 +369,7 @@ it deliberately.
 | Sub-agent isolation | `mu/tools/agent/spawn.py` |
 | Hook registry / loader | `mu/agent/hooks.py`, `mu/agent/hooks_config.py` |
 | Security audit engine | `mu/security/engine.py` |
+| Device pairing | `mu/gui/devices.py`, `mu/gui/routers/devices.py`, `mu/gui/devices_cli.py` |
 
 Tests: `tests/tools/test_secret_paths.py`, `tests/tools/test_secret_scrubber.py`,
 `tests/tools/test_bash_secret_guard.py`, `tests/tools/` (sandbox +

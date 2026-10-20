@@ -3,13 +3,13 @@
     "name": "mucli",
     "slug": "mucli-mobile",
     "scheme": "mucli",
-    "version": "0.5.4",
+    "version": "0.6.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "android": {
       "package": "com.mucli.mobile",
-      "versionCode": 20,
+      "versionCode": 22,
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -24,7 +24,11 @@
           "resizeMode": "contain",
           "backgroundColor": "#1A1814"
         }
-      }
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "ios": {
       "bundleIdentifier": "com.mucli.mobile",
@@ -40,7 +44,22 @@
     ],
     "plugins": [
       "expo-font",
-      "expo-system-ui"
+      "expo-system-ui",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "mucli uses the camera to scan the pairing code shown on your computer.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "mucli uses the microphone to turn speech into a chat message."
+        }
+      ]
     ],
     "icon": "./assets/icon.png",
     "backgroundColor": "#F8F6F1"

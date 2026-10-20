@@ -62,7 +62,14 @@ def check_host(request: Request) -> None:
 
 
 def check_request(request: Request) -> None:
-    """Dependency for mutating endpoints: Host, Origin and the CSRF header."""
+    """Dependency for mutating endpoints: Host, Origin and the CSRF header.
+
+    A request authenticated by a paired device's bearer token (mu/gui/devices.py) needs no CSRF
+    token: browsers can't attach ``Authorization`` cross-site without a preflight, which the GUI
+    never allows, so the token itself proves the caller isn't a forged browser request."""
+    from mu.gui.devices import request_device
+    if request_device(request) is not None:
+        return
     check_host(request)
     origin = request.headers.get("origin")
     if origin and origin != "null":

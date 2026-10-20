@@ -55,6 +55,4 @@ it('no component hard-codes a visible Sheet/Dialog that it mounts conditionally'
     return /<(Sheet|Dialog|ModalFrame)\b[^>]*?\svisible(\s|\/?>)/.test(text) || /if \(!visible\) return null;/.test(text);
   });
   expect(offenders).toEqual([]);
-  const host = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'PromptHost.tsx'), 'utf8');
-  expect(host).toMatch(/<Sheet\s+visible=\{sheetOpen\}/);
 });

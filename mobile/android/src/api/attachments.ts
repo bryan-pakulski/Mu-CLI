@@ -1,5 +1,6 @@
 
 import { ApiError, api, baseUrl } from './client';
+import { authHeaders } from './auth';
 
 export interface AttachmentDescriptor {
   attachment_id: string;
@@ -45,7 +46,7 @@ export const attachmentsApi = {
     } as unknown as Blob);
     const response = await fetch(
       `${baseUrl()}/api/sessions/${encodeURIComponent(sessionName)}/attachments`,
-      { method: 'POST', body: form },
+      { method: 'POST', body: form, headers: authHeaders(baseUrl()) },
     );
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {

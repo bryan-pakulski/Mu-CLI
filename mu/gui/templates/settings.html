@@ -16,6 +16,7 @@
         <ul class="w-rows mu-settings-index">
             <li class="w-row"><a class="w-row__main" href="#set-appearance"><span class="w-row__title">Appearance</span><span class="w-row__sub">Theme, light or dark, decoration</span></a></li>
             <li class="w-row"><a class="w-row__main" href="#set-areas"><span class="w-row__title">Areas</span><span class="w-row__sub">Chat, Work, Orchestration, pricing</span></a></li>
+            <li class="w-row"><a class="w-row__main" href="#set-devices"><span class="w-row__title">Devices</span><span class="w-row__sub">Pair a phone; paired devices</span></a></li>
             <li class="w-row"><a class="w-row__main" href="#set-keys"><span class="w-row__title">Keyboard</span><span class="w-row__sub">Shortcuts and the palette</span></a></li>
         </ul>
     </nav>
@@ -78,6 +79,27 @@
         </div>
     </section>
 
+    {#- Paired devices (mu/gui/devices.py): a phone signs in by pairing. Only this computer can pair
+        or revoke; the QR carries the GUI address and a single-use code. -#}
+    <section class="w-formsection" aria-labelledby="set-devices" data-devices>
+        <header class="w-formsection__head"><h2 class="w-formsection__title" id="set-devices">Devices</h2><p class="w-formsection__lede">Phones signed in to this μcli. Anything not on this computer needs pairing.</p></header>
+        <div class="w-formsection__body">
+            <div class="mu-pair" data-pair hidden>
+                <div class="mu-pair__qr" data-pair-qr></div>
+                <div class="mu-pair__info">
+                    <p class="mu-pair__code" data-pair-code></p>
+                    <p class="w-row__sub" data-pair-expiry></p>
+                    <p class="w-row__sub" data-pair-urls></p>
+                    <p class="w-row__sub" data-pair-loopback hidden>The GUI only listens on this computer. To reach it from a phone, restart it with <code>MUCLI_GUI_ALLOW_REMOTE=1 mucli --gui --host 0.0.0.0</code>.</p>
+                    <p class="w-row__sub">In the app: More → Settings → Devices, then scan this code.</p>
+                    <button type="button" class="w-btn" data-variant="secondary" data-size="sm" data-pair-cancel>Cancel</button>
+                </div>
+            </div>
+            <ul class="w-rows" data-device-list aria-label="Paired devices"></ul>
+            <div class="w-btn-row"><button type="button" class="w-btn" data-variant="secondary" data-pair-start>Pair a device</button></div>
+        </div>
+    </section>
+
     <section class="w-formsection" aria-labelledby="set-keys">
         <header class="w-formsection__head"><h2 class="w-formsection__title" id="set-keys">Keyboard</h2><p class="w-formsection__lede">Everything is a key away; the palette finds the rest.</p></header>
         <div class="w-formsection__body">
@@ -94,6 +116,7 @@
     </section>
     </div>
 </div>
+<script src="/static/js/settings_devices.js" defer></script>
 <script>
 /* The index follows the section in view; links scroll inside the main pane. */
 (function () {

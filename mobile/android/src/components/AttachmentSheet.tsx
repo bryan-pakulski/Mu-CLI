@@ -1,11 +1,11 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { attachmentsApi, type AttachmentDescriptor } from '../api/attachments';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, radii, spacing } from '../theme/tokens';
-import { Button, Pressable, Sheet, Text, Icon } from '../ui';
+import { Button, Pressable, Sheet, Text, Icon, InkDrop } from '../ui';
 
 interface Props {
   visible: boolean;
@@ -104,12 +104,12 @@ export function AttachmentSheet({ visible, sessionName, selected, onSelectedChan
       </View>
       <View style={styles.toolbar}>
         <Button title={uploading ? 'Uploading…' : 'Upload documents'} onPress={pick} disabled={uploading} />
-        {uploading ? <ActivityIndicator color={colors.accent.ink} /> : null}
+        {uploading ? <InkDrop /> : null}
       </View>
       <Text variant="xs" style={{ color: colors.ink3, marginBottom: spacing.sm }}>
         Uploaded files are stored with this session. Select files to attach them to the next message.
       </Text>
-      {loading ? <ActivityIndicator color={colors.accent.ink} /> : (
+      {loading ? <InkDrop /> : (
         <View style={styles.list}>
           {items.length === 0 ? <Text variant="sm" dim>No uploaded documents</Text> : null}
           {items.map(item => {

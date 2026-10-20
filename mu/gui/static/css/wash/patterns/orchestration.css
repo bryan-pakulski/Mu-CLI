@@ -724,7 +724,7 @@
         min-height: 0;
         overflow: hidden;             /* the log scrolls, never the page */
         border-left: 1px solid var(--wash-hairline);
-        background: color-mix(in srgb, var(--wash-sunken) 35%, var(--wash-surface));
+        background: transparent;      /* the leaf, like the main chat's transcript */
     }
     .orch-chat[hidden] { display: none; }
     .orch-panes[data-chat="open"] { --w-chat-w: clamp(320px, 26%, 440px); }
@@ -752,116 +752,41 @@
             background: var(--wash-surface);
         }
     }
+    /* The chat itself is the main chat's components (.w-transcript, .w-msg, toolcard.js,
+     * .w-approval, .w-resolved, .w-composer); these rules only fit them to a narrow column. */
     .orch-chat__head {
         display: flex;
         align-items: center;
-        gap: var(--wash-space-3);
-        padding: var(--wash-space-4) var(--wash-space-5) var(--wash-space-3);
+        gap: var(--wash-space-2);
+        padding: var(--wash-space-4) var(--wash-space-4) var(--wash-space-3) var(--wash-space-5);
         border-bottom: 1px solid var(--wash-hairline);
     }
-    .orch-chat__title { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
-    .orch-chat__title .w-group__title { margin: 0; }
-    .orch-chat__title .orch-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .orch-chat__log {
-        flex: 1 1 auto;
-        min-height: 0;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: var(--wash-space-3);
-        padding: var(--wash-space-4) var(--wash-space-5);
+    .orch-chat__head .w-group__title { margin: 0; }
+    .orch-chat__log.w-transcript { flex: 1 1 auto; padding: var(--wash-space-5) var(--wash-space-5) var(--wash-space-6); }
+    .orch-chat__composer.w-composer { width: 100%; padding: var(--wash-space-3) var(--wash-space-4) var(--wash-space-3); }
+    .orch-chat__composer .w-composer__bar { min-width: 0; }
+    .orch-chat__composer .w-chip { max-width: 18ch; }
+    .orch-chat__model {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--wash-ink-3);
+        font-size: var(--wash-type-caption-size);
     }
-    .orch-chat__hint { margin: 0; }
-    .orch-chat__empty p { margin: 0 0 var(--wash-space-3); color: var(--wash-ink-2); }
-    .orch-chat__suggest { display: flex; flex-direction: column; align-items: flex-start; gap: var(--wash-space-2); }
-    .orch-chat__suggest .w-textbtn { text-align: left; white-space: normal; }
-    .orch-chat__msg { min-width: 0; overflow-wrap: anywhere; }
-    .orch-chat__msg > :first-child { margin-top: 0; }
-    .orch-chat__msg > :last-child { margin-bottom: 0; }
-    .orch-chat__msg.is-user {
-        align-self: flex-end;
-        max-width: 88%;
-        padding: var(--wash-space-2) var(--wash-space-3);
-        border-radius: var(--wash-radius-md);
-        background: var(--w-glass-fill-subtle);
-    }
-    .orch-chat__msg.is-assistant { line-height: var(--wash-type-body-line); }
-    .orch-chat__msg.is-assistant pre { overflow-x: auto; padding: var(--wash-space-2) var(--wash-space-3); border-radius: var(--wash-radius-sm); background: color-mix(in srgb, var(--wash-sunken) 70%, transparent); font-size: var(--wash-type-caption-size); }
-    .orch-chat__msg.is-assistant table { border-collapse: collapse; font-size: var(--wash-type-caption-size); }
-    .orch-chat__msg.is-assistant :is(th, td) { padding: var(--wash-space-1) var(--wash-space-2); border-bottom: 1px solid var(--wash-hairline); text-align: left; }
-    /* Tool calls: one small disclosure per stretch ("Used 3 tools · …"), steps inside. */
-    .orch-chat__steps { font-size: var(--wash-type-caption-size); color: var(--wash-ink-3); }
-    .orch-chat__steps > summary { display: inline-flex; align-items: center; gap: var(--wash-space-2); cursor: pointer; list-style: none; }
-    .orch-chat__steps > summary::-webkit-details-marker { display: none; }
-    .orch-chat__steps > summary::after { content: "▸"; font-size: var(--wash-type-caption-size); }
-    .orch-chat__steps[open] > summary::after { content: "▾"; }
-    .orch-chat__steps > summary:hover { color: var(--wash-ink-2); }
-    .orch-chat__steps .w-sign { flex: 0 0 auto; width: 14px; }
-    .orch-chat__steplist { margin: var(--wash-space-2) 0 0; padding: 0 0 0 var(--wash-space-4); list-style: none; display: flex; flex-direction: column; gap: var(--wash-space-2); border-left: 1px solid var(--wash-hairline); }
-    .orch-chat__step { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: var(--wash-space-2); }
-    .orch-chat__stepname { color: var(--wash-ink-2); }
-    .orch-chat__stepout { grid-column: 2; min-width: 0; }
-    .orch-chat__stepout pre {
-        max-height: 140px;
-        overflow: auto;
-        margin: var(--wash-space-1) 0 0;
-        padding: var(--wash-space-2);
-        border-radius: var(--wash-radius-sm);
-        background: color-mix(in srgb, var(--wash-sunken) 70%, transparent);
-        font: var(--wash-type-caption-size) / 1.45 var(--wash-font-mono);
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-    }
-    .orch-chat__steplinks { margin: var(--wash-space-1) 0 0; font-family: var(--wash-font-mono); }
-    .orch-chat__steplinks a { margin-right: var(--wash-space-2); color: var(--wash-ink-2); }
-    /* Working: three dots that rise in turn at the end of the log (still under reduced motion). */
-    .orch-chat__typing { display: inline-flex; align-items: center; gap: var(--wash-space-1); height: var(--wash-space-5); padding-left: var(--wash-space-1); }
-    .orch-chat__typing > span[aria-hidden] {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--wash-ink-3);
-        animation: orch-chat-dot 1.2s ease-in-out infinite;
-    }
-    .orch-chat__typing > span[aria-hidden]:nth-child(3) { animation-delay: 0.15s; }
-    .orch-chat__typing > span[aria-hidden]:nth-child(4) { animation-delay: 0.3s; }
-    @keyframes orch-chat-dot {
-        0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
-        30% { opacity: 1; transform: translateY(-4px); }
-    }
-    @media (prefers-reduced-motion: reduce) {
-        .orch-chat__typing > span[aria-hidden] { animation: none; opacity: 0.6; }
-    }
-    .orch-chat__msg.is-run .w-rows { margin: 0; }
+    .orch-chat__suggest { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--wash-space-2); margin-top: var(--wash-space-4); }
+    .orch-chat__suggest .w-chip { max-width: 100%; cursor: pointer; }
+    .orch-chat__run .w-rows { margin: 0; }
     /* The chat is narrow: a run's buttons go under its title. */
-    .orch-chat__msg.is-run .w-row {
+    .orch-chat__run .w-row {
         margin-inline: 0;
         padding-left: calc(var(--wash-space-2) + 22px);
         grid-template-columns: minmax(0, 1fr);
         grid-template-areas: "main" "acts";
         row-gap: var(--wash-space-2);
     }
-    .orch-chat__msg.is-run .w-row__when { display: none; }
-    .orch-chat__msg.is-run .w-row > .w-sign { left: var(--wash-space-2); }
-    .orch-chat__msg.is-note [data-tone="danger"] { color: var(--wash-danger-ink); }
-    .orch-chat__prompt {
-        display: flex;
-        flex-direction: column;
-        gap: var(--wash-space-2);
-        padding: var(--wash-space-3);
-        border-radius: var(--wash-radius-md);
-        background: color-mix(in srgb, var(--wash-attention-pigment) 12%, transparent);
-    }
-    .orch-chat__prompt p { margin: 0; }
-    .orch-chat__args { max-height: 200px; overflow: auto; font-size: var(--wash-type-caption-size); }
-    .orch-chat__choices { display: flex; flex-wrap: wrap; gap: var(--wash-space-2); }
-    .orch-chat__other { display: flex; gap: var(--wash-space-2); }
-    .orch-chat__other .w-input { flex: 1 1 auto; height: var(--wash-size-control-sm); }
-    .orch-chat__ctx { display: flex; align-items: center; gap: var(--wash-space-2); padding: 0 var(--wash-space-5) var(--wash-space-2); }
-    .orch-chat__chip { padding: 0 var(--wash-space-2); border-radius: var(--wash-radius-sm); background: var(--w-glass-fill-subtle); font-size: var(--wash-type-caption-size); }
-    .orch-chat__composer { display: flex; align-items: flex-end; gap: var(--wash-space-2); padding: var(--wash-space-3) var(--wash-space-5) var(--wash-space-2); border-top: 1px solid var(--wash-hairline); }
-    .orch-chat__input { flex: 1 1 auto; min-height: 0; resize: none; }
-    .orch-chat__foot { margin: 0; padding: 0 var(--wash-space-5) var(--wash-space-3); }
+    .orch-chat__run .w-row > .w-sign { left: var(--wash-space-2); }
+    .orch-chat__run .w-row__when { display: none; }
 }
 
 @layer patterns {

@@ -1,0 +1,164 @@
+{
+ "access_policy": {
+  "default": true,
+  "default_rules": [
+   {
+    "decision": "confirm",
+    "match": {
+     "run": "test"
+    },
+    "name": "Tests are approved by the operator"
+   },
+   {
+    "decision": "allow",
+    "match": {
+     "actor": "ai",
+     "effect": "read_only",
+     "nodes": "env!=prod"
+    },
+    "name": "AI diagnostics outside prod"
+   },
+   {
+    "decision": "confirm",
+    "match": {
+     "actor": "ai",
+     "effect": "read_only",
+     "nodes": "env=prod"
+    },
+    "name": "AI diagnostics on prod are confirmed first"
+   },
+   {
+    "decision": "allow",
+    "match": {
+     "actor": "operator",
+     "effect": "read_only"
+    },
+    "name": "Operator read-only runs need no extra confirmation"
+   },
+   {
+    "decision": "confirm",
+    "match": {
+     "effect": "mutating"
+    },
+    "name": "Anything that changes a system is confirmed"
+   },
+   {
+    "decision": {
+     "confirm": "typed"
+    },
+    "match": {
+     "effect": "destructive"
+    },
+    "name": "Destructive changes are confirmed by typing the tool id"
+   }
+  ],
+  "history": [],
+  "rules": [
+   {
+    "decision": "confirm",
+    "match": {
+     "run": "test"
+    },
+    "name": "Tests are approved by the operator"
+   },
+   {
+    "decision": "allow",
+    "match": {
+     "actor": "ai",
+     "effect": "read_only",
+     "nodes": "env!=prod"
+    },
+    "name": "AI diagnostics outside prod"
+   },
+   {
+    "decision": "confirm",
+    "match": {
+     "actor": "ai",
+     "effect": "read_only",
+     "nodes": "env=prod"
+    },
+    "name": "AI diagnostics on prod are confirmed first"
+   },
+   {
+    "decision": "allow",
+    "match": {
+     "actor": "operator",
+     "effect": "read_only"
+    },
+    "name": "Operator read-only runs need no extra confirmation"
+   },
+   {
+    "decision": "confirm",
+    "match": {
+     "effect": "mutating"
+    },
+    "name": "Anything that changes a system is confirmed"
+   },
+   {
+    "decision": {
+     "confirm": "typed"
+    },
+    "match": {
+     "effect": "destructive"
+    },
+    "name": "Destructive changes are confirmed by typing the tool id"
+   }
+  ],
+  "version": 0,
+  "yaml": "rules:\n- name: Tests are approved by the operator\n  match:\n    run: test\n  decision: confirm\n- name: AI diagnostics outside prod\n  match:\n    actor: ai\n    effect: read_only\n    nodes: env!=prod\n  decision: allow\n- name: AI diagnostics on prod are confirmed first\n  match:\n    actor: ai\n    effect: read_only\n    nodes: env=prod\n  decision: confirm\n- name: Operator read-only runs need no extra confirmation\n  match:\n    actor: operator\n    effect: read_only\n  decision: allow\n- name: Anything that changes a system is confirmed\n  match:\n    effect: mutating\n  decision: confirm\n- name: Destructive changes are confirmed by typing the tool id\n  match:\n    effect: destructive\n  decision:\n    confirm: typed\n"
+ },
+ "agent_updates": {
+  "auto": false,
+  "current": "1.2.0"
+ },
+ "defaults": {
+  "strategy": {
+   "batch": 10,
+   "canary": 1,
+   "failure_threshold": 10,
+   "pause_between_s": 0
+  }
+ },
+ "dispatch_paused": false,
+ "endpoint": {
+  "bind": "",
+  "error": "",
+  "fingerprint": "",
+  "kind": "",
+  "port": 30312,
+  "running": false,
+  "url": ""
+ },
+ "groups": [],
+ "keys": {
+  "signing": {
+   "key_id": "b58c9f6576ddfb37",
+   "public_key": "v3bKoWRfSG5lLM1D7bO7PJ6JEppcRRG1Hi0XkrMW9Cw="
+  },
+  "test": {
+   "key_id": "a5caaaaa23ac4c89",
+   "public_key": "51wY8m0rXxDR7C5PBrb2uCJC9tRRZoAY4TmXGOd53A4="
+  }
+ },
+ "metrics": {
+  "dispatches": 0,
+  "events": 0,
+  "polls": 0,
+  "tick_errors": 0,
+  "ticks": 6
+ },
+ "network": {
+  "advertise": "",
+  "bind": "",
+  "port": 30312
+ },
+ "overlay": {},
+ "overlay_peers": [],
+ "schedules": [],
+ "secrets": {
+  "locked": false,
+  "names": [],
+  "passphrase": false
+ },
+ "trusted_keys": []
+}

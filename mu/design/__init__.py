@@ -40,6 +40,11 @@ def palettes() -> Dict[str, Any]:
     return {k: v for k, v in load_tokens().get("palettes", {}).items() if not k.startswith("_")}
 
 
+def destinations() -> Dict[str, Any]:
+    """Destination → {accent pigment, ambient scene} (the shell's per-destination accent)."""
+    return {k: v for k, v in load_tokens().get("destination", {}).items() if not k.startswith("_")}
+
+
 def palette_choices() -> list:
     """Theme picker rows (Wash first): name, label, note and swatches per mode
     (canvas, surface, ink and the accent / ok / attention / danger / plan pigments)."""

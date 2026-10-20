@@ -21,6 +21,15 @@ export { InkDrop, ProgressBar, Skeleton, ResultBar, Meter, Sparkline, type Skele
 export { PipelineStepper, MiniStepper, describeStep, type StepLike } from './Stepper';
 export { ContextRing, LayerBar, contextTone, layerTone, CONTEXT_CAUTION, CONTEXT_DANGER, type LayerSegment } from './Meters';
 export { WashBackground, washArt, spotWash, type WashArt } from './WashBackground';
-export { glassStyle, useGlass, stateTint, activePillStyle, GlassChrome, GlassBackdrop, Stage, AmbientBackground, AmbientLayer, ambientArt, routeAmbient, useAmbientOverride, GLASS_MIN_ALPHA, type GlassLevel, type AmbientArt } from './Glass';
+export { glassStyle, useGlass, stateTint, activePillStyle, GlassChrome, GlassBackdrop, Stage, AmbientBackground, AmbientLayer, ambientArt, destinationArt, useAmbientOverride, GLASS_MIN_ALPHA, glassFillAlpha, type GlassLevel, type AmbientArt } from './Glass';
 export { layout, useInterval } from './layout';
+export { PageHeader, StateSentence, HeaderTabs, StatusSign, Row, Rows, Board, BoardSection, PrimaryPill, ActionBar, ActionSheet, useServerActions,
+  type PageHeaderProps, type StatePart, type HeaderTab, type MenuItem, type RowProps, type ServerAction } from './Mu';
+export { RunInPicker } from './RunInPicker';
+export { Composer, isSlashCommand, useMic, type ComposerProps, type ComposerFoot, type ComposerSlashItem } from './Composer';
+export { ToolList, cardView } from './ToolList';
+export { buildToolCards, groupCards, turnSummary, callItems, cardFromCall, type ToolEvent, type ToolListItem, type ToolCardItem, type ToolGroupItem, type ToolListKind } from './toolList';
+export * as approvalModel from './approval';
+export { ArtifactBrowser, ArtifactViewer, EvidenceList } from './ArtifactViewer';
+export { ResultsTable, formatCell, sortRows, filterRows, nextSort, type ResultColumn, type ResultRow, type ResultTable, type ResultsData, type SortState, type ResultsTableProps, type AskContext } from './ResultsTable';
 export type { Tone, Semantic } from '../theme/tokens';

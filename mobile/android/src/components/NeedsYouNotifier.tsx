@@ -1,12 +1,15 @@
-// App-wide watcher for "needs you" jobs: refetches the jobs home VM on the
-// change stream (and every 30 s as a fallback) while connected and posts a
-// local notification for every job that newly needs a human. Renders nothing.
+// App-wide watcher for "needs you" jobs: keeps the Work tab badge current from
+// GET /api/jobs/attention, and (when notifications are on) refetches the jobs home
+// VM on the change stream (and every 30 s as a fallback) and posts a local
+// notification for every job that newly needs a human. Renders nothing.
 
 import { useEffect, useRef, useState } from 'react';
 
 import { jobCoreApi, subscribeToJobChanges } from '../api/jobCore';
 import { enteredNeedsYou, loadNotifyEnabled, notifyNeedsYou, onNotifyEnabledChange } from '../api/jobNotifications';
+import { jobsApi } from '../api/jobs';
 import { useConnectionStore } from '../store/connection';
+import { refreshWorkBadge, useWorkBadge } from '../store/workBadge';
 
 export const NEEDS_YOU_POLL_MS = 30_000;
 
@@ -22,6 +25,16 @@ export function NeedsYouNotifier() {
     const off = onNotifyEnabledChange(on => setEnabled(on));
     return () => { alive = false; off(); };
   }, []);
+
+  // The Work badge, on the web rail's schedule plus every job change.
+  useEffect(() => {
+    if (!isConnected) { useWorkBadge.getState().set(0); return undefined; }
+    const refresh = () => { void refreshWorkBadge(jobsApi.attention); };
+    refresh();
+    const timer = setInterval(refresh, NEEDS_YOU_POLL_MS);
+    const stream = subscribeToJobChanges(change => { if (change.scope !== 'board') refresh(); }, refresh);
+    return () => { clearInterval(timer); stream.close(); };
+  }, [isConnected, baseUrl]);
 
   useEffect(() => {
     previous.current = null; // new server or reconnect: re-baseline, never replay the backlog

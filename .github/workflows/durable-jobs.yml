@@ -64,3 +64,6 @@ jobs:
 
       - name: Typecheck mobile durable-work surfaces
         run: npm run typecheck
+
+      - name: Mobile tests
+        run: npm test -- --ci

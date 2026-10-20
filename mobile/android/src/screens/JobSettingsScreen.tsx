@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { JiraBrowser } from '../components/JiraSheet';
@@ -8,30 +7,25 @@ import { JobRulesForm } from '../components/JobRulesForm';
 import { BuildEnvironmentsSettings } from '../components/JobEnvironments';
 import { AgentsSettings } from '../components/JobAgents';
 import { JobStageModelsForm } from '../components/JobStageModelsSheet';
-import { JobsNavBar, type JobsPage, switchJobsPage } from '../components/JobsChrome';
 import { loadNotifyEnabled, setNotifyEnabled } from '../api/jobNotifications';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useConnectionStore } from '../store/connection';
-import { useTheme } from '../theme/ThemeContext';
-import { fontWeights, spacing } from '../theme/tokens';
-import { Button, SwitchRow, Text, useToast } from '../ui';
+import { spacing } from '../theme/tokens';
+import { Button, PageHeader, SwitchRow, Text, useToast } from '../ui';
 
 export type JobSettingsScreenProps = NativeStackScreenProps<RootStackParamList, 'JobSettings'>;
 
 /** Wash Settings page for jobs: stage models, plan approval, run rules and the Jira link. */
 export function JobSettingsScreen({ navigation }: JobSettingsScreenProps) {
-  const { colors } = useTheme();
   const toast = useToast();
   const sessionName = useConnectionStore(state => state.activeSessionName);
-  const go = (page: JobsPage) => switchJobsPage(navigation, 'JobSettings', page);
   const [notify, setNotify] = useState(true);
   useEffect(() => { void loadNotifyEnabled().then(setNotify); }, []);
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
-      <JobsNavBar current="JobSettings" onNavigate={go} />
+    <View style={styles.root}>
+      <PageHeader title="Work settings" back={{ label: 'Back', onPress: () => navigation.goBack() }} testID="job-settings-header"
+        state={[{ text: 'Defaults for every new job; a model set on a job wins', tone: 'quiet' }]} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text variant="xl" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Settings</Text>
-        <Text variant="xs" style={{ color: colors.ink3 }}>Defaults for every new job. A model set on a job itself takes priority.</Text>
         <View style={styles.tools}>
           <Button small label="Setup" accessibilityHint="Guided checklist and Doctor: sets up and tests everything jobs need" onPress={() => navigation.navigate('JobSetup')} testID="job-settings-setup" />
         </View>
@@ -41,13 +35,13 @@ export function JobSettingsScreen({ navigation }: JobSettingsScreenProps) {
         <JobRulesForm active />
         <BuildEnvironmentsSettings active />
         <AgentsSettings active />
-        <Text variant="md" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>Jira</Text>
+        <Text variant="title3" accessibilityRole="header">Jira</Text>
         <JiraBrowser active section="link" sessionName={sessionName} />
         <View style={styles.row}>
-          <Button label="Open tickets →" onPress={() => go('JobBoards')} />
+          <Button variant="secondary" navigates label="Open tickets" onPress={() => navigation.navigate('Tabs', { screen: 'Work', params: { tab: 'tickets' } })} />
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

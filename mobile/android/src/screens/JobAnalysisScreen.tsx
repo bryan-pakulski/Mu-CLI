@@ -1,13 +1,15 @@
+// Job performance (Work → job ⋯ → Performance, Insights → Jobs): the durable execution analysis as
+// a page header with the headline numbers in its state sentence, then sections of rows.
+
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { api } from '../api/client';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
-import { fontSizes, fontWeights, fonts, radii, spacing, tracking } from '../theme/tokens';
-import { Text } from '../ui';
+import { fonts, spacing } from '../theme/tokens';
+import { Banner, BoardSection, Loading, Meter, PageHeader, Row, Text } from '../ui';
 
 export type JobAnalysisScreenProps = NativeStackScreenProps<RootStackParamList, 'JobAnalysis'>;
 
@@ -81,7 +83,6 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
     try {
       const result = await api.get<{ analysis: JobAnalysis }>(`/api/jobs/${encodeURIComponent(jobId)}/analysis`, { query: { timeline_limit: 1000 } });
       setAnalysis(result.analysis);
-      navigation.setOptions({ title: result.analysis.job.title });
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -89,15 +90,20 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
       setLoading(false);
       setRefreshing(false);
     }
-  }, [jobId, navigation]);
+  }, [jobId]);
 
   useEffect(() => { void load(); }, [load]);
 
-  if (loading && !analysis) {
-    return <SafeAreaView edges={['bottom']} style={styles.center}><ActivityIndicator color={colors.accent.ink} /></SafeAreaView>;
-  }
+  const back = navigation.canGoBack() ? { label: 'Back', onPress: () => navigation.goBack() } : undefined;
   if (!analysis) {
-    return <SafeAreaView edges={['bottom']} style={styles.center}><Text variant="sm" style={{ color: colors.danger.ink }}>{error || 'Could not load job analysis.'}</Text></SafeAreaView>;
+    return (
+      <View style={styles.page} testID="job-analysis">
+        <PageHeader title="Job performance" back={back} />
+        <View style={styles.center}>
+          {loading ? <Loading label="Loading job performance…" /> : <Text variant="body" tone="danger">{error || "Couldn't load the job analysis."}</Text>}
+        </View>
+      </View>
+    );
   }
 
   const s = analysis.summary;
@@ -108,158 +114,104 @@ export function JobAnalysisScreen({ route, navigation }: JobAnalysisScreenProps)
   const runtime = analysis.runtime_trace;
 
   return (
-    <SafeAreaView edges={['bottom']} style={styles.safe}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(true); }} tintColor={colors.ink3} />}
-      >
-        <View style={styles.hero}>
-          <Text variant="xs" style={{ color: colors.ink3 }}>{label(analysis.job.status)}{analysis.job.archived ? ' · Archived' : ''}</Text>
-          <Text variant="xl" style={styles.title}>Job performance</Text>
-          <Text variant="sm" dim style={styles.subtitle}>Durable execution analysis separates active work from waiting, review and stopped/error residence.</Text>
-          {error ? <Text variant="xs" style={{ color: colors.danger.ink, marginTop: spacing.sm }}>{error}</Text> : null}
-        </View>
+    <View style={styles.page} testID="job-analysis">
+      <PageHeader title={analysis.job.title || 'Job performance'} back={back} state={[
+        { text: `${label(analysis.job.status)}${analysis.job.archived ? ' · archived' : ''}` },
+        { text: `${duration(s.elapsed_seconds)} wall · ${duration(s.active_seconds)} active` },
+        { text: `${costIsEstimate ? '≈ ' : ''}$${cost.toFixed(2)}`, tone: 'quiet' },
+        s.failures ? { text: `${s.failures} failure${s.failures === 1 ? '' : 's'}`, tone: 'danger' } : null,
+      ]} />
+      <ScrollView contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(true); }} tintColor={colors.ink3} />}>
+        {error ? <Banner tone="danger" title="Couldn't refresh">{error}</Banner> : null}
 
-        <View style={[styles.metrics, { backgroundColor: colors.surface }]}>
-          <Metric label="Wall" value={duration(s.elapsed_seconds)} />
-          <Metric label="Active" value={duration(s.active_seconds)} />
-          <Metric label="Passive" value={duration(s.passive_seconds || 0)} />
-          <Metric label="Stopped" value={duration(s.stopped_seconds || 0)} />
-        </View>
-        <View style={[styles.metrics, { backgroundColor: colors.surface }]}>
-          <Metric label={costIsEstimate ? 'Cost est.' : 'Cost'} value={`$${cost.toFixed(2)}`} />
-          <Metric label="Attempts" value={String(s.attempts)} />
-          <Metric label="Tools" value={String(s.tool_calls)} />
-          <Metric label="Failures" value={String(s.failures)} />
-        </View>
+        <BoardSection title="Time">
+          <Row title="Wall" when={duration(s.elapsed_seconds)} />
+          <Row title="Active" when={duration(s.active_seconds)} />
+          <Row title="Passive" sub="Waiting, review and queues" when={duration(s.passive_seconds || 0)} />
+          <Row title="Stopped" sub="Paused, failed or errored" when={duration(s.stopped_seconds || 0)} />
+        </BoardSection>
 
-        <Section title="Harness trace">
-          {runtime?.available ? (
-            <>
-              <Row label="Detailed trace" value={`${runtime.run_count || 0} run(s) · available`} />
-              <Row label="Session" value={runtime.session_name || '—'} />
-              <Text variant="xs" dim style={styles.copy}>{runtime.reason}</Text>
-            </>
-          ) : (
-            <Text variant="xs" dim style={styles.copy}>{runtime?.reason || 'No detailed harness trace was recorded for this job.'}</Text>
-          )}
-        </Section>
+        <BoardSection title="Signals">
+          <Row title="First verification" when={firstPass} />
+          <Row title="Verification" when={`${s.verification_passes} passed · ${s.verification_failures} failed`} />
+          <Row title={costIsEstimate ? 'Cost (estimate)' : 'Cost'} when={`$${cost.toFixed(2)}`} />
+          <Row title="Attempts" sub={`${s.retries} additional`} when={String(s.attempts)} />
+          <Row title="Tool calls" sub={`${s.unique_tools} distinct tools`} when={String(s.tool_calls)} />
+          <Row title="Human gates" sub={`${s.human_responses} responses`} when={String(s.human_gates)} />
+          <Row title="Recoveries" when={String(s.recoveries)} />
+          <Row title="Changed files" when={`${s.changed_files} · +${s.additions} / −${s.deletions}`} />
+          <Row title="Tokens" sub={tokenSummary(s.tokens)} />
+        </BoardSection>
 
-        <Section title="Signals">
-          <Row label="First verification" value={firstPass} />
-          <Row label="Verification" value={`${s.verification_passes} passed · ${s.verification_failures} failed`} />
-          <Row label="Additional attempts" value={String(s.retries)} />
-          <Row label="Human gates" value={String(s.human_gates)} />
-          <Row label="Human responses" value={String(s.human_responses)} />
-          <Row label="Recoveries" value={String(s.recoveries)} />
-          <Row label="Changed files" value={`${s.changed_files} · +${s.additions} / -${s.deletions}`} />
-          <Row label="Tokens" value={tokenSummary(s.tokens)} />
-        </Section>
+        <BoardSection title="Harness trace">
+          {runtime?.available
+            ? <Row status="done" title={`${runtime.run_count || 0} run(s) recorded`} sub={[runtime.session_name, runtime.reason].filter(Boolean).join(' · ')} />
+            : <Row status="skipped" title="No detailed trace" sub={runtime?.reason || 'No detailed harness trace was recorded for this job.'} />}
+        </BoardSection>
 
-        <Section title="Lifecycle">
+        <BoardSection title="Lifecycle" empty="No lifecycle recorded.">
           {analysis.phase_breakdown.map(item => (
-            <View key={item.status} style={styles.barRow}>
-              <View style={styles.barHead}><Text variant="xs" style={{ color: colors.ink2 }}>{label(item.status)}</Text><Text variant="xs" dim style={styles.num}>{duration(item.seconds)} · {item.percent.toFixed(1)}%</Text></View>
-              <View style={[styles.track, { backgroundColor: colors.sunken }]}><View style={[styles.fill, { width: `${Math.max(1, item.percent)}%`, backgroundColor: colors.accent.ink }]} /></View>
-            </View>
+            <Row key={item.status} title={label(item.status)} when={`${duration(item.seconds)} · ${item.percent.toFixed(1)}%`}
+              sub={<View style={styles.meter}><Meter value={Math.max(1, item.percent)} max={100} accessibilityLabel={`${label(item.status)} ${item.percent.toFixed(1)} percent`} /></View>} />
           ))}
-        </Section>
+        </BoardSection>
 
-        <Section title="State drill-down">
-          {(analysis.phase_intervals || []).length ? (analysis.phase_intervals || []).map((item, index) => (
-            <View key={`${index}-${item.status}`} style={styles.interval}>
-              <View style={styles.barHead}>
-                <Text variant="sm" style={{ fontWeight: fontWeights.semibold, color: item.classification === 'stopped' ? colors.danger.ink : colors.ink }}>{label(item.status)}</Text>
-                <Text variant="xs" dim style={styles.num}>{label(item.classification)} · {duration(item.duration_seconds)}</Text>
-              </View>
-              <Text variant="xs" style={[styles.copy, { color: colors.ink2 }]}>{item.interpretation}</Text>
-              <Text variant="xs" dim style={styles.copy}>{item.explanation}</Text>
-              <Row label="Entered" value={item.entry_event?.summary || 'Not recorded'} />
-              <Row label="Exited" value={item.exit_event?.summary || 'Not recorded'} />
-              <Row label="Activity" value={`${item.agent_event_count} agent/tool · ${item.worker_event_count} worker · ${item.event_count} total`} />
-            </View>
-          )) : <Text variant="sm" dim>No lifecycle intervals recorded.</Text>}
-        </Section>
+        <BoardSection title="State drill-down" empty="No lifecycle intervals recorded.">
+          {(analysis.phase_intervals || []).map((item, index) => (
+            <Row key={`${index}-${item.status}`} status={item.classification === 'stopped' ? 'failed' : undefined}
+              title={label(item.status)} when={`${label(item.classification)} · ${duration(item.duration_seconds)}`}
+              sub={
+                <View style={styles.subStack}>
+                  <Text variant="caption" tone="ink2">{item.interpretation}</Text>
+                  <Text variant="caption" tone="ink3">{item.explanation}</Text>
+                  <Text variant="caption" tone="ink3">Entered: {item.entry_event?.summary || 'not recorded'} · Exited: {item.exit_event?.summary || 'not recorded'}</Text>
+                  <Text variant="caption" tone="ink3">{item.agent_event_count} agent/tool · {item.worker_event_count} worker · {item.event_count} events</Text>
+                </View>
+              } />
+          ))}
+        </BoardSection>
 
-        <Section title={`Attempts · ${analysis.attempts.length}`}>
-          {analysis.attempts.length ? analysis.attempts.map(item => (
-            <View key={item.number} style={styles.attempt}>
-              <View style={styles.barHead}><Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>#{item.number} · {label(item.status)}</Text><Text variant="xs" dim style={styles.num}>{duration(item.duration_seconds)} · ${item.cost_usd.toFixed(2)}</Text></View>
-              <Text variant="xs" dim style={styles.attemptMeta}>{item.tool_calls} tools · {item.agent_messages} messages · {item.runtime_errors} errors</Text>
-              <Text variant="xs" dim style={styles.attemptMeta}>{tokenSummary(item.tokens)}</Text>
-            </View>
-          )) : <Text variant="sm" dim>No implementation attempts recorded.</Text>}
-        </Section>
+        <BoardSection title="Attempts" count={analysis.attempts.length} empty="No implementation attempts recorded.">
+          {analysis.attempts.map(item => (
+            <Row key={item.number} status={item.status} title={`#${item.number} · ${label(item.status)}`}
+              when={`${duration(item.duration_seconds)} · $${item.cost_usd.toFixed(2)}`}
+              sub={`${item.tool_calls} tools · ${item.agent_messages} messages · ${item.runtime_errors} errors · ${tokenSummary(item.tokens)}`} />
+          ))}
+        </BoardSection>
 
-        <Section title="Tool profile">
-          {analysis.tools.length ? analysis.tools.slice(0, 20).map(item => (
-            <View key={item.name} style={styles.toolRow}>
-              <Text variant="xs" style={[styles.toolName, { color: colors.ink2 }]} numberOfLines={1}>{item.name}</Text>
-              <View style={[styles.toolTrack, { backgroundColor: colors.sunken }]}><View style={[styles.toolFill, { width: `${item.count / maxTool * 100}%`, backgroundColor: colors.accent.ink }]} /></View>
-              <Text variant="xs" dim style={styles.toolCount}>{item.count}</Text>
-            </View>
-          )) : <Text variant="sm" dim>No tool-call telemetry recorded.</Text>}
-        </Section>
+        <BoardSection title="Tool profile" empty="No tool-call telemetry recorded.">
+          {analysis.tools.slice(0, 20).map(item => (
+            <Row key={item.name} title={<Text variant="caption" style={styles.mono} numberOfLines={1}>{item.name}</Text>} when={String(item.count)}
+              sub={<View style={styles.meter}><Meter value={item.count} max={maxTool} accessibilityLabel={`${item.name} ${item.count} calls`} /></View>} />
+          ))}
+        </BoardSection>
 
-        <Section title={`Verification · ${analysis.verifications.length}`}>
-          {analysis.verifications.length ? analysis.verifications.map((item, index) => (
-            <View key={`${index}-${item.status}`} style={styles.verification}>
-              <Text variant="sm" style={{ color: item.passed ? colors.ok.ink : colors.danger.ink, fontWeight: fontWeights.semibold }}>{item.passed ? 'PASS' : 'FAIL'} · Run {index + 1}</Text>
-              <Text variant="xs" dim style={styles.attemptMeta}>{item.checks_passed}/{item.checks} checks · {duration(item.duration_seconds)} · {item.changed_files} files{item.dirty ? ' · dirty' : ''}</Text>
-            </View>
-          )) : <Text variant="sm" dim>No deterministic verification recorded.</Text>}
-        </Section>
+        <BoardSection title="Verification" count={analysis.verifications.length} empty="No deterministic verification recorded.">
+          {analysis.verifications.map((item, index) => (
+            <Row key={`${index}-${item.status}`} status={item.passed ? 'done' : 'failed'} title={`Run ${index + 1} · ${item.passed ? 'passed' : 'failed'}`}
+              when={duration(item.duration_seconds)}
+              sub={`${item.checks_passed}/${item.checks} checks · ${item.changed_files} files${item.dirty ? ' · dirty' : ''}`} />
+          ))}
+        </BoardSection>
 
-        <Section title="Interventions & failures">
-          <Row label="Human gates" value={String(analysis.human_gates.length)} />
-          {analysis.human_gates.slice(-6).reverse().map(item => <Text key={`g-${item.event_id}`} variant="xs" dim style={styles.incident}>{item.reason || 'Human input required'}</Text>)}
-          <Row label="Failures" value={String(analysis.failures.length)} />
-          {analysis.failures.slice(-8).reverse().map(item => <Text key={`f-${item.event_id}`} variant="xs" style={[styles.incident, { color: colors.danger.ink }]}>{label(item.event_type)} · {item.summary}</Text>)}
-        </Section>
+        <BoardSection title="Human gates" count={analysis.human_gates.length} empty="No human gates.">
+          {analysis.human_gates.slice(-6).reverse().map(item => <Row key={`g-${item.event_id}`} status="needs_you" title={item.reason || 'Human input required'} />)}
+        </BoardSection>
+
+        <BoardSection title="Failures" count={analysis.failures.length} empty="No failures.">
+          {analysis.failures.slice(-8).reverse().map(item => <Row key={`f-${item.event_id}`} status="failed" title={label(item.event_type)} sub={item.summary} />)}
+        </BoardSection>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
-function Metric({ label: metricLabel, value }: { label: string; value: string }) {
-  return <View style={styles.metric}><Text variant="xs" dim>{metricLabel}</Text><Text variant="base" style={styles.metricValue}>{value}</Text></View>;
-}
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  const { colors } = useTheme();
-  return <View style={styles.section}><Text variant="sm" style={[styles.sectionTitle, { color: colors.ink }]}>{title}</Text>{children}</View>;
-}
-function Row({ label: rowLabel, value }: { label: string; value: string }) {
-  const { colors } = useTheme();
-  return <View style={styles.row}><Text variant="xs" dim>{rowLabel}</Text><Text variant="xs" style={{ color: colors.ink2, flex: 1, textAlign: 'right', fontVariant: ['tabular-nums'] }}>{value}</Text></View>;
-}
-
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: 'transparent' },
-  center: { flex: 1, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
-  content: { paddingBottom: spacing['3xl'] },
-  hero: { paddingHorizontal: spacing.base, paddingVertical: spacing.lg },
-  title: { marginTop: spacing.xs, fontWeight: fontWeights.semibold, letterSpacing: tracking.tight },
-  subtitle: { marginTop: spacing.xs },
-  metrics: { flexDirection: 'row', marginHorizontal: spacing.base, marginBottom: spacing.sm, borderRadius: radii.sm },
-  metric: { flex: 1, minWidth: 0, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
-  metricValue: { marginTop: spacing.xs, fontWeight: fontWeights.semibold, fontSize: fontSizes.base, fontVariant: ['tabular-nums'] },
-  num: { fontVariant: ['tabular-nums'] },
-  section: { paddingHorizontal: spacing.base, paddingVertical: spacing.base },
-  sectionTitle: { fontWeight: fontWeights.semibold, marginBottom: spacing.sm },
-  row: { minHeight: 36, paddingVertical: spacing.sm, flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
-  barRow: { paddingVertical: spacing.sm },
-  barHead: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md, alignItems: 'baseline' },
-  track: { height: 4, marginTop: spacing.sm, borderRadius: radii.pill, overflow: 'hidden' },
-  fill: { height: '100%', borderRadius: radii.pill },
-  interval: { paddingVertical: spacing.md },
-  copy: { marginTop: spacing.xs },
-  attempt: { paddingVertical: spacing.md },
-  attemptMeta: { marginTop: spacing.xs, fontVariant: ['tabular-nums'] },
-  toolRow: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  toolName: { width: 118, fontFamily: fonts.mono },
-  toolTrack: { flex: 1, height: 4, borderRadius: radii.pill, overflow: 'hidden' },
-  toolFill: { height: '100%', borderRadius: radii.pill },
-  toolCount: { width: 32, textAlign: 'right', fontVariant: ['tabular-nums'] },
-  verification: { paddingVertical: spacing.md },
-  incident: { marginTop: spacing.sm },
+  page: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
+  content: { padding: spacing.base, paddingBottom: spacing['3xl'] },
+  meter: { flexDirection: 'row', marginTop: spacing.xs },
+  subStack: { gap: 2, marginTop: spacing.xs },
+  mono: { fontFamily: fonts.mono },
 });

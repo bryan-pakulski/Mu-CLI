@@ -79,6 +79,12 @@ export function PromptFrame({ tone = 'attention', chip, title, queue, children, 
 
 export type ApprovalCardProps = {
   toolName: string;
+  /** The heading ("Permission to edit routes.py", "Run `pytest -q`"); default "Permission to run <tool>". */
+  title?: string;
+  /** A shell command shown as a code block (shell approvals). */
+  command?: string;
+  /** A unified diff to review (edit approvals); arguments follow under a disclosure. */
+  diff?: string;
   /** Human sentence, e.g. "Allow write_file to run?" */
   description: string;
   /** Primary target (path, command) in mono. */
@@ -104,17 +110,26 @@ export type ApprovalCardProps = {
 };
 
 export function ApprovalCard({
-  toolName, description, target, preview, risk, highRisk, remember, onRememberChange, onApprove, onDeny, onEdit,
+  toolName, title, command, diff, description, target, preview, risk, highRisk, remember, onRememberChange, onApprove, onDeny, onEdit,
   submitting, queue, approveTestID, denyTestID, rememberTestID, denyLabel = 'Deny', denyIsDestructive,
 }: ApprovalCardProps) {
   const { colors } = useTheme();
   const tone: Tone = highRisk ? 'danger' : 'attention';
+  const [argsOpen, setArgsOpen] = React.useState(false);
   return (
-    <PromptFrame tone={tone} chip="Needs you" title={`Permission to run ${toolName}`} queue={queue} testID="approval-card">
-      <Text variant="body" tone="ink2">{description}</Text>
-      {target ? <Text variant="mono" numberOfLines={2} ellipsizeMode="middle" selectable>{target}</Text> : null}
+    <PromptFrame tone={tone} chip="Needs you" title={title || `Permission to run ${toolName}`} queue={queue} testID="approval-card">
+      {description ? <Text variant="body" tone="ink2">{description}</Text> : null}
+      {command ? (
+        <View testID="approval-command" style={{ borderRadius: radii.sm, backgroundColor: colors.code, padding: spacing.md }}>
+          <Text variant="mono" selectable>{command}</Text>
+        </View>
+      ) : target ? <Text variant="mono" numberOfLines={2} ellipsizeMode="middle" selectable>{target}</Text> : null}
       {risk ? <Chip tone={tone} glyph="◆">{`Risk: ${risk}`}</Chip> : null}
-      {preview ? (
+      {diff ? <DiffView patch={diff} maxLines={16} /> : null}
+      {diff && preview ? (
+        <Button variant="ghost" label={argsOpen ? 'Hide the arguments' : 'Show the arguments'} onPress={() => setArgsOpen(o => !o)} testID="approval-args-toggle" />
+      ) : null}
+      {preview && (!diff || argsOpen) ? (
         looksLikeDiff(preview) ? <DiffView patch={preview} maxLines={12} /> : (
           <View style={{ borderRadius: radii.sm, backgroundColor: colors.code, padding: spacing.md }}>
             <Text variant="caption" tone="ink3" style={{ marginBottom: spacing.xs }}>Arguments</Text>

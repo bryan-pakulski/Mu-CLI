@@ -1,0 +1,73 @@
+{
+  "bytes": 681,
+  "collected": 5,
+  "files": [
+    {
+      "bytes": 30,
+      "kind": "log",
+      "label": "suite output",
+      "name": "check1 \u2014 output",
+      "path": "suite-1.log",
+      "suites": [
+        "check1"
+      ]
+    },
+    {
+      "bytes": 181,
+      "kind": "pcap",
+      "label": "suite-1",
+      "mtime": 1792493070.6778429,
+      "name": "capture.pcap",
+      "path": "artifacts/suite-1/capture.pcap",
+      "suites": [
+        "check1"
+      ]
+    },
+    {
+      "bytes": 43,
+      "kind": "json",
+      "label": "suite-1",
+      "mtime": 1792493070.6778994,
+      "name": "coverage.json",
+      "path": "artifacts/suite-1/coverage.json",
+      "suites": [
+        "check1"
+      ]
+    },
+    {
+      "bytes": 81,
+      "kind": "log",
+      "label": "suite-1",
+      "mtime": 1792493070.6777937,
+      "name": "test.log",
+      "path": "artifacts/suite-1/test.log",
+      "suites": [
+        "check1"
+      ]
+    },
+    {
+      "bytes": 38,
+      "kind": "csv",
+      "label": "suite-1",
+      "mtime": 1792493070.677872,
+      "name": "timings.csv",
+      "path": "artifacts/suite-1/timings.csv",
+      "suites": [
+        "check1"
+      ]
+    },
+    {
+      "bytes": 338,
+      "kind": "junit",
+      "label": "suite-1",
+      "mtime": 1792493070.6777606,
+      "name": "reports/junit.xml",
+      "path": "artifacts/suite-1/reports/junit.xml",
+      "suites": [
+        "check1"
+      ]
+    }
+  ],
+  "run": 1,
+  "skipped": []
+}

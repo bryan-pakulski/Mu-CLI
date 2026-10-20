@@ -10,6 +10,7 @@ import {
   type ReplayOutcome,
   type RevisionToken,
 } from '../api/offlineQueue';
+import { cachedToken, loadToken, normalizeBase } from '../api/auth';
 
 const STORAGE_KEY = '@mucli/connection';
 let reconnectInFlight: Promise<void> | null = null;
@@ -22,6 +23,9 @@ export interface ConnectionState {
   activeProvider: string | null;
   activeModel: string | null;
   isConnected: boolean;
+  /** The server answers but this phone isn't paired with it (mobile_parity.md §7a). */
+  pairingRequired: boolean;
+  setPairingRequired: (required: boolean) => void;
   yolo: boolean;
   /** Session plan mode (read-only; write tools blocked). Server-owned:
    * refreshed from GET /api/variables, never persisted locally. */
@@ -145,6 +149,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   activeProvider: null,
   activeModel: null,
   isConnected: false,
+  pairingRequired: false,
   yolo: false,
   planMode: false,
   sessionRevision: null,
@@ -161,8 +166,14 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   },
 
   setBaseUrl: (url: string) => {
-    set({ baseUrl: url.replace(/\/$/, '') });
+    const base = normalizeBase(url);
+    set({ baseUrl: base, pairingRequired: false });
+    void loadToken(base);
     get().saveToStorage();
+  },
+
+  setPairingRequired: (required: boolean) => {
+    if (get().pairingRequired !== required) set({ pairingRequired: required });
   },
 
   setActiveSession: (name: string | null) => {
@@ -235,6 +246,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
           yolo: parsed.yolo || false,
         });
       }
+      await loadToken(get().baseUrl);
     } catch {
       // AsyncStorage not available or corrupt — keep defaults
     }
@@ -401,6 +413,17 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
             if (!get().isConnected) {
               set({ isConnected: true });
               await get().saveToStorage();
+            }
+            // Reachable: is this phone signed in? (/healthz is open; everything else needs pairing.)
+            await loadToken(baseUrl);
+            try {
+              const who = await fetch(baseUrl + '/api/devices/self', {
+                headers: cachedToken(baseUrl) ? { Authorization: `Bearer ${cachedToken(baseUrl)}` } : {},
+                signal: controller.signal,
+              });
+              set({ pairingRequired: who.status === 401 });
+            } catch {
+              // Keep the previous answer; the next request re-checks.
             }
             // G5 (§3.6): reconnect success path replays the offline queue.
             void get().replayPending();

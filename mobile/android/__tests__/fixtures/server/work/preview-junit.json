@@ -1,0 +1,56 @@
+{
+  "bytes": 338,
+  "junit": {
+    "suites": [
+      {
+        "cases": [
+          {
+            "classname": "pkg.mod",
+            "detail": "",
+            "message": "",
+            "name": "test_ok",
+            "status": "passed",
+            "stdout": "",
+            "time": 0.1
+          },
+          {
+            "classname": "pkg.mod",
+            "detail": "trace here",
+            "message": "assert 1 == 2",
+            "name": "test_bad",
+            "status": "failed",
+            "stdout": "",
+            "time": 0.2
+          },
+          {
+            "classname": "pkg.mod",
+            "detail": "",
+            "message": "",
+            "name": "test_skip",
+            "status": "skipped",
+            "stdout": "",
+            "time": null
+          }
+        ],
+        "errors": 0,
+        "failures": 1,
+        "name": "unit",
+        "skipped": 1,
+        "tests": 3,
+        "time": 0.5
+      }
+    ],
+    "totals": {
+      "errors": 0,
+      "failures": 1,
+      "skipped": 1,
+      "tests": 3
+    }
+  },
+  "kind": "junit",
+  "name": "reports/junit.xml",
+  "path": "artifacts/suite-1/reports/junit.xml",
+  "pretty": true,
+  "text": "<testsuites>\n  <testsuite name=\"unit\" time=\"0.5\">\n    <testcase classname=\"pkg.mod\" name=\"test_ok\" time=\"0.1\" />\n    <testcase classname=\"pkg.mod\" name=\"test_bad\" time=\"0.2\">\n      <failure message=\"assert 1 == 2\">trace here</failure>\n    </testcase>\n    <testcase classname=\"pkg.mod\" name=\"test_skip\">\n      <skipped />\n    </testcase>\n  </testsuite>\n</testsuites>",
+  "truncated": false
+}

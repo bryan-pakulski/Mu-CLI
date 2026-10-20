@@ -19,7 +19,7 @@ import json
 import os
 import tempfile
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
@@ -515,12 +515,36 @@ async def studio_session(request: Request, payload: Dict[str, Any]):
     return {"session_name": name, "url": "/"}
 
 
+async def _prune_fleet_chats(request: Request, *, keep: str) -> List[str]:
+    """Fleet chats are temporary: delete every saved fleet-chat session except ``keep`` (the
+    current one). A chat with a turn in flight is left for the next pass."""
+    from mu.gui.routers import sessions as sessions_router
+    from mu.session.visibility import is_fleet_chat_session
+    state = request.app.state
+    removed: List[str] = []
+    for path in sessions_router._session_dirs():
+        name = os.path.basename(os.path.dirname(path))
+        if name == keep or not is_fleet_chat_session(name, sessions_router._read_session_data(name) or {}):
+            continue
+        try:
+            if name in state.sessions:
+                state.prompts.cancel_session(name)
+                await sessions_router.unload_named_session(name, request)
+            await sessions_router.delete_session(name, request, if_match=None)
+            removed.append(name)
+        except HTTPException:
+            continue   # busy (409) or already gone (404)
+    return removed
+
+
 @router.post("/api/orchestration/chat/session", dependencies=[Depends(csrf.check_request)])
 async def fleet_chat_session(request: Request, payload: Dict[str, Any]):
     """The fleet chat docked on the orchestration page: an ``orchestration`` session (orch_*
     tools: it can look things up, draft tools and *propose* runs; approving stays with the
     operator, AI_COMMANDS unchanged). Loaded without focusing it, so the main chat's current
-    session is untouched. ``fresh: true`` starts a new conversation."""
+    session is untouched. Fleet chats are temporary and never listed with your sessions
+    (mu/session/visibility.py): ``fresh: true`` starts a new conversation and the old one is
+    deleted (as is any other leftover fleet chat)."""
     from mu.gui.routers import sessions as sessions_router
     orch = orch_for(request)
     name = "" if payload.get("fresh") else str(orch.store.get_setting("chat_session", "") or "")
@@ -541,6 +565,10 @@ async def fleet_chat_session(request: Request, payload: Dict[str, Any]):
                                                        "session_type": "orchestration", "activate": False})
         orch.store.set_setting("chat_session", name)
     session = await asyncio.to_thread(request.app.state.load_session, name=name, focus=False)
+    if session is not None and isinstance(getattr(session, "variables", None), dict):
+        from mu.session.visibility import FLEET_CHAT_KIND
+        session.variables["internal_session_kind"] = FLEET_CHAT_KIND   # kept out of session lists
+    await _prune_fleet_chats(request, keep=name)
     busy_for = getattr(request.app.state, "session_busy_for", None)
     return {"session_name": name, "provider": getattr(session.provider, "name", provider) if session else provider,
             "model": getattr(session.provider, "model_name", model) if session else model,
@@ -622,8 +650,9 @@ async def events(request: Request, after: int = Query(0, ge=0), once: bool = Fal
         seq = min(after or _BUS.seq, _BUS.seq)
         yield f"event: hello\ndata: {json.dumps({'seq': seq, 'attention': orch.attention()})}\n\n"
         heartbeat = time.monotonic()
+        from mu.gui.devices import still_paired
         while True:
-            if await request.is_disconnected():
+            if await request.is_disconnected() or not still_paired(request):
                 return
             await asyncio.to_thread(_bridge, orch)
             changes = await asyncio.to_thread(_BUS.wait, seq, 0.5)

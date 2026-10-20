@@ -219,14 +219,19 @@ signed and immutable; change a tool by creating a new version.
 
 **Ask** in the orchestration header (or `.`) docks a chat beside the panes on every route: ask
 about your nodes and runs, or ask for something to be done. It is an *orchestration* session
-(`POST /api/orchestration/chat/session`; one conversation, kept across reloads, **New** starts
-another) with the same `orch_*` tools as Studio, so it can look up facts and results, draft tools
+(`POST /api/orchestration/chat/session`) with the same `orch_*` tools as Studio, so it can look up facts and results, draft tools
 and **propose** runs. A run it proposes appears in the chat as a card with **Approve and start /
 Reject** (or Continue / Cancel): those are your own commands, exactly as on the run page,
 typed confirmation included. The AI still can't approve, dispatch, publish or touch policy
 (`AI_COMMANDS` is unchanged). Tool approvals and questions it asks are answered inline. On a
 node, run, tool or runbook page the message carries that item as context ("About node web-1",
 removable). The fleet chat never changes the main chat's current session.
+
+Fleet chats are temporary. There is one conversation at a time (kept across reloads); **New**
+starts another and deletes the old one, along with any other leftover fleet chat (one with a turn
+still running is removed on the next pass). They never appear in your session lists (web,
+terminal or mobile): their sessions carry `internal_session_kind: fleet_chat`
+(`mu/session/visibility.py`).
 
 ## 4. Designing tools with the AI (Studio)
 

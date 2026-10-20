@@ -63,7 +63,7 @@ export function EnvironmentsEditor({ drafts, onChange, sources }: { drafts: Envi
                       onPress={() => onChange(drafts.map((x, j) => (j === i ? draftFromSpec(o.spec, x) : x)))}
                       style={[styles.chip, { borderColor: on ? colors.accent.ink : colors.hairline, backgroundColor: on ? colors.accent.wash : colors.surface }]}>
                       <Text variant="xs" style={[styles.mono, { color: on ? colors.accent.ink : colors.ink }]} numberOfLines={1}>{o.name}</Text>
-                      {o.status || o.size ? <Text variant="xs" style={{ color: colors.ink3 }}>{o.status || o.size}</Text> : null}
+                      {o.status || o.size ? <Text variant="xs" tone="ink3">{o.status || o.size}</Text> : null}
                     </Pressable>
                   );
                 })}
@@ -109,7 +109,7 @@ export function BuildEnvironmentsField({ active, repository, session, value, onC
   return (
     <Field label="Build environments" hint={value ? 'Job override' : resolved ? `from ${sourceLabel(resolved.source)}` : undefined} testID="new-job-environments">
       {loading && !vm ? <Loading label="Resolving build environments…" /> : null}
-      {error ? <Text variant="xs" style={{ color: colors.ink3 }}>Build environments unavailable: {error}</Text> : null}
+      {error ? <Text variant="xs" tone="ink3">Build environments unavailable: {error}</Text> : null}
       {resolved?.error ? <Banner tone="danger" glyph="✗" title={resolved.error} /> : null}
       {value ? (
         <>
@@ -155,10 +155,10 @@ export function RepositoryEnvironmentApproval({ repository, session, debounceMs 
     <View style={styles.col} testID="new-job-environment-approval">
       {pending.map(r => (
         <Banner key={r.fingerprint} tone="warn" glyph="◆" title={`Repository build environment: ${r.kind === 'build' ? 'build and use' : 'use'} ${r.label || r.ref}`}>
-          <Text variant="xs"><Text variant="xs" style={{ color: colors.ink3 }}>Ref: </Text><Text variant="xs" style={styles.mono}>{r.ref}</Text></Text>
-          <Text variant="xs"><Text variant="xs" style={{ color: colors.ink3 }}>Fingerprint: </Text><Text variant="xs" style={styles.mono}>{r.fingerprint}</Text></Text>
-          {r.ignored_features?.length ? <Text variant="xs" style={{ color: colors.ink3 }}>Ignored features: {r.ignored_features.join(', ')}</Text> : null}
-          {r.message ? <Text variant="xs" style={{ color: colors.ink3 }}>{r.message}</Text> : null}
+          <Text variant="xs"><Text variant="xs" tone="ink3">Ref: </Text><Text variant="xs" style={styles.mono}>{r.ref}</Text></Text>
+          <Text variant="xs"><Text variant="xs" tone="ink3">Fingerprint: </Text><Text variant="xs" style={styles.mono}>{r.fingerprint}</Text></Text>
+          {r.ignored_features?.length ? <Text variant="xs" tone="ink3">Ignored features: {r.ignored_features.join(', ')}</Text> : null}
+          {r.message ? <Text variant="xs" tone="ink3">{r.message}</Text> : null}
           <View style={styles.rowWrap}>
             <Button small tone="warn" label="Approve environment" disabled={!!busy} testID={`approve-environment-${r.fingerprint}`}
               onPress={() => {
@@ -209,7 +209,7 @@ export function JobEnvironmentsSheet({ visible, onClose, environments, actions, 
       <View style={styles.col} testID="job-environments-sheet">
         {editing ? (
           <>
-            <Text variant="xs" style={{ color: colors.ink3 }}>Saved as this job's override; its snapshots are re-created before the next stage. Remove every row to fall back to repo config, session or Settings.</Text>
+            <Text variant="xs" tone="ink3">Saved as this job's override; its snapshots are re-created before the next stage. Remove every row to fall back to repo config, session or Settings.</Text>
             <EnvironmentsEditor drafts={editing} onChange={setEditing} sources={vm} />
             <View style={styles.rowEnd}>
               <Button label="Cancel" onPress={() => setEditing(null)} />
@@ -220,7 +220,7 @@ export function JobEnvironmentsSheet({ visible, onClose, environments, actions, 
         ) : (
           <>
             <View style={styles.rowWrap}>
-              <Text variant="xs" style={{ color: colors.ink3, flex: 1 }}>
+              <Text variant="xs" tone="ink3" style={styles.flex}>
                 {env?.count ? `${env.count} binding${env.count === 1 ? '' : 's'} from ${sourceLabel(env.source)}${env.bytes ? ` · ${bytes(env.bytes)}` : ''}` : 'This job uses the shared runtime image.'}
               </Text>
               {env?.kept ? <Pill tone="accent">⬢ kept</Pill> : null}
@@ -238,7 +238,7 @@ export function JobEnvironmentsSheet({ visible, onClose, environments, actions, 
                 {b.probed_env?.length ? <KV label="Probed env">{b.probed_env.join(', ')}</KV> : null}
                 {b.error ? <Banner tone="danger" glyph="✗" role="alert" title={b.error} /> : null}
                 {b.secret_paths?.length ? (
-                  <View><Text variant="xs" style={{ color: colors.danger.ink, fontWeight: fontWeights.semibold }}>Secret scan hits ({b.secret_paths.length})</Text><Pre numberOfLines={12}>{b.secret_paths.join('\n')}</Pre></View>
+                  <View><Text variant="xs" tone="danger" style={styles.strong}>Secret scan hits ({b.secret_paths.length})</Text><Pre numberOfLines={12}>{b.secret_paths.join('\n')}</Pre></View>
                 ) : null}
                 {b.skipped_paths?.length ? <SkippedPaths paths={b.skipped_paths} /> : null}
               </Panel>
@@ -267,7 +267,7 @@ function SkippedPaths({ paths }: { paths: string[] }) {
   return (
     <View>
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(v => !v)} style={styles.disclosure}>
-        <Text variant="xs" style={{ color: colors.accent.ink }}>{open ? '▾' : '▸'} {paths.length} home path{paths.length === 1 ? '' : 's'} left out</Text>
+        <Text variant="xs" tone="accent">{open ? '▾' : '▸'} {paths.length} home path{paths.length === 1 ? '' : 's'} left out</Text>
       </Pressable>
       {open ? <Pre numberOfLines={30}>{paths.join('\n')}</Pre> : null}
     </View>
@@ -293,23 +293,23 @@ export function BuildEnvironmentsSettings({ active }: { active: boolean }) {
   return (
     <Panel title="Build environment host" testID="build-environments-settings">
       {loading && !vm ? <Loading label="Checking the host…" /> : null}
-      {error ? <Text variant="xs" style={{ color: colors.ink3 }}>Unavailable: {error}</Text> : null}
+      {error ? <Text variant="xs" tone="ink3">Unavailable: {error}</Text> : null}
       {vm ? (
         <>
           <KV label="Docker-in-Docker">
-            <Text variant="xs" style={{ color: dind?.available ? colors.ok.ink : colors.attention.ink }}>{dind?.available ? `✓ available (${dind.engine})` : '◆ not installed'}</Text>
+            <Text variant="xs" tone={dind?.available ? 'ok' : 'attention'}>{dind?.available ? `✓ available (${dind.engine})` : '◆ not installed'}</Text>
           </KV>
           {!dind?.available ? (
             <View style={styles.col} testID="sysbox-guidance">
-              <Text variant="xs" style={{ color: colors.ink3 }}>{dind?.message}</Text>
+              <Text variant="xs" tone="ink3">{dind?.message}</Text>
               {(dind?.install || []).map((step, i) => <Text key={i} variant="xs" selectable>{i + 1}. {step}</Text>)}
             </View>
           ) : null}
-          <KV label="GPUs"><Text variant="xs" style={{ color: vm.gpu?.supported ? colors.ok.ink : colors.ink3 }}>{vm.gpu?.supported ? `✓ ${vm.gpu.reason}` : vm.gpu?.reason || 'unavailable'}</Text></KV>
-          <Text variant="sm" style={{ fontWeight: fontWeights.semibold, marginTop: spacing.sm }}>Kept jobs</Text>
+          <KV label="GPUs"><Text variant="xs" tone={vm.gpu?.supported ? 'ok' : 'ink3'}>{vm.gpu?.supported ? `✓ ${vm.gpu.reason}` : vm.gpu?.reason || 'unavailable'}</Text></KV>
+          <Text variant="sm" style={styles.sectionGap}>Kept jobs</Text>
           {kept.length ? kept.map(k => (
             <View key={k.id} style={[styles.kept, { borderColor: colors.hairline }]} testID={`kept-job-${k.id}`}>
-              <View style={{ flex: 1 }}>
+              <View style={styles.flex}>
                 <Text variant="xs" numberOfLines={1}>{k.title || k.id.slice(0, 8)}</Text>
                 <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]} numberOfLines={1}>{k.bindings || '—'}{k.bytes ? ` · ${bytes(k.bytes)}` : ''}</Text>
               </View>
@@ -323,10 +323,16 @@ export function BuildEnvironmentsSettings({ active }: { active: boolean }) {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  strong: { fontWeight: fontWeights.semibold },
+  flexStrong: { flex: 1, fontWeight: fontWeights.semibold },
+  mono: { fontFamily: fonts.mono },
+  monoShrink: { flexShrink: 1, fontFamily: fonts.mono },
+  sectionGap: { fontWeight: fontWeights.semibold, marginTop: spacing.sm },
+  intro: { marginBottom: spacing.sm },
   col: { gap: spacing.sm },
   rowWrap: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
   rowEnd: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
-  mono: { fontFamily: fonts.mono },
   draft: { borderWidth: 1, borderRadius: radii.control, padding: spacing.sm, gap: spacing.xs },
   chips: { gap: spacing.xs, paddingVertical: 2 },
   chip: { borderWidth: 1, borderRadius: radii.control, paddingHorizontal: spacing.sm, paddingVertical: 4, minHeight: 36, justifyContent: 'center', maxWidth: 220 },

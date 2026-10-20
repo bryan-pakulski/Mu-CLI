@@ -24,6 +24,8 @@ Invoke via `python mucli.py [flags]`.
 | `--gui` | Launch the browser GUI in the background (default port 30311). |
 | `--trace` | Launch the GUI and open the Trace Analyzer dashboard (`/trace`). See [tracing.md](tracing.md). |
 | `--trace-analyze <file>` | Print a terminal summary of a trace JSONL file and exit (headless quick-look). See [tracing.md](tracing.md). |
+| `gui pair` | Show a pairing QR code and code for a phone (valid 10 minutes, one use). See [security.md](security.md) §8. |
+| `gui devices [list\|revoke NAME]` | List paired devices, or revoke one (its streams and terminal close at once). |
 
 ## Environment variables
 

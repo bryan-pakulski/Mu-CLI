@@ -1,0 +1,272 @@
+{
+ "accepted_at": 1792491810.905049,
+ "actions": [
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": false,
+   "hidden": false,
+   "id": "acceptNode",
+   "input": null,
+   "label": "Accept",
+   "primary": true,
+   "reason": "node is not awaiting acceptance",
+   "shortcut": "",
+   "tone": "ok"
+  },
+  {
+   "args": {},
+   "confirm": "Quarantine this node? It keeps reporting but receives no work until released.",
+   "danger": false,
+   "dialog": null,
+   "enabled": true,
+   "hidden": false,
+   "id": "quarantineNode",
+   "input": {
+    "arg": "reason",
+    "label": "Reason (optional)",
+    "multiline": false,
+    "optional": true
+   },
+   "label": "Quarantine",
+   "primary": false,
+   "reason": "",
+   "shortcut": "",
+   "tone": "warn"
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": false,
+   "hidden": false,
+   "id": "unquarantineNode",
+   "input": null,
+   "label": "Release quarantine",
+   "primary": false,
+   "reason": "node is not quarantined",
+   "shortcut": "",
+   "tone": ""
+  },
+  {
+   "args": {},
+   "confirm": "Revoke this node? Its credential is deleted and live executions become unreachable. It must enrol again with a new join token.",
+   "danger": true,
+   "dialog": null,
+   "enabled": true,
+   "hidden": false,
+   "id": "revokeNode",
+   "input": null,
+   "label": "Revoke",
+   "primary": false,
+   "reason": "",
+   "shortcut": "",
+   "tone": "danger"
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": "labels",
+   "enabled": true,
+   "hidden": false,
+   "id": "setNodeLabels",
+   "input": null,
+   "label": "Edit labels",
+   "primary": false,
+   "reason": "",
+   "shortcut": "",
+   "tone": ""
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": true,
+   "hidden": false,
+   "id": "setNodeCanary",
+   "input": null,
+   "label": "Unmark canary",
+   "primary": false,
+   "reason": "",
+   "shortcut": "",
+   "tone": ""
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": true,
+   "hidden": false,
+   "id": "rotateCredential",
+   "input": null,
+   "label": "Rotate credential",
+   "primary": false,
+   "reason": "",
+   "shortcut": "",
+   "tone": ""
+  },
+  {
+   "args": {},
+   "confirm": null,
+   "danger": false,
+   "dialog": null,
+   "enabled": true,
+   "hidden": false,
+   "id": "refreshFacts",
+   "input": null,
+   "label": "Refresh facts",
+   "primary": false,
+   "reason": "",
+   "shortcut": "",
+   "tone": ""
+  }
+ ],
+ "address": "",
+ "agent": {
+  "current": "1.2.0",
+  "outdated": true,
+  "reason": "agent test can't update itself: update it once by hand",
+  "updatable": false,
+  "version": "test"
+ },
+ "agent_version": "test",
+ "busy": null,
+ "canary": true,
+ "created_at": 1792491810.905049,
+ "facts": {
+  "cpu_count": 2,
+  "kernel": "6.1.0",
+  "os": {
+   "id": "debian",
+   "pretty_name": "Debian 12"
+  },
+  "provides": [
+   "systemd",
+   "ss",
+   "openssl"
+  ],
+  "system": "linux",
+  "systemd": true
+ },
+ "facts_at": 1792491810.905049,
+ "groups": [],
+ "id": "n_a1105c121a",
+ "kind": "host",
+ "labels": {
+  "env": "prod",
+  "role": "web"
+ },
+ "last_seen": 1792491810.905049,
+ "last_seen_ago": "0s ago",
+ "name": "web-1",
+ "online": true,
+ "policy": {
+  "accept_categories": [
+   "*"
+  ],
+  "allow_agent_updates": false,
+  "allow_remote_policy": null,
+  "allowed_run_as": [
+   "*"
+  ],
+  "allowed_runtimes": [
+   "bash",
+   "python3",
+   "builtin"
+  ],
+  "allowed_tools": [
+   "*"
+  ],
+  "canary": true,
+  "denied_tools": [],
+  "deny_all": false,
+  "errors": [],
+  "max_effect": "destructive",
+  "max_privilege": "root",
+  "quiet_hours": [],
+  "require_check_mode_first": false
+ },
+ "policy_errors": [],
+ "presence": "online",
+ "recent_executions": [
+  {
+   "attempts": 1,
+   "batch": 0,
+   "check_mode": false,
+   "created_at": 1792491810.905049,
+   "dispatched_at": 1792491810.905049,
+   "duration_s": 0.1,
+   "exit_code": 0,
+   "finished_at": 1792491810.905049,
+   "id": "x_54f69181f848",
+   "log": "message: hello\n",
+   "log_truncated": false,
+   "node_id": "n_a1105c121a",
+   "output": {
+    "message": "hello from web-1"
+   },
+   "output_errors": [],
+   "params": {
+    "message": "hello"
+   },
+   "reason": "",
+   "redactions": 0,
+   "rollback_of": "",
+   "run_id": "r_fd98e12fc9d8",
+   "started_at": 1792491810.905049,
+   "state": "succeeded",
+   "step": 0,
+   "step_name": "main",
+   "style": {
+    "glyph": "\u2713",
+    "label": "succeeded",
+    "semantic": "ok",
+    "status": "done"
+   },
+   "tool": "demo.echo@1"
+  }
+ ],
+ "remote_policy": {
+  "allowed": false,
+  "pending": null,
+  "reason": "the node's agent predates remote policy edits; update it (agent 1.2.0)",
+  "sha256": "",
+  "supported": false,
+  "text": ""
+ },
+ "sandbox": "",
+ "status": "active",
+ "style": {
+  "glyph": "\u2713",
+  "label": "active",
+  "semantic": "ok",
+  "status": "done"
+ },
+ "summary": {
+  "arch": "",
+  "cpus": 2,
+  "hostname": "",
+  "kernel": "6.1.0",
+  "load": null,
+  "max_disk_used_pct": null,
+  "memory_gb": null,
+  "memory_used_pct": null,
+  "os": "Debian 12",
+  "provides": [
+   "systemd",
+   "ss",
+   "openssl"
+  ],
+  "reboot_reasons": [],
+  "reboot_required": null,
+  "services": 0,
+  "systemd": true,
+  "uptime_days": null
+ }
+}

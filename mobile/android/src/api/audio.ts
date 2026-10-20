@@ -1,10 +1,11 @@
 import { baseUrl } from './client';
+import { authHeaders } from './auth';
 
 export const audioApi = {
   tts: async (text: string, voice?: string, sessionName?: string): Promise<Blob> => {
     const res = await fetch(`${baseUrl()}/api/audio/tts`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders(baseUrl()) },
       body: JSON.stringify({ text, voice, session_name: sessionName }),
     });
     if (!res.ok) throw new Error(`TTS failed: ${res.status}`);
@@ -19,7 +20,7 @@ export const audioApi = {
     } as unknown as Blob);
     const res = await fetch(`${baseUrl()}/api/audio/stt`, {
       method: 'POST',
-      headers: { 'Content-Type': 'multipart/form-data' },
+      headers: { ...authHeaders(baseUrl()) },  // multipart: fetch sets the boundary
       body: formData,
     });
     if (!res.ok) throw new Error(`STT failed: ${res.status}`);

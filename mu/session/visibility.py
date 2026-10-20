@@ -49,10 +49,28 @@ def is_job_workspace_session(data: Mapping[str, Any] | None = None) -> bool:
     return str(variables.get("internal_session_kind") or "").strip().lower() == "job_workspace"
 
 
+# The orchestration page's fleet chat (POST /api/orchestration/chat/session) is temporary: one
+# conversation at a time, the previous one deleted when a new one starts. Its sessions are named
+# ``fleet-chat-<YYYYMMDD-HHMMSS>[-n]`` and carry ``internal_session_kind = "fleet_chat"``.
+FLEET_CHAT_KIND = "fleet_chat"
+FLEET_CHAT_NAME = re.compile(r"^fleet-chat-\d{8}-\d{6}(?:-\d+)?$")
+
+
+def is_fleet_chat_session(name: str, data: Mapping[str, Any] | None = None) -> bool:
+    """Return True for a (temporary) orchestration fleet-chat session."""
+
+    variables = data.get("variables") if isinstance(data, Mapping) else None
+    if isinstance(variables, Mapping) and str(variables.get("internal_session_kind") or "").strip().lower() == FLEET_CHAT_KIND:
+        return True
+    return bool(FLEET_CHAT_NAME.fullmatch(str(name or "").strip()))
+
+
 def is_user_visible_session(name: str, data: Mapping[str, Any] | None = None) -> bool:
     """Return whether a session belongs in ordinary user conversation lists."""
 
-    return not is_durable_job_session(name, data) and not is_job_workspace_session(data)
+    return (not is_durable_job_session(name, data) and not is_job_workspace_session(data)
+            and not is_fleet_chat_session(name, data))
 
 
-__all__ = ["is_durable_job_session", "is_job_workspace_session", "is_user_visible_session"]
+__all__ = ["FLEET_CHAT_KIND", "is_durable_job_session", "is_fleet_chat_session", "is_job_workspace_session",
+           "is_user_visible_session"]

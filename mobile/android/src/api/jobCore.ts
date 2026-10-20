@@ -3,7 +3,7 @@ import { subscribeToEvents } from './sse';
 import type { JobBuildEnvironments, JobEnvironmentsSummary } from './environments';
 import type { ResolvedStageAgent } from './agents';
 
-export type JobPart = 'state' | 'pipeline' | 'plan' | 'session' | 'diff' | 'review' | 'checks' | 'costs';
+export type JobPart = 'state' | 'pipeline' | 'plan' | 'session' | 'diff' | 'review' | 'checks' | 'costs' | 'notes';
 export type ActionTone = 'ok' | 'warn' | 'danger' | '';
 /** Server-decided command availability (CONTRACT §7 adds tone/confirm/input/dialog/hidden). */
 export interface JobAction {
@@ -101,7 +101,12 @@ export interface EnvironmentRepair {
 export interface FailedCase { run: number; suite: string; name: string; id: string; message: string; new: boolean; classname?: string }
 export interface SuiteHistoryPoint { run: number; passed: boolean; duration_ms: number | null; finished_at: number | null }
 export interface TranscriptPart { type: string; text?: string; tool_name?: string; tool_args?: unknown; tool_result?: unknown }
+/** A screenshot, recording or log an agent captured while testing (mu/jobs/evidence.py). */
+export interface EvidenceItem { id: string; stage: string; attempt?: number; file: string; name: string; caption: string; kind: 'image' | 'video' | 'text' | string; bytes: number; created_at: number }
+/** One plain-English note (mu/jobs/core/notes.py): what happened, oldest first; `tab` links to detail. */
+export interface JobNote { id: string; at: number; stage: string; tone: string; title: string; headline: string; bullets: string[]; meta: string; count: number; tab: string }
 export interface JobVM extends JobSummary {
+  notes?: JobNote[];
   branch: string; worktree: string; pipeline: JobStep[]; fix_attempts?: number;
   plan?: { version: number; latest_version: number; approved_version: number; versions: number[]; markdown: string; draft: string | null; diff_from_previous: string; errors: string[]; error?: string };
   review?: { verdict: string; merge_readiness: number; summary: string; counts: Record<string, number>; findings: Finding[]; plan_coverage: Array<{ criterion_id: string; status: string; evidence: string }>; out_of_scope_changes?: unknown[] } | null;
@@ -110,7 +115,7 @@ export interface JobVM extends JobSummary {
   environment_approval?: EnvironmentApproval | null;
   /** Jobs run unattended: a failed template job setup is a warning (the job continued). */
   setup_warning?: { binding: string; command?: string; index?: number; exit_code?: number | null; template?: string; message?: string; error?: string } | null;
-  checks?: { live?: AuditEvent[]; runs: CheckRun[]; failed_cases?: FailedCase[]; history?: Record<string, SuiteHistoryPoint[]>; repairs?: EnvironmentRepair[] };
+  checks?: { live?: AuditEvent[]; runs: CheckRun[]; evidence?: EvidenceItem[]; failed_cases?: FailedCase[]; history?: Record<string, SuiteHistoryPoint[]>; repairs?: EnvironmentRepair[] };
   session?: { session_name?: string; approval?: { tool_name: string; tool_args: Record<string, unknown> | string; reason?: string; detail?: string } | null; live: boolean; events: AuditEvent[]; stages: Record<string, Array<{ role: string; parts: TranscriptPart[] }>> };
   costs?: { total_usd: number; by_stage: Record<string, number>; events: AuditEvent[] };
   /** Per-binding build environment state (job environments panel). */

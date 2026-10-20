@@ -920,6 +920,11 @@ def main():
         from mu.orchestration.cli import main as orch_main
 
         sys.exit(orch_main(sys.argv[2:]))
+    # `mucli gui pair` / `mucli gui devices [revoke NAME]`: paired devices (mobile).
+    if len(sys.argv) > 1 and sys.argv[1] == "gui":
+        from mu.gui.devices_cli import main as gui_main
+
+        sys.exit(gui_main(sys.argv[2:]))
     logger.info("μCLI starting...")
 
     parser = argparse.ArgumentParser(description="Interactive AI CLI")

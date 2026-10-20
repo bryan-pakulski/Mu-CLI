@@ -1,0 +1,1110 @@
+{
+  "actions": [
+    {
+      "args": {
+        "version": 0
+      },
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "approvePlan",
+      "input": null,
+      "label": "Approve plan",
+      "primary": false,
+      "reason": "plan is not awaiting approval",
+      "shortcut": "a",
+      "tone": "ok"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "rejectPlan",
+      "input": {
+        "label": "What should the planner change?",
+        "multiline": true,
+        "optional": false
+      },
+      "label": "Request re-plan",
+      "primary": false,
+      "reason": "plan is not awaiting approval",
+      "shortcut": "x",
+      "tone": "danger"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "savePlanDraft",
+      "input": null,
+      "label": "Save draft",
+      "primary": false,
+      "reason": "plan is not awaiting approval",
+      "shortcut": "e",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "approveTool",
+      "input": null,
+      "label": "Approve tool",
+      "primary": false,
+      "reason": "no tool approval pending",
+      "shortcut": "a",
+      "tone": "warn"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "denyTool",
+      "input": {
+        "label": "Reason for the agent (optional)",
+        "multiline": true,
+        "optional": true
+      },
+      "label": "Deny tool",
+      "primary": false,
+      "reason": "no tool approval pending",
+      "shortcut": "d",
+      "tone": "danger"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": true,
+      "hidden": false,
+      "id": "message",
+      "input": {
+        "label": "Message to the agent",
+        "multiline": true,
+        "optional": false
+      },
+      "label": "Message",
+      "primary": false,
+      "reason": "",
+      "shortcut": "m",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": true,
+      "hidden": true,
+      "id": "raiseLimit",
+      "input": {
+        "arg": "amount",
+        "label": "Amount (e.g. 25 for $25, 30m, 5M tokens)",
+        "multiline": false,
+        "optional": false,
+        "type": "amount",
+        "value": ""
+      },
+      "label": "Raise limit",
+      "primary": false,
+      "reason": "",
+      "shortcut": "L",
+      "tone": "ok"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "resume",
+      "input": {
+        "label": "Guidance for the agent (optional)",
+        "multiline": true,
+        "optional": true
+      },
+      "label": "Resume",
+      "primary": false,
+      "reason": "job is not paused",
+      "shortcut": "u",
+      "tone": "warn"
+    },
+    {
+      "args": {},
+      "confirm": "Restart the current stage? Its in-progress work is discarded.",
+      "danger": false,
+      "dialog": null,
+      "enabled": true,
+      "hidden": false,
+      "id": "restartStage",
+      "input": null,
+      "label": "Restart stage",
+      "primary": false,
+      "reason": "",
+      "shortcut": "R",
+      "tone": "warn"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "retry",
+      "input": null,
+      "label": "Retry",
+      "primary": false,
+      "reason": "only failed jobs can be retried",
+      "shortcut": "y",
+      "tone": "warn"
+    },
+    {
+      "args": {},
+      "confirm": "Continue without the template's job setup? Checks that need the missing dependencies will be reported as unrunnable.",
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "skipSetup",
+      "input": null,
+      "label": "Continue without setup",
+      "primary": false,
+      "reason": "no failed job setup",
+      "shortcut": "",
+      "tone": "warn"
+    },
+    {
+      "args": {},
+      "confirm": "Review this job although some checks could not run? The review verdict is capped at needs work.",
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "continueUnverified",
+      "input": null,
+      "label": "Continue unverified",
+      "primary": false,
+      "reason": "checks are not waiting on unrunnable results",
+      "shortcut": "",
+      "tone": "warn"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "recheck",
+      "input": null,
+      "label": "Re-run checks",
+      "primary": false,
+      "reason": "checks re-run only after review",
+      "shortcut": "c",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "reprompt",
+      "input": {
+        "label": "Guidance for the fix (optional)",
+        "multiline": true,
+        "optional": true
+      },
+      "label": "Re-prompt with findings",
+      "primary": false,
+      "reason": "re-prompt is available after review",
+      "shortcut": "F",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": true,
+      "id": "markFindings",
+      "input": null,
+      "label": "Update findings",
+      "primary": false,
+      "reason": "no review findings",
+      "shortcut": "",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": true,
+      "id": "markViewed",
+      "input": null,
+      "label": "Mark file viewed",
+      "primary": false,
+      "reason": "no diff to review",
+      "shortcut": "",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": "push",
+      "enabled": false,
+      "hidden": false,
+      "id": "push",
+      "input": null,
+      "label": "Push / open PR",
+      "primary": false,
+      "reason": "push is available after review",
+      "shortcut": "p",
+      "tone": "ok"
+    },
+    {
+      "args": {},
+      "confirm": "Push the branch again and open a new PR? The closed PR is left as it is.",
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "repush",
+      "input": null,
+      "label": "Re-push",
+      "primary": false,
+      "reason": "re-push is available when the job's PR was closed without merging",
+      "shortcut": "",
+      "tone": "ok"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "markMerged",
+      "input": null,
+      "label": "Mark merged",
+      "primary": false,
+      "reason": "job has not been pushed",
+      "shortcut": "D",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": "Approve this repository-declared build environment? mucli will use (or build) it for jobs on this repository (a job still waiting on it is requeued; a job that ran without it keeps its current environment).",
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "approveEnvironment",
+      "input": null,
+      "label": "Approve environment",
+      "primary": false,
+      "reason": "no environment approval pending",
+      "shortcut": "",
+      "tone": "warn"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": false,
+      "id": "rejectEnvironment",
+      "input": {
+        "label": "Reason (optional)",
+        "multiline": false,
+        "optional": true
+      },
+      "label": "Reject environment",
+      "primary": false,
+      "reason": "no environment approval pending",
+      "shortcut": "",
+      "tone": "danger"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": "environments",
+      "enabled": false,
+      "hidden": true,
+      "id": "setEnvironments",
+      "input": null,
+      "label": "Change build environments",
+      "primary": false,
+      "reason": "a stage is running; wait for it to finish or pause the job",
+      "shortcut": "",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": "Re-snapshot the build environments for this job? Stages started after this use the new images.",
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": true,
+      "id": "refreshEnvironments",
+      "input": null,
+      "label": "Refresh environments",
+      "primary": false,
+      "reason": "a stage is running; wait for it to finish or pause the job",
+      "shortcut": "E",
+      "tone": "warn"
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": true,
+      "hidden": true,
+      "id": "keepEnvironments",
+      "input": null,
+      "label": "Keep environments",
+      "primary": false,
+      "reason": "",
+      "shortcut": "K",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": true,
+      "id": "addRepairToTemplate",
+      "input": null,
+      "label": "Add to template setup",
+      "primary": false,
+      "reason": "no committed environment repair",
+      "shortcut": "",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": null,
+      "danger": false,
+      "dialog": null,
+      "enabled": false,
+      "hidden": true,
+      "id": "saveRepairedTemplate",
+      "input": {
+        "arg": "name",
+        "label": "Template name",
+        "multiline": false,
+        "optional": true
+      },
+      "label": "Save repaired image as template",
+      "primary": false,
+      "reason": "no committed environment repair",
+      "shortcut": "",
+      "tone": ""
+    },
+    {
+      "args": {},
+      "confirm": "Discard this job? Running work is cancelled and the job cannot be resumed.",
+      "danger": true,
+      "dialog": null,
+      "enabled": true,
+      "hidden": false,
+      "id": "discard",
+      "input": null,
+      "label": "Discard",
+      "primary": false,
+      "reason": "",
+      "shortcut": "",
+      "tone": "danger"
+    },
+    {
+      "args": {},
+      "confirm": "Delete this job and its artifacts? This cannot be undone.",
+      "danger": true,
+      "dialog": null,
+      "enabled": true,
+      "hidden": false,
+      "id": "delete",
+      "input": null,
+      "label": "Delete",
+      "primary": false,
+      "reason": "",
+      "shortcut": "",
+      "tone": "danger"
+    }
+  ],
+  "approval": null,
+  "attention_detail": "",
+  "attention_headline": "",
+  "branch": "mu/job-78c24ad58c-fix-the-login-race",
+  "budget": {
+    "active_seconds": 0.3,
+    "cost_fraction": null,
+    "cost_usd": 0.0,
+    "max_cost_usd": null,
+    "max_runtime_seconds": null
+  },
+  "build_environments": {
+    "bindings": [],
+    "bytes": 0,
+    "count": 0,
+    "kept": false,
+    "refresh_pending": false,
+    "repairs": [],
+    "runtime_repair_image": "",
+    "source": "default",
+    "summary": ""
+  },
+  "checks": {
+    "evidence": [],
+    "failed_cases": [
+      {
+        "classname": "",
+        "id": "check1",
+        "message": "1 failed, 1 passed, 1 skipped",
+        "name": "check1",
+        "new": false,
+        "run": 1,
+        "suite": "check1"
+      }
+    ],
+    "history": {
+      "check1": [
+        {
+          "duration_ms": 0,
+          "finished_at": 1792493070.6958208,
+          "passed": false,
+          "run": 1
+        }
+      ]
+    },
+    "live": [],
+    "repairs": [],
+    "runs": [
+      {
+        "byproducts": [
+          {
+            "kind": "untracked",
+            "path": "capture.pcap",
+            "suite": "check1"
+          },
+          {
+            "kind": "untracked",
+            "path": "coverage.json",
+            "suite": "check1"
+          },
+          {
+            "kind": "untracked",
+            "path": "test.log",
+            "suite": "check1"
+          },
+          {
+            "kind": "untracked",
+            "path": "timings.csv",
+            "suite": "check1"
+          }
+        ],
+        "checks_failed": 1,
+        "checks_passed": 0,
+        "checks_total": 1,
+        "dirty_worktree": false,
+        "duration_ms": 29,
+        "finished_at": 1792493070.6958208,
+        "head_sha": "a230f8ab594dc71f736607275ae8b951908962eb",
+        "missing_docker_suites": [],
+        "missing_tool_environments": {},
+        "missing_tools": [],
+        "new_failures": 0,
+        "passed": false,
+        "preexisting_failures": 1,
+        "run": 1,
+        "started_at": 1792493070.6662116,
+        "suites": [
+          {
+            "baseline": {
+              "passed": false,
+              "return_code": 1,
+              "stderr": "",
+              "stdout": "1 failed, 1 passed, 1 skipped"
+            },
+            "byproducts": [
+              "capture.pcap",
+              "coverage.json",
+              "test.log",
+              "timings.csv"
+            ],
+            "command": "pytest -q",
+            "duration_ms": 0,
+            "environment": "",
+            "environment_docker": false,
+            "new_failures": [],
+            "passed": false,
+            "preexisting_failures": [
+              "suite failure (identical baseline output)"
+            ],
+            "return_code": 1,
+            "status": "failed",
+            "stderr": "",
+            "stdout": "1 failed, 1 passed, 1 skipped",
+            "suite": "check1"
+          }
+        ],
+        "trigger": "auto",
+        "unrunnable": 0,
+        "unrunnable_suites": [],
+        "verified": true
+      }
+    ]
+  },
+  "cost_usd": 0.0,
+  "costs": {
+    "by_stage": {},
+    "events": [
+      {
+        "created_at": 1792493070.3413785,
+        "event_type": "job_created",
+        "from_status": null,
+        "id": 5,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "core_state": {
+            "failed_from": null,
+            "fix_attempts": 0,
+            "paused_from": null,
+            "state": "provisioning"
+          },
+          "execution": {
+            "agent_mode": "default",
+            "auto_approve_writes": true,
+            "model": "small",
+            "provider": "ollama",
+            "session_type": "workspace",
+            "stages": {}
+          },
+          "title": "Fix the login race"
+        },
+        "reason": "",
+        "to_status": "queued"
+      },
+      {
+        "created_at": 1792493070.342897,
+        "event_type": "worktree_preflight_started",
+        "from_status": null,
+        "id": 6,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "managed_branch": "mu/job-78c24ad58c-fix-the-login-race",
+          "managed_worktree": "/work/worktrees/78c24ad58c6a40c8818fda1374e9a222",
+          "repository_input": "/work/repo",
+          "requested_base_branch": "main",
+          "requested_base_sha": ""
+        },
+        "reason": "",
+        "to_status": null
+      },
+      {
+        "created_at": 1792493070.357876,
+        "event_type": "repository_inspected",
+        "from_status": null,
+        "id": 7,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "canonical_path": "/work/repo",
+          "current_branch": "main",
+          "detected_default_branch": "main",
+          "git_common_dir": "/work/repo/.git",
+          "head_sha": "a230f8ab594dc71f736607275ae8b951908962eb",
+          "origin_url": "",
+          "primary_branch": "main",
+          "repository_id": "ace5f643cd32760c1c481a4d",
+          "repository_input": "/work/repo",
+          "source_worktree_clean": true,
+          "submitted_path": "/work/repo"
+        },
+        "reason": "",
+        "to_status": null
+      },
+      {
+        "created_at": 1792493070.3631678,
+        "event_type": "job_base_resolved",
+        "from_status": null,
+        "id": 8,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "base_sha": "a230f8ab594dc71f736607275ae8b951908962eb",
+          "fallback_used": false,
+          "requested_base_branch": "main",
+          "resolved_base_ref": "main"
+        },
+        "reason": "",
+        "to_status": null
+      },
+      {
+        "created_at": 1792493070.3662868,
+        "event_type": "worktree_inventory",
+        "from_status": null,
+        "id": 9,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "managed_path_exists": false,
+          "managed_path_registered": false,
+          "managed_worktree": "/work/worktrees/78c24ad58c6a40c8818fda1374e9a222",
+          "registered_count": 1
+        },
+        "reason": "",
+        "to_status": null
+      },
+      {
+        "created_at": 1792493070.3681228,
+        "event_type": "worktree_add_started",
+        "from_status": null,
+        "id": 10,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "base_ref": "main",
+          "base_sha": "a230f8ab594dc71f736607275ae8b951908962eb",
+          "branch": "mu/job-78c24ad58c-fix-the-login-race",
+          "branch_exists": false,
+          "repository": "/work/repo",
+          "worktree": "/work/worktrees/78c24ad58c6a40c8818fda1374e9a222"
+        },
+        "reason": "",
+        "to_status": null
+      },
+      {
+        "created_at": 1792493070.3750036,
+        "event_type": "worktree_ready",
+        "from_status": null,
+        "id": 11,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "base_ref": "main",
+          "base_sha": "a230f8ab594dc71f736607275ae8b951908962eb",
+          "branch": "mu/job-78c24ad58c-fix-the-login-race",
+          "repository": "/work/repo",
+          "repository_id": "ace5f643cd32760c1c481a4d",
+          "worktree": "/work/worktrees/78c24ad58c6a40c8818fda1374e9a222"
+        },
+        "reason": "",
+        "to_status": null
+      },
+      {
+        "created_at": 1792493070.3760698,
+        "event_type": "status_changed",
+        "from_status": "queued",
+        "id": 12,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "attention_reason": "",
+          "core_state": {
+            "failed_from": null,
+            "fix_attempts": 0,
+            "paused_from": null,
+            "state": "provisioning"
+          }
+        },
+        "reason": "",
+        "to_status": "preparing"
+      },
+      {
+        "created_at": 1792493070.3770125,
+        "event_type": "attempt_started",
+        "from_status": null,
+        "id": 13,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "attempt_id": "f69e29acf7fe44f7bddbe9569156ed8f",
+          "number": 1,
+          "worker_id": "worker"
+        },
+        "reason": "",
+        "to_status": null
+      },
+      {
+        "created_at": 1792493070.3779001,
+        "event_type": "status_changed",
+        "from_status": "preparing",
+        "id": 14,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "attention_reason": "",
+          "core_state": {
+            "failed_from": null,
+            "fix_attempts": 0,
+            "paused_from": null,
+            "state": "implementing"
+          }
+        },
+        "reason": "",
+        "to_status": "running"
+      },
+      {
+        "created_at": 1792493070.3785791,
+        "event_type": "worker_lease_acquired",
+        "from_status": null,
+        "id": 15,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "lease_expires_at": 1792493670.3785791,
+          "worker_id": "worker"
+        },
+        "reason": "",
+        "to_status": null
+      },
+      {
+        "created_at": 1792493070.7011058,
+        "event_type": "checks_completed",
+        "from_status": null,
+        "id": 16,
+        "job_id": "78c24ad58c6a40c8818fda1374e9a222",
+        "payload": {
+          "byproducts": [
+            {
+              "kind": "untracked",
+              "path": "capture.pcap",
+              "suite": "check1"
+            },
+            {
+              "kind": "untracked",
+              "path": "coverage.json",
+              "suite": "check1"
+            },
+            {
+              "kind": "untracked",
+              "path": "test.log",
+              "suite": "check1"
+            },
+            {
+              "kind": "untracked",
+              "path": "timings.csv",
+              "suite": "check1"
+            }
+          ],
+          "checks_failed": 1,
+          "checks_passed": 0,
+          "checks_total": 1,
+          "dirty_worktree": false,
+          "duration_ms": 29,
+          "finished_at": 1792493070.6958208,
+          "head_sha": "a230f8ab594dc71f736607275ae8b951908962eb",
+          "missing_docker_suites": [],
+          "missing_tool_environments": {},
+          "missing_tools": [],
+          "new_failures": 0,
+          "passed": false,
+          "preexisting_failures": 1,
+          "run": 1,
+          "started_at": 1792493070.6662116,
+          "trigger": "auto",
+          "unrunnable": 0,
+          "unrunnable_suites": [],
+          "verified": true
+        },
+        "reason": "",
+        "to_status": null
+      }
+    ],
+    "total_usd": 0.0
+  },
+  "created_at": 1792493070.3413785,
+  "diff": {
+    "live": {
+      "base_sha": "a230f8ab594dc71f736607275ae8b951908962eb",
+      "bytes": 0,
+      "files": [],
+      "generated_at": 1792493070.7304146,
+      "patch": "",
+      "truncated": false,
+      "untracked": [],
+      "untracked_total": 0
+    },
+    "patch": null,
+    "viewed": []
+  },
+  "environment_approval": null,
+  "environments": {
+    "bytes": 0,
+    "count": 0,
+    "kept": false,
+    "source": "default",
+    "status": "",
+    "summary": ""
+  },
+  "failed_from": null,
+  "fix_attempts": 0,
+  "id": "78c24ad58c6a40c8818fda1374e9a222",
+  "key": "",
+  "legacy_status": "running",
+  "limit": null,
+  "max_cost_usd": null,
+  "mini": "\u2713\u2500\u2713\u2500\u25cf\u2500\u25cb\u2500\u25cb\u2500\u25cb",
+  "notes": [
+    {
+      "at": 1792493070.3413785,
+      "bullets": [],
+      "count": 1,
+      "headline": "",
+      "id": "e5",
+      "meta": "",
+      "stage": "job",
+      "tab": "",
+      "title": "Job created",
+      "tone": "neutral"
+    },
+    {
+      "at": 1792493070.7011058,
+      "bullets": [
+        "1 already failing before this change"
+      ],
+      "count": 1,
+      "headline": "1 of 1 checks failed.",
+      "id": "e16",
+      "meta": "run 1",
+      "stage": "checks",
+      "tab": "checks",
+      "title": "Checks failed",
+      "tone": "attention"
+    }
+  ],
+  "origin_session": "",
+  "paused_from": null,
+  "pipeline": [
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.037,
+      "glyph": "\u2713",
+      "id": "plan",
+      "label": "Plan",
+      "runs": 1,
+      "started_at": 1792493070.3413785,
+      "status": "done"
+    },
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.0,
+      "glyph": "\u2713",
+      "id": "approve",
+      "label": "Approve",
+      "runs": 0,
+      "started_at": null,
+      "status": "done"
+    },
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.339,
+      "glyph": "\u25cf",
+      "id": "implement",
+      "label": "Implement",
+      "runs": 1,
+      "started_at": 1792493070.3779001,
+      "status": "active"
+    },
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.0,
+      "glyph": "\u25cb",
+      "id": "checks",
+      "label": "Checks",
+      "runs": 0,
+      "started_at": null,
+      "status": "pending"
+    },
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.0,
+      "glyph": "\u25cb",
+      "id": "review",
+      "label": "Review",
+      "runs": 0,
+      "started_at": null,
+      "status": "pending"
+    },
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.0,
+      "glyph": "\u25cb",
+      "id": "push",
+      "label": "Push",
+      "runs": 0,
+      "started_at": null,
+      "status": "pending"
+    }
+  ],
+  "plan": {
+    "approved_version": 0,
+    "diff_from_previous": "",
+    "doc": null,
+    "draft": null,
+    "errors": [
+      "no plan yet"
+    ],
+    "latest_version": 0,
+    "markdown": "",
+    "version": 0,
+    "versions": []
+  },
+  "pr": null,
+  "repository": "/work/repo",
+  "review": null,
+  "session": {
+    "approval": null,
+    "events": [],
+    "live": true,
+    "session_name": "",
+    "stages": {
+      "implement": [],
+      "plan": [],
+      "review": []
+    }
+  },
+  "setup_warning": null,
+  "stage_agents": {
+    "implement": {
+      "agent": "mucli",
+      "effort": "",
+      "label": "mucli",
+      "model": "",
+      "source": "settings"
+    },
+    "plan": {
+      "agent": "mucli",
+      "effort": "",
+      "label": "mucli",
+      "model": "",
+      "source": "settings"
+    },
+    "review": {
+      "agent": "mucli",
+      "effort": "",
+      "label": "mucli",
+      "model": "",
+      "source": "settings"
+    }
+  },
+  "stage_models": {
+    "implement": {
+      "model": "small",
+      "provider": "ollama",
+      "source": "job",
+      "stage": "implement"
+    },
+    "plan": {
+      "model": "small",
+      "provider": "ollama",
+      "source": "job",
+      "stage": "plan"
+    },
+    "review": {
+      "model": "small",
+      "provider": "ollama",
+      "source": "job",
+      "stage": "review"
+    }
+  },
+  "state": "implementing",
+  "steps": [
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.037,
+      "glyph": "\u2713",
+      "id": "plan",
+      "label": "Plan",
+      "runs": 1,
+      "started_at": 1792493070.3413785,
+      "status": "done"
+    },
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.0,
+      "glyph": "\u2713",
+      "id": "approve",
+      "label": "Approve",
+      "runs": 0,
+      "started_at": null,
+      "status": "done"
+    },
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.339,
+      "glyph": "\u25cf",
+      "id": "implement",
+      "label": "Implement",
+      "runs": 1,
+      "started_at": 1792493070.3779001,
+      "status": "active"
+    },
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.0,
+      "glyph": "\u25cb",
+      "id": "checks",
+      "label": "Checks",
+      "runs": 0,
+      "started_at": null,
+      "status": "pending"
+    },
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.0,
+      "glyph": "\u25cb",
+      "id": "review",
+      "label": "Review",
+      "runs": 0,
+      "started_at": null,
+      "status": "pending"
+    },
+    {
+      "cost_usd": 0.0,
+      "detail": "",
+      "elapsed": 0.0,
+      "glyph": "\u25cb",
+      "id": "push",
+      "label": "Push",
+      "runs": 0,
+      "started_at": null,
+      "status": "pending"
+    }
+  ],
+  "title": "Fix the login race",
+  "updated_at": 1792493070.3785791,
+  "verdict": "",
+  "version": 5,
+  "worktree": "/work/worktrees/78c24ad58c6a40c8818fda1374e9a222"
+}

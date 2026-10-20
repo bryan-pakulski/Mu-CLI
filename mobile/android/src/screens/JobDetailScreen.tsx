@@ -1,7 +1,12 @@
+// The job page (plan §6 Work → Job detail), pushed from Work: the page header (title, state
+// sentence, ⋯ menu: job settings, environments, Open a shell, performance), the banners that need
+// you (tool and environment approvals, a limit pause, a setup warning), the pipeline, the action
+// bar from `job.actions`, and the tabs — Notes, Session, Plan, Diff (+ full-screen review),
+// Review, Checks (+ artifacts and evidence), Diagnostics, Cost & audit.
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 
 import { jobCoreApi, subscribeToJobChanges, type Finding, type JobPart, type JobVM } from '../api/jobCore';
 import { jobsApi, type JobAttempt, type JobDiagnosticsSnapshot } from '../api/jobs';
@@ -10,25 +15,34 @@ import { EnvironmentsPill, JobEnvironmentsSheet } from '../components/JobEnviron
 import { stageAgentsLabel } from '../api/agents';
 import { ApprovalBanner, EnvironmentApprovalBanner, JobActionBar, LimitBanner, useJobCommands } from '../components/JobActions';
 import { budgetSummary } from '../components/jobViews';
-import { ChecksTab, DiffTab, PlanTab, ReviewTab, SessionTab } from '../components/JobTabs';
-import { JOB_TABS, JOB_TAB_LABELS, STEP_TABS, defaultTab, eventTone, parsePatch, runOutcome, type JobTab } from '../components/jobViews';
+import { ChecksTab, DiffTab, NotesTab, PlanTab, ReviewTab, SessionTab } from '../components/JobTabs';
+import { JOB_TABS, JOB_TAB_LABELS, STEP_TABS, asJobTab, defaultTab, eventTone, parsePatch, runOutcome, shellCommand, type JobTab } from '../components/jobViews';
 import { PrPill, jobKey } from '../components/JobsChrome';
-import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, spacing, toneInk, touchTarget } from '../theme/tokens';
 import { STATUS, duration, money, stateLabel, stateStatus, verdictStyle, when } from '../theme/status';
-import { Banner, Button, CountBadge, Empty, KV, Loading, Meter, Panel, Pill, PipelineStepper, Pre, Pressable, type TabItem, Tabs, Text, Icon } from '../ui';
+import {
+  Banner, Button, Dialog, Empty, KV, Loading, Meter, PageHeader, Panel, Pill, PipelineStepper, Pre, Pressable, Sheet, Text, useServerActions, useToast,
+  type HeaderTab, type StatePart,
+} from '../ui';
 
 export const LIVE_DIFF_REFRESH_MS = 5000;
 
-export type JobDetailScreenProps = NativeStackScreenProps<RootStackParamList, 'JobDetail'>;
-// Tab order (Task page): Session · Plan · Diff · Review · Checks · Diagnostics · Cost & audit
-// (JOB_TABS / JOB_TAB_LABELS in components/jobViews.ts).
+type Nav = {
+  setOptions?: (options: object) => void; addListener: (event: 'beforeRemove', cb: (e: { preventDefault: () => void; data: { action: unknown } }) => void) => () => void;
+  navigate: (name: string, params?: object) => void; goBack: () => void; dispatch: (action: never) => void;
+};
+export type JobDetailScreenProps = { route: { params: { jobId: string; tab?: string; action?: string } }; navigation: Nav };
 
 export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
   const { jobId } = route.params;
   const requestedAction = route.params.action;
+  const requestedTab = asJobTab(route.params.tab);
   const { colors } = useTheme();
+  const toast = useToast();
+  const leave = useServerActions();
+  const [shellOpen, setShellOpen] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const [job, setJob] = useState<JobVM | null>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<JobTab | null>(null);
@@ -56,8 +70,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
     try {
       const next = await jobCoreApi.job(jobId, parts);
       setJob(old => ({ ...(old || {}), ...next } as JobVM));
-      setTab(old => old ?? defaultTab(next));
-      navigation.setOptions({ title: next.key || next.title });
+      setTab(old => old ?? requestedTab ?? defaultTab(next));
       if (next.plan && !draftRef.current.dirty) {
         const text = next.plan.draft ?? next.plan.markdown;
         draftRef.current = { text, dirty: !!next.plan.draft, revision: 0, savedRevision: -1, version: next.plan.version };
@@ -66,7 +79,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
       if (next.diff?.viewed) setLocalViewed({});
       setError('');
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
-  }, [jobId, navigation]);
+  }, [jobId, requestedTab]);
 
   useEffect(() => {
     void load();
@@ -76,14 +89,17 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
     return () => stream.close();
   }, [jobId, load]);
 
+  useEffect(() => { if (requestedTab) setTab(requestedTab); }, [requestedTab]);
+
   useEffect(() => navigation.addListener('beforeRemove', event => {
     if (!draftRef.current.dirty) return;
     event.preventDefault();
-    Alert.alert('Unsaved plan edits', 'Leave this plan? Your last autosaved draft is kept.', [
-      { text: 'Stay', style: 'cancel' },
-      { text: 'Leave', onPress: () => { draftRef.current.dirty = false; navigation.dispatch(event.data.action); } },
-    ]);
-  }), [navigation]);
+    void leave.ask({ id: 'leave', label: 'Leave', confirm: 'Leave this plan? Your last autosaved draft is kept.' }).then(ok => {
+      if (!ok) return;
+      draftRef.current.dirty = false;
+      navigation.dispatch(event.data.action as never);
+    });
+  }), [navigation, leave]);
 
   const editable = !!job?.actions.find(a => a.id === 'savePlanDraft' && a.enabled) && history === undefined;
   useEffect(() => {
@@ -176,10 +192,14 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
 
   const fixOne = (id: string) => cmd.invoke('reprompt', { finding_ids: [id] });
 
+  const back = { label: 'Work', onPress: () => navigation.goBack() };
   if (!job) {
     return (
-      <View style={[styles.loading, { backgroundColor: 'transparent' }]}>
-        {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} /> : <Loading label="Loading job…" />}
+      <View style={styles.root}>
+        <PageHeader title="Job" back={back} testID="job-page-header" />
+        <View style={styles.loading}>
+          {error ? <Banner tone="danger" role="alert" title={error} /> : <Loading label="Loading job…" />}
+        </View>
       </View>
     );
   }
@@ -195,76 +215,89 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
   const openFindings = (job.review?.findings || []).filter(f => (f.disposition || 'open') === 'open');
   const lastRun = (job.checks?.runs || []).slice(-1)[0];
   const liveSession = st === 'active' && ['planning', 'implementing', 'reviewing'].includes(job.state);
-  const badge = (id: JobTab): React.ReactNode => {
+  const count = (id: JobTab): string | number | null => {
     switch (id) {
-      case 'session': return liveSession ? <Text variant="xs" accessibilityLabel="live" style={{ color: colors.running.ink }}>●</Text> : job.session?.approval ? <Text variant="xs" accessibilityLabel="approval needed" style={{ color: colors.attention.ink }}>◆</Text> : null;
-      case 'plan': return job.plan?.draft || job.state === 'plan_review' ? <Text variant="xs" accessibilityLabel="needs you" style={{ color: colors.attention.ink }}>◆</Text> : null;
-      case 'diff': return files.length ? <Text variant="xs"><Text variant="xs" style={{ color: colors.ok.ink }}>+{files.reduce((n, f) => n + f.added, 0)}</Text> <Text variant="xs" style={{ color: colors.danger.ink }}>−{files.reduce((n, f) => n + f.removed, 0)}</Text></Text> : null;
-      case 'review': return job.review ? <CountBadge tone={openFindings.some(f => ['blocker', 'major'].includes(f.severity)) ? 'danger' : openFindings.some(f => f.severity === 'minor') ? 'warn' : 'muted'}>{openFindings.length}</CountBadge> : null;
-      case 'checks': {
-        if (job.state === 'checking') return <Text variant="xs" accessibilityLabel="running" style={{ color: colors.running.ink }}>●</Text>;
-        if (!lastRun) return null;
-        const outcome = runOutcome(lastRun);
-        const st = STATUS[outcome.status];
-        return <Text variant="xs" accessibilityLabel={outcome.label} style={{ color: toneInk(colors, st.tone) }}>{st.icon}</Text>;
-      }
-      case 'diagnostics': return failed ? <CountBadge tone="danger">!</CountBadge> : null;
+      case 'notes': return job.notes?.length || null;
+      case 'session': return liveSession ? STATUS.active.icon : job.session?.approval ? STATUS.waiting.icon : null;
+      case 'plan': return job.plan?.draft || job.state === 'plan_review' ? STATUS.waiting.icon : null;
+      case 'diff': return files.length ? `+${files.reduce((n, f) => n + f.added, 0)} −${files.reduce((n, f) => n + f.removed, 0)}` : null;
+      case 'review': return job.review ? openFindings.length : null;
+      case 'checks': return job.state === 'checking' ? STATUS.active.icon : lastRun ? STATUS[runOutcome(lastRun).status].icon : null;
+      case 'diagnostics': return failed ? '!' : null;
       default: return null;
     }
   };
-  const tabItems: TabItem[] = JOB_TABS.map(id => ({ id, label: JOB_TAB_LABELS[id], badge: badge(id), testID: `job-tab-${id}` }));
-  const current = tab || 'session';
+  const tabs: HeaderTab[] = JOB_TABS.map(id => ({ key: id, label: JOB_TAB_LABELS[id], count: count(id) }));
+  const current = tab || 'notes';
   // Paused on a cost/tokens/time/iterations cap: the limit banner owns raiseLimit + Cancel job.
   const limitPaused = !!job.limit;
+  const state: StatePart[] = [
+    { text: stateLabel(job.state), tone: st === 'waiting' ? 'attention' : st === 'failed' ? 'danger' : st === 'done' ? 'ok' : '' },
+    job.paused_from ? { text: `paused in ${stateLabel(job.paused_from)}`, tone: 'attention' } : null,
+    failed && job.failed_from ? { text: `failed in ${stateLabel(job.failed_from)}`, tone: 'danger' } : null,
+    job.verdict ? { text: vLabel, tone: vTone === 'danger' ? 'danger' : vTone === 'ok' ? 'ok' : '' } : null,
+    { text: budget.cost, tone: budget.tone === 'danger' ? 'danger' : budget.tone === 'warn' ? 'attention' : 'quiet' },
+    budget.time ? { text: budget.time, tone: 'quiet' } : null,
+  ].filter(Boolean) as StatePart[];
+  const copyShell = async () => {
+    try { await Clipboard.setStringAsync(shellCommand(job)); toast('Shell command copied', 'ok'); }
+    catch { toast('Couldn’t copy: select the command and copy it', 'attention'); }
+  };
+  const diffProps = {
+    job, viewed, onViewed: setViewed, onFix: fixOne, focus,
+  };
 
   return (
-    <SafeAreaView edges={['bottom']} style={[styles.root, { backgroundColor: 'transparent' }]}>
+    <View style={styles.root}>
+      <PageHeader
+        testID="job-page-header"
+        back={back}
+        title={job.title}
+        state={state}
+        tabs={tabs}
+        tab={current}
+        onTab={key => selectTab(key as JobTab)}
+        menu={[
+          { key: 'settings', label: 'Job settings (models)', icon: 'sliders-horizontal', onPress: () => setModels(true) },
+          { key: 'environments', label: 'Build environments', icon: 'box', onPress: () => setEnvironments(true) },
+          ...(job.worktree ? [{ key: 'shell', label: 'Open a shell', icon: 'terminal' as const, onPress: () => setShellOpen(true) }] : []),
+          { key: 'performance', label: 'Job performance', icon: 'gauge', onPress: () => navigation.navigate('JobAnalysis', { jobId }) },
+        ]}
+      />
       <ScrollView
         ref={scroller}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.ink3} />}
       >
-        <View style={styles.header} testID="job-header">
-          <View style={styles.wrap}>
-            <Text variant="lg" accessibilityRole="header" style={[styles.mono, { fontWeight: fontWeights.semibold }]}>{jobKey(job)}</Text>
-            <Pill tone={STATUS[st].tone} glyph={STATUS[st].icon} testID="job-state-pill">{stateLabel(job.state)}</Pill>
-            {st === 'active' ? <Pill tone="running" glyph="●">{`live · ${stateLabel(job.state)}`}</Pill> : null}
-            {job.paused_from ? <Pill tone="warn">{`paused in ${stateLabel(job.paused_from)}`}</Pill> : null}
-            {job.fix_attempts ? <Pill tone="muted">{`fix attempts ${job.fix_attempts}`}</Pill> : null}
-            {job.verdict ? <Pill tone={vTone}>{vLabel}</Pill> : null}
-            <EnvironmentsPill summary={job.environments} onPress={() => setEnvironments(true)} />
-            <PrPill pr={job.pr} testID="job-pr-pill" />
-            <View style={{ flex: 1 }} />
-            <View style={{ alignItems: 'flex-end' }} testID="job-budget">
-              <Text variant="md" accessibilityLabel={budget.costLabel} style={[styles.num, { fontWeight: fontWeights.semibold, color: budget.tone === 'danger' ? colors.danger.ink : budget.tone === 'warn' ? colors.attention.ink : colors.ink }]}>{budget.cost}</Text>
-              <Text variant="xs" accessibilityLabel={budget.timeLabel} style={[styles.num, { color: colors.ink3 }]}>{budget.time}</Text>
-            </View>
-          </View>
-          <Text variant="md">{job.title}</Text>
-          <View style={styles.wrap}>
-            {job.branch ? <View style={styles.row} accessible accessibilityLabel={`branch ${job.branch}`}><Icon name="git-branch" size="sm" color={colors.ink3} /><Text variant="xs" style={[styles.mono, { color: colors.ink3 }]}>{job.branch}</Text></View> : null}
-            {job.repository ? <Text variant="xs" style={{ color: colors.ink3 }}>repo: <Text variant="xs" style={styles.mono}>{job.repository}</Text></Text> : null}
-            {failed && job.failed_from ? <Text variant="xs" style={{ color: colors.danger.ink }}>failed in {stateLabel(job.failed_from)}</Text> : null}
-            {agentsLabel ? <Text variant="xs" testID="job-stage-agents" style={{ color: colors.ink3 }}>agents: {agentsLabel}</Text> : null}
-            {!agentsLabel || stageModels.length ? <Text variant="xs" style={{ color: colors.ink3 }}>models: {stageModels.length ? stageModels.map(([s, m]) => `${s} ${m?.model}`).join(' · ') : 'unset'}</Text> : null}
-            <Pressable accessibilityRole="button" onPress={() => setModels(true)} style={styles.link}><Text variant="xs" style={{ color: colors.accent.ink }}>Job settings</Text></Pressable>
-          </View>
-          {job.attention_detail && !(job.session?.approval && job.state === 'needs_input') && !limitPaused
-            ? failed ? <Banner tone="danger" glyph="✗" role="alert" title={job.attention_detail} /> : <Banner tone="warn" glyph="◆" title={job.attention_detail} />
-            : null}
-          {error ? <Banner tone="danger" glyph="✗" role="alert" title={error} testID="job-error" /> : null}
+        <View style={styles.facts} testID="job-header">
+          <Text variant="mono" tone="ink3" accessibilityLabel={`job ${jobKey(job)}`}>{jobKey(job)}</Text>
+          <Text variant="caption" tone="ink3" testID="job-state-pill">{stateLabel(job.state)}{job.fix_attempts ? ` · fix attempts ${job.fix_attempts}` : ''}</Text>
+          <EnvironmentsPill summary={job.environments} onPress={() => setEnvironments(true)} />
+          <PrPill pr={job.pr} testID="job-pr-pill" />
         </View>
+        <View style={styles.factsCol}>
+          {job.branch ? <Text variant="monoSm" tone="ink3" accessibilityLabel={`branch ${job.branch}`}>{job.branch}{job.repository ? `  ·  ${job.repository}` : ''}</Text> : null}
+          {agentsLabel ? <Text variant="caption" tone="ink3" testID="job-stage-agents">agents: {agentsLabel}</Text> : null}
+          {!agentsLabel || stageModels.length ? <Text variant="caption" tone="ink3">models: {stageModels.length ? stageModels.map(([s, m]) => `${s} ${m?.model}`).join(' · ') : 'unset'}</Text> : null}
+          {job.worktree ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Open a shell in the job's working directory" onPress={() => setShellOpen(true)} style={styles.link} testID="job-open-shell">
+              <Text variant="caption" tone="accent">Open a shell</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        {job.attention_detail && !(job.session?.approval && job.state === 'needs_input') && !limitPaused
+          ? <Banner tone={failed ? 'danger' : 'attention'} role={failed ? 'alert' : undefined} title={job.attention_detail} />
+          : null}
+        {error ? <Banner tone="danger" role="alert" title={error} testID="job-error" /> : null}
 
-        <Panel flush>
-          <PipelineStepper steps={job.pipeline || job.steps || []} onStep={id => selectTab(STEP_TABS[id] || 'session')} />
-        </Panel>
+        <PipelineStepper steps={job.pipeline || job.steps || []} onStep={id => selectTab(STEP_TABS[id] || 'session')} />
 
         <ApprovalBanner approval={job.session?.approval} actions={job.actions} onInvoke={a => cmd.invoke(a)} busy={cmd.busy} />
         <EnvironmentApprovalBanner approval={job.environment_approval} actions={job.actions} onInvoke={a => cmd.invoke(a)} busy={cmd.busy} />
         {job.setup_warning ? (
-          <Banner tone="caution" glyph="?" role="summary" title="Job setup failed; the job continued without it" testID="job-setup-warning">
-            <Text variant="xs" selectable>{job.setup_warning.message || `\`${job.setup_warning.command || ''}\` failed in ${job.setup_warning.binding}.`}</Text>
+          <Banner tone="caution" role="summary" title="Job setup failed; the job continued without it" testID="job-setup-warning">
+            {job.setup_warning.message || `\`${job.setup_warning.command || ''}\` failed in ${job.setup_warning.binding}.`}
           </Banner>
         ) : null}
 
@@ -273,9 +306,8 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
 
         <JobActionBar actions={job.actions} onInvoke={a => cmd.invoke(a)} busy={cmd.busy} planDirty={dirty} exclude={limitPaused ? ['raiseLimit', 'discard'] : []} />
 
-        <Tabs items={tabItems} value={current} onChange={id => selectTab(id as JobTab)} accessibilityLabel="Job views" />
-
         <View onLayout={e => { contentY.current = e.nativeEvent.layout.y; }} accessibilityLabel={`${JOB_TAB_LABELS[current]} tab`} style={styles.tabBody}>
+          {current === 'notes' ? <NotesTab job={job} onTab={selectTab} /> : null}
           {current === 'session' ? <SessionTab job={job} invoke={cmd.invoke} busy={cmd.busy} /> : null}
           {current === 'plan' ? (
             <PlanTab
@@ -296,8 +328,7 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
             />
           ) : null}
           {current === 'diff' ? (
-            <DiffTab job={job} viewed={viewed} onViewed={setViewed} onFix={fixOne} focus={focus}
-              onFileLayout={(path, y) => { fileY.current[path] = y; }} />
+            <DiffTab {...diffProps} onReview={() => setReviewing(true)} onFileLayout={(path, y) => { fileY.current[path] = y; }} />
           ) : null}
           {current === 'review' ? (
             <ReviewTab
@@ -315,9 +346,8 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
           {current === 'diagnostics' ? (
             <View style={styles.col}>
               <View style={styles.row}>
-                <Text variant="md" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold, flex: 1 }}>Job diagnostics</Text>
-                <Button small label="Refresh" onPress={loadDiagnostics} />
-                <Button small label="Job performance" onPress={() => navigation.navigate('JobAnalysis', { jobId })} />
+                <Text variant="title3" accessibilityRole="header" style={styles.grow}>Job diagnostics</Text>
+                <Button small variant="secondary" label="Refresh" onPress={loadDiagnostics} />
               </View>
               {diagnostics ? (
                 <>
@@ -325,16 +355,16 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
                     <KV label="Status">{diagnostics.status.replace(/_/g, ' ')}{diagnostics.attention_reason ? ` · ${diagnostics.attention_reason.replace(/_/g, ' ')}` : ''}</KV>
                     <KV label="Worker">{diagnostics.worker_id || '—'}</KV>
                     <KV label="Heartbeat">{diagnostics.heartbeat_at ? when(diagnostics.heartbeat_at) : '—'}</KV>
-                    <KV label="Base"><Text variant="xs" style={styles.mono}>{diagnostics.base_branch} {diagnostics.base_sha?.slice(0, 12)}</Text></KV>
-                    <KV label="Worktree"><Text variant="xs" style={styles.mono}>{diagnostics.worktree || '—'}</Text></KV>
+                    <KV label="Base"><Text variant="monoSm">{diagnostics.base_branch} {diagnostics.base_sha?.slice(0, 12)}</Text></KV>
+                    <KV label="Worktree"><Text variant="monoSm">{diagnostics.worktree || '—'}</Text></KV>
                   </Panel>
                   {diagnostics.latest_failure ? (
-                    <Banner tone="danger" glyph="✗" role="alert" title={`Latest failure: ${diagnostics.latest_failure.event_type}`}>
-                      <Text variant="xs">{diagnostics.latest_failure.reason}</Text>
+                    <Banner tone="danger" role="alert" title={`Latest failure: ${diagnostics.latest_failure.event_type}`}>
+                      <Text variant="caption">{diagnostics.latest_failure.reason}</Text>
                       <Pre numberOfLines={20}>{JSON.stringify(diagnostics.latest_failure.payload, null, 2)}</Pre>
                     </Banner>
                   ) : null}
-                  <Panel title="Worker log" right={<Text variant="xs" style={{ color: colors.ink3 }}>{diagnostics.worker_log_truncated ? 'tail' : ''}</Text>}>
+                  <Panel title="Worker log" right={<Text variant="caption" tone="ink3">{diagnostics.worker_log_truncated ? 'tail' : ''}</Text>}>
                     <Pre testID="job-worker-log">{diagnostics?.worker_log_tail || 'No worker log.'}</Pre>
                   </Panel>
                   {diagnostics.diagnostics?.length ? (
@@ -350,10 +380,28 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
         </View>
       </ScrollView>
       {cmd.sheets}
+      {leave.element}
+      <Sheet visible={reviewing} onClose={() => setReviewing(false)} title={`Review · ${jobKey(job)}`} full testID="diff-review-mode" closeLabel="Leave review mode">
+        {reviewing ? <DiffTab {...diffProps} maxLines={4000} /> : null}
+      </Sheet>
+      <Dialog visible={shellOpen} onClose={() => setShellOpen(false)} title="Open a shell" testID="job-shell"
+        footer={<>
+          <Button variant="secondary" label="Close" onPress={() => setShellOpen(false)} />
+          <Button variant="primary" icon="copy" label="Copy" onPress={() => void copyShell()} testID="job-shell-copy" />
+        </>}>
+        <View style={styles.col}>
+          <Text variant="body">Paste this into a terminal on the computer running μcli:</Text>
+          <Pre testID="job-shell-command">{shellCommand(job)}</Pre>
+          <Text variant="caption" tone="ink3">
+            {st === 'active' ? 'The job is running. Pause it first so your edits and the agent’s don’t collide. ' : ''}
+            Commit your edits on {job.branch || 'the job branch'} before you resume: the checks fail on uncommitted changes.
+          </Text>
+        </View>
+      </Dialog>
       <JobStageModelsSheet visible={models} onClose={() => setModels(false)} onSaved={() => setModels(false)} />
       <JobEnvironmentsSheet visible={environments} onClose={() => setEnvironments(false)} environments={job.build_environments}
         actions={job.actions} invoke={cmd.invoke} busy={cmd.busy} repository={job.repository} session={job.origin_session} />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -370,8 +418,8 @@ function AuditRow({ event: e }: { event: AuditLike }) {
         onPress={() => setOpen(v => !v)} style={[styles.row, { minHeight: touchTarget, alignItems: 'flex-start' }]}>
         <Text variant="xs" style={{ color: toneInk(colors, tone), marginTop: 2 }}>●</Text>
         <View style={{ flex: 1 }}>
-          <Text variant="xs"><Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>{e.event_type}</Text>{e.to_status ? <Text variant="xs" style={{ color: colors.ink3 }}> → {e.to_status}</Text> : null}</Text>
-          {e.reason ? <Text variant="xs" style={{ color: colors.ink3 }} numberOfLines={open ? undefined : 2}>{e.reason}</Text> : null}
+          <Text variant="xs"><Text variant="xs" style={{ fontWeight: fontWeights.semibold }}>{e.event_type}</Text>{e.to_status ? <Text variant="xs" tone="ink3"> → {e.to_status}</Text> : null}</Text>
+          {e.reason ? <Text variant="xs" tone="ink3" numberOfLines={open ? undefined : 2}>{e.reason}</Text> : null}
         </View>
         <Text variant="xs" style={[styles.mono, { color: colors.ink3 }]}>{when(e.created_at).slice(5)}</Text>
       </Pressable>
@@ -412,8 +460,8 @@ function CostsTab({ job, attempts }: { job: JobVM; attempts: JobAttempt[] | null
                 <Text variant="xs" style={styles.num}>{money(a.cost_usd)}</Text>
                 <Text variant="xs" style={[styles.num, { color: colors.ink3 }]}>{a.finished_at && a.started_at ? duration((a.finished_at - a.started_at) * 1000) : ''}</Text>
               </View>
-              <Text variant="xs" style={{ color: colors.ink3 }}>{when(a.started_at)}</Text>
-              {a.error ? <Text variant="xs" style={{ color: colors.danger.ink }} numberOfLines={3}>{a.error}</Text> : null}
+              <Text variant="xs" tone="ink3">{when(a.started_at)}</Text>
+              {a.error ? <Text variant="xs" tone="danger" numberOfLines={3}>{a.error}</Text> : null}
             </View>
           );
         }) : <Empty>None.</Empty>}
@@ -443,7 +491,9 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   loading: { flex: 1, padding: spacing.base },
   content: { padding: spacing.base, gap: spacing.md, paddingBottom: spacing['3xl'] },
-  header: { gap: spacing.xs },
+  facts: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  factsCol: { gap: 2 },
+  grow: { flex: 1 },
   col: { gap: spacing.md },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },

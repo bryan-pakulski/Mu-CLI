@@ -99,17 +99,9 @@
 }
 :root {
     --mu-fade: 1400ms;
-    --mu-accent: var(--wash-lagoon-pigment);
-    --mu-accent-ink: var(--wash-lagoon-ink);
-    --mu-accent-wash: var(--wash-lagoon-wash);
     transition: --mu-accent var(--mu-fade) var(--wash-ease-bleed), --mu-accent-ink var(--mu-fade) var(--wash-ease-bleed);
 }
-[data-mode="chat"] { --mu-accent: var(--wash-apricot-pigment); --mu-accent-ink: var(--wash-apricot-ink); --mu-accent-wash: var(--wash-apricot-wash); }
-[data-mode="work"] { --mu-accent: var(--wash-sky-pigment); --mu-accent-ink: var(--wash-sky-ink); --mu-accent-wash: var(--wash-sky-wash); }
-[data-mode="orchestration"] { --mu-accent: var(--wash-lilac-pigment); --mu-accent-ink: var(--wash-lilac-ink); --mu-accent-wash: var(--wash-lilac-wash); }
-[data-mode="environments"] { --mu-accent: var(--wash-meadow-pigment); --mu-accent-ink: var(--wash-meadow-ink); --mu-accent-wash: var(--wash-meadow-wash); }
-[data-mode="insights"] { --mu-accent: var(--wash-lagoon-pigment); --mu-accent-ink: var(--wash-lagoon-ink); --mu-accent-wash: var(--wash-lagoon-wash); }
-[data-mode="settings"] { --mu-accent: var(--wash-plum-pigment); --mu-accent-ink: var(--wash-plum-ink); --mu-accent-wash: var(--wash-plum-wash); }
+/* Each destination's accent and ambient scene come from tokens.json destination (tokens.css [data-mode]). */
 /* The accent marks where you are: the active rail item and the active tab. */
 .w-sidebar .w-nav__item[aria-current] :is(svg, .w-icon) { color: var(--mu-accent-ink); }
 .w-pagetabs__tab:is([aria-current="page"], [aria-selected="true"]) { box-shadow: inset 0 -2px 0 var(--mu-accent-ink); }
@@ -127,12 +119,7 @@
     transition: opacity var(--mu-fade) var(--wash-ease-bleed);
 }
 .mu-ambient__layer[data-on] { opacity: 1; }
-.mu-ambient__layer[data-mode="chat"] { --mu-layer-art: var(--wash-art-scene-dawn); --mu-layer-tint: var(--wash-apricot-wash); }
-.mu-ambient__layer[data-mode="work"] { --mu-layer-art: var(--wash-art-scene-lagoon); --mu-layer-tint: var(--wash-sky-wash); }
-.mu-ambient__layer[data-mode="orchestration"] { --mu-layer-art: var(--wash-art-scene-lagoon); --mu-layer-tint: var(--wash-lilac-wash); }
-.mu-ambient__layer[data-mode="environments"] { --mu-layer-art: var(--wash-art-scene-meadow); --mu-layer-tint: var(--wash-meadow-wash); }
-.mu-ambient__layer[data-mode="insights"] { --mu-layer-art: var(--wash-art-scene-lagoon); --mu-layer-tint: var(--wash-lagoon-wash); }
-.mu-ambient__layer[data-mode="settings"] { --mu-layer-art: var(--wash-art-scene-dawn); --mu-layer-tint: var(--wash-plum-wash); }
+.mu-ambient__layer[data-mode] { --mu-layer-art: var(--mu-ambient-art); --mu-layer-tint: var(--mu-ambient-tint); }
 :root[data-decoration="reduced"] .mu-ambient__layer { background: var(--mu-layer-tint, var(--wash-canvas)); }
 @media (prefers-reduced-transparency: reduce) { .mu-ambient__layer { background: var(--mu-layer-tint, var(--wash-canvas)); } }
 @media (prefers-reduced-motion: reduce) {

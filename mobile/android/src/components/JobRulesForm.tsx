@@ -15,7 +15,7 @@ import {
   type ToolchainImage,
 } from '../api/jobs';
 import { useTheme } from '../theme/ThemeContext';
-import { fonts, fontWeights, spacing } from '../theme/tokens';
+import { fontWeights, fonts, spacing } from '../theme/tokens';
 import { Banner, Button, Field, Loading, Panel, Pill, Pre, Segmented, StatusPill, SwitchRow, Text, TextField, useToast } from '../ui';
 
 /** Editable form state of one field: numbers/text/lists are edited as text. */
@@ -212,8 +212,8 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
           <View style={styles.inline}>
             <TextField accessibilityLabel={a11y} keyboardType="numeric" invalid={invalid} value={String(draft)}
               placeholder={field.optional ? 'default' : undefined}
-              onChangeText={t => edit(field.path, t)} style={{ flex: 1 }} />
-            {field.unit ? <Text variant="xs" style={{ color: colors.ink3 }}>{field.unit}</Text> : null}
+              onChangeText={t => edit(field.path, t)} style={styles.flex} />
+            {field.unit ? <Text variant="xs" tone="ink3">{field.unit}</Text> : null}
           </View>
         );
       case 'select':
@@ -264,11 +264,11 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
                   const hint = rowCellError(field, column, row);
                   return (
                     <View key={column.key} style={styles.cell}>
-                      <Text variant="xs" style={{ color: colors.ink3 }}>{`${column.label}${column.required ? '' : ' (optional)'}`}</Text>
+                      <Text variant="xs" tone="ink3">{`${column.label}${column.required ? '' : ' (optional)'}`}</Text>
                       <TextField accessibilityLabel={`${column.label} ${i + 1}`} placeholder={column.placeholder || column.label} mono
                         value={row[column.key] || ''} autoCapitalize="none" autoCorrect={false} invalid={invalid || !!hint}
                         onChangeText={t => setCell(i, column.key, t)} />
-                      {hint ? <Text variant="xs" style={{ color: colors.danger.ink }}>{hint.slice(field.label.length + 2)}</Text> : null}
+                      {hint ? <Text variant="xs" tone="danger">{hint.slice(field.label.length + 2)}</Text> : null}
                     </View>
                   );
                 })}
@@ -290,14 +290,14 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
 
   return (
     <View style={styles.root} testID="job-rules-form">
-      <Text variant="md" accessibilityRole="header" style={{ fontWeight: fontWeights.semibold }}>Run rules</Text>
-      <Text variant="xs" style={{ color: colors.ink3 }}>Limits and policies every job run obeys. Blank or reset values use the default.</Text>
+      <Text variant="md" accessibilityRole="header" style={styles.strong}>Run rules</Text>
+      <Text variant="xs" tone="ink3">Limits and policies every job run obeys. Blank or reset values use the default.</Text>
       {rules.schema.map(section => {
         const dirty = section.fields.filter(isDirty).length;
         return (
           <Panel key={section.id} testID={`rules-${section.id}`} title={section.title}
             right={dirty ? <Pill tone="warn" glyph="●" testID={`rules-${section.id}-dirty`}>{`${dirty} unsaved`}</Pill> : null}>
-            {section.hint ? <Text variant="xs" style={{ color: colors.ink3 }}>{section.hint}</Text> : null}
+            {section.hint ? <Text variant="xs" tone="ink3">{section.hint}</Text> : null}
             {section.fields.map(field => {
               const set = isSet(field);
               const meta = [
@@ -311,7 +311,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
                 <View style={styles.inline}>
                   {set
                     ? <Pill tone="accent" testID={`rule-set-${field.path}`}>set</Pill>
-                    : <Text variant="xs" style={{ color: colors.ink3 }}>{defaultLabel(field)}</Text>}
+                    : <Text variant="xs" tone="ink3">{defaultLabel(field)}</Text>}
                   {set ? (
                     <Button small ghost label="Reset" accessibilityLabel={`Reset ${field.label}`} disabled={busy === section.id}
                       onPress={() => { void reset(section, field); }} />
@@ -324,7 +324,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
                     <SwitchRow label={field.label} hint={field.hint} value={!!valueOf(field)} onValueChange={v => edit(field.path, v)}
                       testID={`rule-${field.path}`} />
                     {status}
-                    {errors[field.path] ? <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger.ink }}>{errors[field.path]}</Text> : null}
+                    {errors[field.path] ? <Text variant="xs" accessibilityRole="alert" tone="danger">{errors[field.path]}</Text> : null}
                   </View>
                 );
               }
@@ -340,7 +340,7 @@ export function JobRulesForm({ active }: JobRulesFormProps) {
               );
             })}
             {sectionErrors[section.id] ? (
-              <Text variant="xs" accessibilityRole="alert" style={{ color: colors.danger.ink }}>{sectionErrors[section.id]}</Text>
+              <Text variant="xs" accessibilityRole="alert" tone="danger">{sectionErrors[section.id]}</Text>
             ) : null}
             <View style={styles.inline}>
               <Button primary small label={`Save ${section.title.toLowerCase()}`} accessibilityLabel={`Save ${section.title}`}
@@ -416,7 +416,7 @@ export function ToolchainImages({ saved }: { saved: string }) {
 
   if (items === null) return null;
   if (!items.length) {
-    return <Text variant="xs" style={{ color: colors.ink3 }} testID="toolchain-images-empty">Save a row to build its image.</Text>;
+    return <Text variant="xs" tone="ink3" testID="toolchain-images-empty">Save a row to build its image.</Text>;
   }
   return (
     <View style={styles.suites} testID="toolchain-images">
@@ -428,9 +428,9 @@ export function ToolchainImages({ saved }: { saved: string }) {
           <View key={`${item.repository}|${key}`} style={styles.cell} testID={`toolchain-${key}`}>
             <View style={styles.inline}>
               <StatusPill status={meta.status} label={meta.label} />
-              <Text variant="xs" style={{ flexShrink: 1, fontFamily: fonts.mono }}>{`${item.repository || ''} ← ${key}`}</Text>
+              <Text variant="xs" style={styles.monoShrink}>{`${item.repository || ''} ← ${key}`}</Text>
             </View>
-            {item.error ? <Text variant="xs" style={{ color: colors.danger.ink }}>{item.error}</Text> : null}
+            {item.error ? <Text variant="xs" tone="danger">{item.error}</Text> : null}
             <View style={styles.inline}>
               {item.status === 'building' ? null : (
                 <Button small label={item.status === 'built' ? 'Rebuild' : 'Build'} accessibilityLabel={`${item.status === 'built' ? 'Rebuild' : 'Build'} ${key}`}
@@ -450,6 +450,13 @@ export function ToolchainImages({ saved }: { saved: string }) {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  strong: { fontWeight: fontWeights.semibold },
+  flexStrong: { flex: 1, fontWeight: fontWeights.semibold },
+  mono: { fontFamily: fonts.mono },
+  monoShrink: { flexShrink: 1, fontFamily: fonts.mono },
+  sectionGap: { fontWeight: fontWeights.semibold, marginTop: spacing.sm },
+  intro: { marginBottom: spacing.sm },
   root: { gap: spacing.md },
   inline: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
   field: { gap: spacing.xs, marginBottom: spacing.md },

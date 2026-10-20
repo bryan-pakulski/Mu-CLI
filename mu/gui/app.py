@@ -32,6 +32,7 @@ from .routers import (
     containers as containers_router,
     debug as debug_router,
     design as design_router,
+    devices as devices_router,
     feature as feature_router,
     files as files_router,
     inspector,
@@ -233,6 +234,11 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     app.include_router(chat.events_router, tags=["events"])
     app.include_router(design_router.router, tags=["design"])
     app.include_router(orchestration_router.router, tags=["orchestration"])
+    # Paired devices (mobile): non-loopback clients need a device token (mu/gui/devices.py).
+    from .devices import DeviceGate, DeviceStore
+    app.state.devices = DeviceStore()
+    app.include_router(devices_router.router, tags=["devices"])
+    app.add_middleware(DeviceGate)
 
     register_live_observability_hooks()
 

@@ -1,0 +1,9 @@
+{
+  "bytes": 43,
+  "kind": "json",
+  "name": "coverage.json",
+  "path": "artifacts/suite-1/coverage.json",
+  "pretty": true,
+  "text": "{\n  \"total\": 81.5,\n  \"files\": {\n    \"widget.py\": 90\n  }\n}",
+  "truncated": false
+}

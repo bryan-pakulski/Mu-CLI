@@ -1,11 +1,17 @@
+// The session's files above the composer: visualizations open in the in-app viewer, files download
+// with the device token to the share sheet. It collapses into a small Files button at the right
+// edge (remembered on this phone) so the conversation gets the room back.
 import React, { useCallback, useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, ScrollView, StyleSheet, View } from 'react-native';
 import { ArtifactDescriptor, artifactsApi } from '../api/artifacts';
 import { shareServerFile } from '../api/artifactDownload';
 import { navigateTo } from '../navigation/nav';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, radii, spacing } from '../theme/tokens';
-import { Pressable, Text, Icon, useToast } from '../ui';
+import { Pressable, Text, Icon, IconButton, useToast } from '../ui';
+
+export const FILES_STRIP_COLLAPSED_KEY = '@mucli/files-strip-collapsed';
 
 export function ArtifactStrip({
   sessionName,
@@ -17,6 +23,14 @@ export function ArtifactStrip({
   const { colors } = useTheme();
   const toast = useToast();
   const [artifacts, setArtifacts] = useState<ArtifactDescriptor[]>([]);
+  const [collapsed, setCollapsedState] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(FILES_STRIP_COLLAPSED_KEY).then(v => { if (v === '1') setCollapsedState(true); }).catch(() => undefined);
+  }, []);
+  const setCollapsed = (next: boolean) => {
+    setCollapsedState(next);
+    AsyncStorage.setItem(FILES_STRIP_COLLAPSED_KEY, next ? '1' : '0').catch(() => undefined);
+  };
   // Server files need this phone's device token, which a browser doesn't have: visualizations
   // open in the in-app viewer, files download with the token and go to the share sheet.
   const share = (artifact: ArtifactDescriptor) => {
@@ -62,13 +76,35 @@ export function ArtifactStrip({
 
   if (!sessionName || artifacts.length === 0) return null;
 
+  // In the first section's heading row, beside its count.
+  const collapseButton = (
+    <IconButton icon="chevron-down" label="Collapse session files" onPress={() => setCollapsed(true)} testID="files-strip-collapse" style={styles.collapse} />
+  );
+
+  if (collapsed) {
+    // Takes no layout space: the button floats at the right edge just above the composer.
+    return (
+      <View style={styles.dock} pointerEvents="box-none" testID="files-strip-collapsed">
+        <Pressable onPress={() => setCollapsed(false)} accessibilityRole="button"
+          accessibilityLabel={`Show session files, ${artifacts.length}`} testID="files-strip-expand"
+          style={[styles.fab, { backgroundColor: colors.raised, borderColor: colors.hairline, shadowColor: colors.shadow }]}>
+          <Icon name="file" size="sm" color={colors.ink2} />
+          <Text variant="caption" numeric style={{ color: colors.ink2 }}>{artifacts.length}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.wrap}>
+    <View style={styles.wrap} testID="files-strip">
       {visualizations.length > 0 && (
         <View style={styles.section}>
           <View style={styles.heading}>
             <Text variant="xs" dim style={styles.label}>Visualizations</Text>
-            <Text variant="xs" dim>{visualizations.length}</Text>
+            <View style={styles.headRight}>
+              <Text variant="xs" dim>{visualizations.length}</Text>
+              {collapseButton}
+            </View>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
             {visualizations.map(artifact => {
@@ -98,7 +134,10 @@ export function ArtifactStrip({
         <View style={styles.section}>
           <View style={styles.heading}>
             <Text variant="xs" dim style={styles.label}>Files</Text>
-            <Text variant="xs" dim>{files.length}</Text>
+            <View style={styles.headRight}>
+              <Text variant="xs" dim>{files.length}</Text>
+              {visualizations.length ? null : collapseButton}
+            </View>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
             {files.map(artifact => (
@@ -130,8 +169,15 @@ function formatBytes(value: number): string {
 
 const styles = StyleSheet.create({
   wrap: { paddingTop: spacing.sm, paddingBottom: spacing.xs },
+  headRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  // Compact in the heading row; Pressable extends the hit area to the 44pt target.
+  collapse: { width: 28, height: 28 },
+  dock: { height: 0, overflow: 'visible', zIndex: 2 },
+  fab: { position: 'absolute', bottom: spacing.sm, right: spacing.base, flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radii.pill, borderWidth: 1, elevation: 3,
+    shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
   section: { paddingBottom: spacing.xs },
-  heading: { paddingHorizontal: spacing.base, marginBottom: spacing.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  heading: { paddingHorizontal: spacing.base, marginBottom: spacing.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   label: { fontWeight: fontWeights.medium },
   row: { paddingHorizontal: spacing.base, gap: spacing.sm },
   chip: { width: 210, minHeight: 56, borderRadius: radii.sm, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

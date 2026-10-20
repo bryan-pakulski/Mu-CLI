@@ -2402,12 +2402,18 @@ ${problem.text}`, "error", 16000);
             const r = await fetch(
                 `/api/sessions/${encodeURIComponent(target)}/artifacts/${encodeURIComponent(artifactId)}`,
                 { method: "DELETE" },
-            );
-            if (r.ok) {
-                this.bySession[target] = (this.bySession[target] || []).filter(
-                    a => a.artifact_id !== artifactId
-                );
+            ).catch(() => null);
+            if (!r || !r.ok) {
+                const d = r ? await r.json().catch(() => ({})) : {};
+                // Already gone on the server: drop it here too; anything else is reported.
+                if (!r || r.status !== 404) {
+                    Alpine.store("toast").show(d.detail || `Couldn't delete the artifact (${r ? r.status : "offline"})`, "error");
+                    return;
+                }
             }
+            this.bySession[target] = (this.bySession[target] || []).filter(
+                a => a.artifact_id !== artifactId
+            );
         },
         formatSize(bytes) {
             const n = Number(bytes) || 0;

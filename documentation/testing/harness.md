@@ -31,7 +31,7 @@ NODE_PATH=mobile/android/node_modules node --test tests/gui/frontend/*.cjs
 |---|---|---|---|---|
 | Agent loop & providers | `tests/agent/` | 9 | 113 | 2 s |
 | Context engineering | `tests/context/` | 13 | 141 | 11 s |
-| Sessions & memory | `tests/sessions/` | 8 | 100 | 1 s |
+| Sessions & memory | `tests/sessions/` | 9 | 103 | 3 s |
 | Tools & safety gates | `tests/tools/` | 11 | 171 | 1 s |
 | Modes & commands | `tests/modes/` | 9 | 178 | 1 s |
 | Containers | `tests/containers/` | 4 | 31 | 0 s |
@@ -102,6 +102,7 @@ Must prove:
 - History pages correctly on every surface
 - Threads create, coordinate and delete safely
 - The Memory Ledger stores and recalls; two surfaces stay consistent
+- Session files (artifacts, uploads) delete at any time; concurrent registry writers lose nothing
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
@@ -110,6 +111,7 @@ Must prove:
 | `test_gui_unreadable_session.py` | 5 | 0.0 s | GUI must surface an unreadable session.json, never demote it to workspace |
 | `test_mu_tools_memory.py` | 15 | 0.0 s | Pin the migrated memory + scratchpad tools (`mu/tools/memory/`) |
 | `test_session_revision.py` | 32 | 0.1 s | Cross-surface continuity phase 1: session revision counter + CAS + If-Match |
+| `test_session_files.py` | 3 | 2.3 s | Artifact and upload delete during a turn; one shared lock per registry file |
 | `test_session_unreadable_doc.py` | 4 | 0.0 s | SessionManager must never clobber a session.json it cannot read |
 | `test_surface_sync.py` | 13 | 0.7 s | Tests for the CLI-side surface sync watcher (cross-surface phase 2, G1) |
 | `test_threads.py` | 13 | 0.1 s |  |

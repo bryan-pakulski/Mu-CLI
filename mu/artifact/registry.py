@@ -16,6 +16,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from mu.artifact.locking import path_lock
+
 # Round-50 F2: parse cache for registry reads — bounded by path count,
 # validated by (size, mtime_ns). Registries are append-mostly, so history
 # polling hits the cache instead of json.load-ing the file every time.
@@ -46,8 +48,9 @@ class ArtifactRegistry:
             if max_bytes is not None
             else os.getenv("MUCLI_ARTIFACT_MAX_BYTES", 2000 * 1024 * 1024)
         )
-        self._lock = threading.RLock()
         os.makedirs(self.artifacts_dir, exist_ok=True)
+        # Shared with every other registry object (and process) using this directory.
+        self._lock = path_lock(os.path.join(self.artifacts_dir, "registry.lock"))
 
     @property
     def session_name(self) -> str:

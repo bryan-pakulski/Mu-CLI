@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import re
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse, HTMLResponse
 
 from mu.artifact import ArtifactRegistry
@@ -145,10 +145,9 @@ async def download_artifact(name: str, artifact_id: str):
 
 
 @router.delete("/{name}/artifacts/{artifact_id}")
-async def delete_artifact(name: str, artifact_id: str, request: Request):
-    session = request.app.state.session_by_name(name)
-    if session is not None and request.app.state.session_busy_for(name).is_set():
-        raise HTTPException(status_code=409, detail="cannot delete artifacts during an active turn")
+async def delete_artifact(name: str, artifact_id: str):
+    # Allowed during a turn: every registry object for the session shares one lock
+    # (mu/artifact/locking.py), so a delete can't race the agent publishing an artifact.
     if not _registry(name).remove(artifact_id):
         raise HTTPException(status_code=404, detail="artifact not found")
     return {"ok": True, "artifact_id": artifact_id}

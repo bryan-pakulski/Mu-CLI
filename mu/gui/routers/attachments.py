@@ -187,8 +187,7 @@ async def download_attachment(name: str, attachment_id: str):
 
 @router.delete("/{name}/attachments/{attachment_id}")
 async def delete_attachment(name: str, attachment_id: str, request: Request):
-    if request.app.state.session_busy_for(name).is_set():
-        raise HTTPException(status_code=409, detail="cannot delete attachments during an active turn")
+    # Allowed during a turn: registry writes share one lock per session (mu/artifact/locking.py).
     if not _registry(name).remove(attachment_id):
         raise HTTPException(status_code=404, detail="attachment not found")
     await request.app.state.bus.publish({

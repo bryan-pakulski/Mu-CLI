@@ -13,11 +13,12 @@ import mimetypes
 import os
 import shutil
 import tempfile
-import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+from mu.artifact.locking import path_lock
 
 
 class AttachmentError(ValueError):
@@ -54,8 +55,9 @@ class AttachmentRegistry:
         # Available storage and any external reverse-proxy limits are the only
         # remaining constraints.
         self.max_bytes: int | None = None
-        self._lock = threading.RLock()
         os.makedirs(self.attachments_dir, exist_ok=True)
+        # Shared with every other registry object (and process) using this directory.
+        self._lock = path_lock(os.path.join(self.attachments_dir, "registry.lock"))
 
     @property
     def session_name(self) -> str:

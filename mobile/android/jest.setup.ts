@@ -80,3 +80,9 @@ jest.mock('expo-av', () => {
     },
   };
 });
+
+// expo-sharing: the share sheet (session files downloaded with the device token).
+jest.mock('expo-sharing', () => ({
+  isAvailableAsync: jest.fn(async () => true),
+  shareAsync: jest.fn(async () => undefined),
+}));

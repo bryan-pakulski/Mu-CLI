@@ -4,6 +4,7 @@
 // HTML reports and binaries come from code under test and are only stored.
 
 import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { baseUrl } from './client';
 import { authHeaders } from './auth';
 
@@ -56,4 +57,25 @@ export function saveCheckArtifact(jobId: string, run: number, file: { path: stri
 
 export function saveEvidenceFile(jobId: string, item: { file: string; name?: string; bytes?: number }): Promise<SaveOutcome> {
   return save(evidenceFileUrl(baseUrl(), jobId, item.file), item.name || item.file, item.bytes);
+}
+
+/**
+ * Download a server file with this phone's device token (streamed straight to the app cache, so
+ * size is no limit) and hand it to Android's share sheet: save it to Files or Downloads, open it
+ * (an APK installs), or send it on. A browser can't do this — it has no device token, so the
+ * server would ask it to pair. The previous shared copy is cleared first; the latest stays until
+ * the next share so the receiving app can still read it.
+ */
+export async function shareServerFile(url: string, name: string, mimeType?: string): Promise<void> {
+  if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing isn\u2019t available on this phone.');
+  const dir = `${FileSystem.cacheDirectory}shared/`;
+  await FileSystem.deleteAsync(dir, { idempotent: true }).catch(() => undefined);
+  await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => undefined);
+  const dest = `${dir}${safeFileName(name)}`;
+  const res = await FileSystem.downloadAsync(url, dest, { headers: authHeaders(baseUrl()) });
+  if (res.status !== 200) {
+    await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => undefined);
+    throw new Error(res.status === 401 ? 'This phone needs pairing again.' : res.status === 404 ? 'It\u2019s no longer on the server.' : `The server answered ${res.status}.`);
+  }
+  await Sharing.shareAsync(res.uri, { mimeType: mimeType || 'application/octet-stream', dialogTitle: name });
 }

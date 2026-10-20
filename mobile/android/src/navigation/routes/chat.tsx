@@ -51,7 +51,7 @@ export type ChatParams = {
   Skills: undefined;
   Modes: undefined;
   Prompts: undefined;
-  Artifacts: undefined;
+  Artifacts: { view?: string } | undefined;
 };
 
 /** Params the Chat tab accepts (Settings → Areas opens the session settings). */

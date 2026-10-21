@@ -124,7 +124,8 @@ def compact(table: Dict[str, Any], *, sort: str = "", descending: Optional[bool]
 @tool(name="fleet_overview", group="fleet", phase="fleet", requires_approval=False,
       execution_kind="read", preview_policy="none",
       description="Read-only snapshot of the managed fleet: what needs the operator, every node (online, "
-                  "labels, disk and memory use, agent version, whether it needs a reboot and why), recent runs, and the tools whose results "
+                  "labels, groups, health (ok/warning/critical) and why, disk and memory use, agent version, whether it needs a reboot "
+                  "and why), node groups with their health counts, recent runs, and the tools whose results "
                   "fleet_results can read. Use it before answering questions about the machines.",
       parameters={"type": "object", "properties": {}})
 def fleet_overview(args, context):
@@ -135,6 +136,8 @@ def fleet_overview(args, context):
         from . import vm
         from .attention import counts, describe
         att = counts(store)
+        board = vm.fleet_dashboard(store)
+        health = {n["id"]: n for n in board["nodes"]}
         nodes = []
         for node in store.list_nodes():
             view = vm.node_vm(store, node)
@@ -144,7 +147,10 @@ def fleet_overview(args, context):
                           "memory_used_pct": summary.get("memory_used_pct"), "uptime_days": summary.get("uptime_days"),
                           "agent": view.get("agent_version"), "last_seen": view.get("last_seen_ago"),
                           "reboot_required": summary.get("reboot_required"),
-                          "reboot_reasons": summary.get("reboot_reasons") or []})
+                          "reboot_reasons": summary.get("reboot_reasons") or [],
+                          "groups": view.get("groups") or [],
+                          "health": (health.get(node.id) or {}).get("health", {}).get("level"),
+                          "health_reasons": (health.get(node.id) or {}).get("health", {}).get("reasons") or []})
         runs = [{k: b.get(k) for k in ("id", "title", "state", "target", "effect", "nodes")}
                 for b in (vm.run_brief(r) for r in store.list_runs(limit=10))]
         tools: Dict[str, int] = {}
@@ -155,6 +161,8 @@ def fleet_overview(args, context):
             "needs_you": {k: att[k] for k in ("approvals", "paused_runs", "reviews", "pending_nodes", "offline_nodes")},
             "dispatch_paused": att.get("dispatch_paused", False), "nodes": nodes, "recent_runs": runs,
             "needs_reboot": [n["name"] for n in nodes if n.get("reboot_required")],
+            "groups": [{k: g[k] for k in ("name", "description", "nodes", "online", "health")} for g in board["groups"]],
+            "ungrouped": board["ungrouped"],
             "tools_with_results": [{"tool": t, "results": n} for t, n in sorted(tools.items(), key=lambda kv: -kv[1])],
         })
     except Exception as exc:  # noqa: BLE001

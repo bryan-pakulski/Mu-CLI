@@ -1,4 +1,4 @@
-/* Orchestration — Nodes: inventory, node detail, enrolment, groups and
+/* Orchestration — Nodes: inventory, node detail, enrolment and
  * disposable test nodes (documentation/plans/orchestration.md §3.1, §6.2,
  * §6.7, §6.8, §8).
  */
@@ -235,32 +235,6 @@
         return { head, line };
     }
 
-    /* ------------------------------------------------------------ groups */
-    function groupDialog(group, done) {
-        const form = document.createElement('form');
-        form.className = 'orch-stack';
-        const id = ui.uid('group');
-        form.innerHTML = `
-            <div class="w-field"><label class="w-field__label" for="${id}-name">Name</label><input class="w-input" data-mono id="${id}-name" value="${esc(group?.name || '')}" ${group ? 'readonly' : 'data-autofocus'} autocomplete="off" placeholder="web-prod"></div>
-            <div class="w-field"><label class="w-field__label" for="${id}-sel">Selector</label><input class="w-input" data-mono id="${id}-sel" value="${esc(group?.selector || '')}" ${group ? 'data-autofocus' : ''} autocomplete="off" placeholder="env=prod,role in (web,api),!legacy">
-                <p class="w-field__hint">Comma means AND. Use <code>k=v</code>, <code>k!=v</code>, <code>k in (a,b)</code>, <code>k</code> (present) or <code>!k</code> (absent).</p></div>
-            <div class="w-field"><label class="w-field__label" for="${id}-desc">Description <span class="orch-muted">(optional)</span></label><input class="w-input" id="${id}-desc" value="${esc(group?.description || '')}" autocomplete="off"></div>
-            <p class="w-field__error" data-error role="alert"></p>
-            <div class="w-btn-row orch-dialog__actions"><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button><button type="submit" class="w-btn" data-variant="primary">${group ? 'Save group' : 'Add group'}</button></div>`;
-        const d = ui.dialog({ title: group ? `Edit group ${group.name}` : 'New group', body: form });
-        form.querySelector('[data-cancel]').onclick = () => d.close();
-        form.onsubmit = async e => {
-            e.preventDefault();
-            const args = { name: form.querySelector(`#${id}-name`).value.trim(), selector: form.querySelector(`#${id}-sel`).value.trim(), description: form.querySelector(`#${id}-desc`).value.trim() };
-            try {
-                await ui.busy(form.querySelector('[type=submit]'), () => api.cmd('putGroup', args));
-                ui.toast('Group saved', 'ok');
-                d.close();
-                done?.();
-            } catch (err) { form.querySelector('[data-error]').innerHTML = `<span aria-hidden="true">✗</span> ${esc(err.message)}`; }
-        };
-    }
-
     async function startTestNode(button, done) {
         const image = await ui.prompt({ title: 'Start a disposable test node', label: 'Container image', optional: true, value: '', okLabel: 'Start test node', hint: 'Leave blank for the default image. The node runs in a local container without a sandbox, is marked canary and is revoked when you stop it.' });
         if (image === null) return;
@@ -307,7 +281,8 @@
             actions: `<a class="w-textbtn" data-tone="quiet" href="${href}">Open run</a>`,
         })])}</div>`;
     }
-    function nodeRow(n, { pinnedAccept = true } = {}) {
+    /* `draggable`: the row can be dragged onto a group in the list (groups.js). */
+    function nodeRow(n, { pinnedAccept = true, draggable = false } = {}) {
         const accept = pinnedAccept && (n.actions || []).find(a => a.id === 'acceptNode' && a.enabled);
         const offline = statusKey(n) === 'offline';
         const stWord = statusKey(n) === 'active' ? '' : `<span${offline || n.status === 'revoked' ? ' data-tone="danger"' : (n.status === 'pending' ? ' data-tone="attention"' : '')}>${esc(ui.cap(offline ? 'offline' : (n.style?.label || n.status)))}</span>`;
@@ -319,6 +294,7 @@
                 n.sandbox === 'none' ? sandboxCell(n) : '', (n.policy_errors || []).length ? policyCell(n) : '']),
             when: n.last_seen ? ui.time(n.last_seen) : '', pinned: !!accept,
             actions: accept ? `<button type="button" class="w-textbtn" data-accept="${esc(n.id)}">Accept</button>` : '',
+            attrs: draggable && n.status !== 'revoked' ? ` draggable="true" data-node-id="${esc(n.id)}" data-node-name="${esc(n.name || n.id)}"` : '',
         });
     }
     function bindAccept(root, nodes) {
@@ -331,9 +307,13 @@
     }
 
     /* ------------------------------------------------------------ inventory (the LIST pane) */
-    async function renderInventory(el, route, { isCurrent, setQuery, soft, tools }) {
+    /* `scopeGroup` (groups.js): only that group's nodes ("-" = in no group, "*" = all);
+     * `draggable`: rows drag onto groups. */
+    async function renderInventory(el, route, { isCurrent, setQuery, soft, tools, scopeGroup = '*', draggable = false }) {
         const data = await api.get('nodes');
         if (!isCurrent()) return null;
+        if (scopeGroup === '-') data.nodes = data.nodes.filter(n => !(n.groups || []).length);
+        else if (scopeGroup && scopeGroup !== '*') data.nodes = data.nodes.filter(n => (n.groups || []).includes(scopeGroup));
         const filter = route.query.get('status') || '';
         const prev = soft ? el.querySelector('#orch-node-search')?.value : null;
         const search = prev ?? (route.query.get('q') || '');
@@ -357,7 +337,7 @@
             const q = (el.querySelector('#orch-node-search').value || '').toLowerCase();
             const f = route.query.get('status') || '';
             const rows = data.nodes.filter(n => (!f || statusKey(n) === f) && (!q || [n.name, n.id, n.address, ui.formatLabels(n.labels)].join(' ').toLowerCase().includes(q)));
-            el.querySelector('[data-node-table]').innerHTML = ui.rows(rows.map(n => nodeRow(n)), { label: 'Nodes', empty: data.nodes.length ? 'No nodes match this filter.' : 'No nodes enrolled yet. Set one up, or create a join token.' });
+            el.querySelector('[data-node-table]').innerHTML = ui.rows(rows.map(n => nodeRow(n, { draggable })), { label: 'Nodes', empty: data.nodes.length ? 'No nodes match this filter.' : (scopeGroup && scopeGroup !== '*' ? 'No nodes here yet.' : 'No nodes enrolled yet. Set one up, or create a join token.') });
             bindAccept(el, data.nodes);
             Orch.markSelected?.();
         };
@@ -420,24 +400,10 @@
                         });
                     }), { label: 'Join tokens', empty: 'No join tokens yet.' })}
                 </section>
-                <section class="w-board__cell" data-span="all" aria-labelledby="orch-groups-h">
-                    <header class="w-pane__head"><h2 class="w-pane__title" id="orch-groups-h" title="Named label selectors you can target runs and access rules at">Groups</h2><button type="button" class="w-textbtn" data-tone="quiet" data-add-group>New group</button></header>
-                    ${ui.table({ label: 'Groups', empty: 'No groups yet. A group names a label selector you can target runs and access rules at.', cols: [{ label: 'Name' }, { label: 'Selector' }, { label: 'Members', num: true }, { label: 'Description' }, { label: 'Actions', sr: true, cls: 'w-table__actions' }],
-                        rows: data.groups.map((g, i) => [`<span class="orch-mono">${esc(g.name)}</span>`, `<code class="orch-mono">${esc(g.selector)}</code>`,
-                            String(n.filter(x => (x.groups || []).includes(g.name)).length), esc(g.description || ''),
-                            `<span class="orch-cell-acts"><button type="button" class="w-textbtn" data-tone="quiet" data-edit-group="${i}">Edit</button><button type="button" class="w-textbtn" data-tone="danger" data-del-group="${i}">Delete</button></span>`]) })}
-                </section>
             </div>`;
         el.querySelector('[data-update-agents]')?.addEventListener('click', e => updateAgents(null, e.currentTarget));
         el.querySelectorAll('[data-enrol]').forEach(b => b.addEventListener('click', enrol));
         el.querySelector('[data-test-node]').addEventListener('click', e => startTestNode(e.currentTarget, () => Orch.refresh()));
-        el.querySelector('[data-add-group]').addEventListener('click', () => groupDialog(null, () => Orch.refresh()));
-        el.querySelectorAll('[data-edit-group]').forEach(b => b.addEventListener('click', () => groupDialog(data.groups[Number(b.dataset.editGroup)], () => Orch.refresh())));
-        el.querySelectorAll('[data-del-group]').forEach(b => b.addEventListener('click', async () => {
-            const g = data.groups[Number(b.dataset.delGroup)];
-            if (!await ui.confirm({ title: `Delete group ${g.name}?`, message: 'Runs and schedules that target this group will no longer match any node.', confirmLabel: 'Delete group', tone: 'danger' })) return;
-            try { await ui.command('deleteGroup', { name: g.name }, { ok: 'Group deleted' }); Orch.refresh(); } catch (_) { /* toasted */ }
-        }));
         el.querySelectorAll('[data-stop-test]').forEach(b => b.addEventListener('click', async () => {
             if (!await ui.confirm({ title: 'Stop this test node?', message: 'The container is removed and the node is revoked.', confirmLabel: 'Stop test node', tone: 'danger' })) return;
             try { await ui.command('stopTestNode', { node_id: b.dataset.stopTest }, { ok: 'Test node stopped', button: b }); Orch.refresh(); } catch (_) { /* toasted */ }
@@ -495,9 +461,11 @@
                     ])}
                     ${(s.provides || []).length ? `<details class="w-disclose"><summary>Provides ${esc(s.provides.length)} commands and services</summary><p class="orch-labels">${s.provides.map(p => `<span class="orch-label">${esc(p)}</span>`).join('')}</p></details>` : ''}
                 </section>
+                <section class="w-group orch-hist" aria-labelledby="orch-hist-h"><div class="w-group__head"><h2 class="w-group__title" id="orch-hist-h">History</h2><span class="orch-sub">CPU, memory, disk, load, network and disk I/O over time</span></div>
+                    <div data-history></div></section>
                 <section class="w-group" aria-labelledby="orch-lab-h"><div class="w-group__head"><h2 class="w-group__title" id="orch-lab-h">Labels and groups</h2></div>
                     ${labels.length ? `<p class="orch-labels">${labels.map(([k, v]) => `<span class="orch-label">${esc(k)}=${esc(v)}</span>`).join('')}</p>` : '<p class="orch-muted">No labels. Runs target nodes by label; set some from the actions.</p>'}
-                    <p class="orch-sub">${(n.groups || []).length ? `In ${n.groups.map(esc).join(', ')}` : 'In no group (groups are label selectors, set on the fleet page).'}</p>
+                    <p class="orch-sub">${(n.groups || []).length ? `In ${n.groups.map(g => `<a href="#/group/${encodeURIComponent(g)}">${esc(g)}</a>`).join(', ')}` : 'In no group. Drag it onto a group in the Nodes list, or manage groups on the Groups tab.'}</p>
                 </section>
                 <section class="w-group" aria-labelledby="orch-pol-h" data-policy-section><div class="w-group__head"><h2 class="w-group__title" id="orch-pol-h">Node-local policy</h2><span class="orch-sub">what this node will refuse</span>${policyState(n).head}</div>
                     ${policyState(n).line}
@@ -536,7 +504,16 @@
             if (!await ui.confirm({ title: 'Stop this test node?', message: 'The container is removed and the node is revoked.', confirmLabel: 'Stop test node', tone: 'danger' })) return;
             try { await ui.command('stopTestNode', { node_id: n.id }, { ok: 'Test node stopped', button: e.currentTarget }); done(); } catch (_) { /* toasted */ }
         });
-        return null;
+        /* History charts (history.js): poll while shown; an agent before 1.3.0 records none. */
+        const history = Orch.history?.mount(el.querySelector('[data-history]'), {
+            url: `nodes/${encodeURIComponent(n.id)}/metrics`,
+            notice: data => ((data.needs_update || []).length
+                ? ui.banner('attention', '◆', 'This node’s agent predates 1.3.0 — update it to record history.',
+                    n.agent?.updatable ? '<button type="button" class="w-btn" data-variant="tonal" data-tone="attention" data-size="sm" data-history-update>Update this node</button>' : '')
+                : ''),
+            bind: box => box.querySelector('[data-history-update]')?.addEventListener('click', e => updateAgents([n.id], e.currentTarget, { stay: true })),
+        });
+        return history ? { dispose: () => history.dispose() } : null;
     }
 
     /* ------------------------------------------------------------ maintenance (the control panel)
@@ -632,7 +609,7 @@
         box.querySelectorAll('[data-maint-check]').forEach(b => b.addEventListener('click', e => go(b.dataset.maintCheck, true, e.currentTarget)));
     }
 
-    Orch.nodes = { enrol, startMaintenance, policyDialog, endpointCard, endpointLine, nodeName, labelsDialog, updateAgents, renderInventory, nodeRow, meter, meters };
-    Orch.routes.nodes = { nav: 'nodes', title: 'Nodes', scopes: ['node', 'run'], render: renderFleet, crumbs: () => [{ label: 'Nodes' }] };
+    Orch.nodes = { enrol, startMaintenance, policyDialog, endpointCard, endpointLine, nodeName, labelsDialog, updateAgents, renderInventory, renderFleet, nodeRow, meter, meters };
+    /* #/nodes (the dashboard) is groups.js. */
     Orch.routes.node = { nav: 'nodes', title: 'Node', scopes: ['node', 'run'], render: renderDetail, crumbs: r => [{ label: 'Nodes', to: '#/nodes' }, { label: r.parts[0] || 'Node' }] };
 })();

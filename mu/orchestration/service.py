@@ -27,6 +27,7 @@ _logger = logging.getLogger(__name__)
 LEASE_S = 15.0
 TICK_S = 1.0
 AGENT_UPDATE_CHECK_S = 300.0          # how often the scheduler looks for out-of-date agents
+ROLLUP_CHECK_S = 3600.0               # node history: raw samples older than two days become 5-minute averages
 AGENT_UPDATE_RETRY_S = 24 * 3600.0    # don't re-propose a version within a day of the last proposal
 DEFAULT_NETWORK = {"bind": "", "port": 30312, "advertise": ""}
 
@@ -53,6 +54,7 @@ class Orchestrator:
         self._setup_tokens: Dict[str, Dict[str, Any]] = {}
         self._setup_lock = threading.Lock()
         self._agent_check_at = 0.0
+        self._metrics_rollup_at = 0.0
 
     # ------------------------------------------------------------ settings
     def dispatch_paused(self) -> bool:
@@ -300,6 +302,13 @@ class Orchestrator:
             self._due_schedules(now)
         except Exception:  # noqa: BLE001
             _logger.exception("orchestration: schedule evaluation failed")
+        if now - self._metrics_rollup_at >= ROLLUP_CHECK_S:
+            self._metrics_rollup_at = now
+            try:
+                from . import metrics
+                metrics.rollup(self.store, now)
+            except Exception:  # noqa: BLE001
+                _logger.exception("orchestration: node history rollup failed")
         if now - self._agent_check_at >= AGENT_UPDATE_CHECK_S:
             self._agent_check_at = now
             try:

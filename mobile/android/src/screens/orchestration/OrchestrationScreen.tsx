@@ -1,5 +1,5 @@
 // The Orchestration tab (web view.js): the page header — title, the fleet's state sentence, text tabs
-// Now · Runs · Nodes · Catalog, Studio and Settings under ⋯, and Ask (the fleet chat) — over one view
+// Now · Runs · Nodes · Groups · Catalog, Studio and Settings under ⋯, and Ask (the fleet chat) — over one view
 // at a time. A run, node, tool or runbook opens as its own screen. Live via /api/orchestration/events.
 // Route param `tab` opens a view directly (Settings → Areas sends {tab: 'settings'}).
 
@@ -9,6 +9,7 @@ import { orchestrationApi, type OrchOverview } from '../../api/orchestration';
 import { EmptyState, IconButton, PageHeader, type HeaderTab, type StatePart } from '../../ui';
 import { FleetChatSheet } from './AskSheets';
 import { CatalogView } from './CatalogView';
+import { GroupsView } from './groups';
 import { NodesView } from './NodesView';
 import { NowView } from './NowView';
 import { RunsView } from './RunsView';
@@ -17,9 +18,9 @@ import { StudioView } from './StudioView';
 import { plural } from './parts';
 import { useOrchData } from './useOrchData';
 
-export const ORCH_TABS = ['now', 'runs', 'nodes', 'catalog', 'studio', 'settings'] as const;
+export const ORCH_TABS = ['now', 'runs', 'nodes', 'groups', 'catalog', 'studio', 'settings'] as const;
 export type OrchTab = typeof ORCH_TABS[number];
-const MAIN: HeaderTab[] = [{ key: 'now', label: 'Now' }, { key: 'runs', label: 'Runs' }, { key: 'nodes', label: 'Nodes' }, { key: 'catalog', label: 'Catalog' }];
+const MAIN: HeaderTab[] = [{ key: 'now', label: 'Now' }, { key: 'runs', label: 'Runs' }, { key: 'nodes', label: 'Nodes' }, { key: 'groups', label: 'Groups' }, { key: 'catalog', label: 'Catalog' }];
 const MORE: Record<string, string> = { studio: 'Studio', settings: 'Settings' };
 
 /** The fleet in one sentence (web view.js stateParts): nodes, offline / connecting, tools, drafts, dispatch. */
@@ -73,6 +74,7 @@ export function OrchestrationScreen({ navigation, route }: { navigation: any; ro
         {tab === 'now' ? <NowView overview={overview} onChanged={() => { void reload(); }} openRun={openRun} openNode={openNode} openTool={openTool} openRunbook={openRunbook} openTab={k => setTab(k as OrchTab)} /> : null}
         {tab === 'runs' ? <RunsView openRun={openRun} /> : null}
         {tab === 'nodes' ? <NodesView openNode={openNode} openRun={openRun} /> : null}
+        {tab === 'groups' ? <GroupsView /> : null}
         {tab === 'catalog' ? <CatalogView openTool={openTool} openRunbook={openRunbook} /> : null}
         {tab === 'studio' ? <StudioView openToolEditor={openToolEditor} openRunbookEditor={openRunbookEditor} openTool={openTool} openRunbook={openRunbook} /> : null}
         {tab === 'settings' ? <SettingsView /> : null}

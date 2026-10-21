@@ -81,6 +81,7 @@
         frame.addEventListener('load', function () {
             view.loaded = true;
             frame.removeAttribute('data-loading');
+            post(view, { type: 'mu:view', active: active === key });   // loaded while hidden: say so
         });
         frame.setAttribute('data-loading', '');
         host.appendChild(frame);
@@ -93,6 +94,8 @@
             view.frame.toggleAttribute('data-active', on);
             view.frame.setAttribute('aria-hidden', on ? 'false' : 'true');
             view.frame.tabIndex = on ? 0 : -1;
+            // Hidden views release their live streams (MuLive in mu_live.js): connections are scarce.
+            post(view, { type: 'mu:view', active: on });
         });
     }
     function navigate(href, opts) {

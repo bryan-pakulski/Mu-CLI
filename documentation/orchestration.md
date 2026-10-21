@@ -161,6 +161,50 @@ drafts under test. **Nodes → Start test node** (needs Docker on the master) st
 container node (`python:3.12-slim` by default) that enrols itself as an accepted canary; remove it
 when done.
 
+### Node dashboard and groups
+
+**Nodes** opens on the dashboard: overall health for the fleet, a group, or the ungrouped nodes.
+Each node is **healthy**, **warning** or **critical** (or awaiting acceptance), with the reasons in
+words, and the worst come first:
+- **Critical:** offline, quarantined, a disk ≥ 95 % full, memory ≥ 95 % used.
+- **Warning:** a disk ≥ 85 %, memory ≥ 90 %, load above 1.5 per CPU, needs a reboot, an outdated
+  agent, local policy errors, or facts older than a day.
+
+The dashboard also shows memory, disk and load averages and maxima, busy nodes, and the last 24 hours
+of runs on those nodes. The thresholds are in `mu/orchestration/vm.py`.
+
+**Groups** collect nodes for viewing and for runs. A node belongs to a group when it is a
+**member** or the group's **label selector** matches it (a group with no selector has only its
+members).
+- **Web:** **+ Create group** beside the groups list. Drag a node onto a group to add it, from one group to another to move it, or onto **Ungrouped** to take it out. Each row's menu does the same without dragging.
+- **Phone:** long-press a node, then **Move to group…**.
+- **Groups tab:** rename a group, edit its description, selector and members, or delete it.
+
+**Run on this group** proposes a run targeting the group (`{groups: [name]}`), the same as choosing
+the group in the run wizard. Group changes are operator actions (audited) and never available to the
+AI. The fleet chat's read-only `fleet_overview` reports each node's groups and health, and each
+group's health counts.
+
+From the terminal: `/orch dashboard [GROUP|-]`, `/orch groups` and `/orch group …` in the chat,
+or `mucli orch dashboard [--group G]` and `mucli orch groups …` (below).
+
+### Node history
+
+Nodes running agent **1.3.0** or newer report a small utilisation sample with their poll, about
+every 20 seconds:
+- CPU %, memory %, the fullest disk % and load;
+- network in and out, and disk read and write, in bytes per second.
+
+The rates come from the kernel's counters between two samples (Linux `/proc`). The master stamps
+each sample with its own clock and keeps full resolution for two days. After that, samples become
+5-minute averages, kept for 30 days.
+- **Node page:** charts for the last hour, 6 hours, day, week or month.
+- **Dashboard:** the same charts for the scope. CPU, memory and load are averaged across its nodes, network and disk I/O summed, and disk is the fullest.
+- **Older agents:** they have no history, and the charts say so. Update them (**Update agents**, or automatic updates) to start recording.
+
+In the terminal: `/orch history [NODE|GROUP|-] [1h|6h|24h|7d|30d]` draws sparklines, as do
+`mucli orch nodes history NODE --range R` and `mucli orch dashboard --history [--group G]`.
+
 ### Node maintenance
 
 Every node (agent 1.2.0 or newer) reports whether it **needs a reboot** with its facts:
@@ -448,6 +492,10 @@ consistent archive of the store, keys and blobs (it contains private keys: prote
 
 ```
 mucli orch nodes [list|show|accept|quarantine|unquarantine|revoke|token|update] [NODE]
+mucli orch dashboard [--group G|-] [--history] [--range R]   (health; --history adds sparklines)
+mucli orch nodes history NODE [--range 1h|6h|24h|7d|30d]
+mucli orch groups [list|show|create|delete|add|remove|rename] [NAME] [NODES…|NEW]
+               [--selector SEL] [--description D] [--from G]
 mucli orch tools [list|show|publish|deprecate|starter] [REF]
 mucli orch runbooks [list|show|validate FILE|DIR|save FILE|DIR|submit REF|publish REF|test REF]
                [--nodes IDS] [--params JSON] [--no-check]

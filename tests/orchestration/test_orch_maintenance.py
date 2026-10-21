@@ -90,6 +90,32 @@ def test_reboot_detection_from_the_package_manager_flag(monkeypatch, tmp_path):
     assert '"reboot": reboot_status' in Path(collectors.__file__).read_text()    # part of every facts report
 
 
+NEEDS = ("Core libraries or services have been updated since boot-up:\n  * kernel\n  * glibc\n\n"
+         "Reboot is required to fully utilize these updates.\nMore information: https://access.redhat.com/solutions/27943\n")
+FINE = "No core libraries or services have been updated since boot-up.\nReboot should not be necessary.\n"
+
+
+@pytest.mark.parametrize("code,stdout,stderr,required,error", [
+    (1, NEEDS, "", True, ""),
+    (0, FINE, "", False, ""),
+    # It exits 1 on failure too (the agent runs unprivileged): that is not a reboot.
+    (1, "", "Error: This command has to be run with superuser privileges (under the root user on most systems).", False, "superuser"),
+    (1, "", "Error: Failed to obtain the transaction lock (logged in as: mucli-node).", False, "transaction lock"),
+])
+def test_needs_restarting_only_counts_when_it_says_reboot_is_required(monkeypatch, tmp_path, code, stdout, stderr, required, error):
+    """Amazon Linux / RHEL (agent 1.3.1): a failed `needs-restarting -r` used to read as a reboot
+    being needed, so the warning outlived every reboot."""
+    from types import SimpleNamespace
+    _fake_kernel(monkeypatch, tmp_path, "6.1.174-217.345.amzn2023.x86_64", ["6.1.174-217.345.amzn2023.x86_64"])
+    monkeypatch.setattr(collectors.shutil, "which", lambda name: "/usr/bin/needs-restarting" if name == "needs-restarting" else None)
+    monkeypatch.setattr(collectors.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=code, stdout=stdout, stderr=stderr))
+    status = collectors.reboot_status()
+    assert status["required"] is required
+    if required:
+        assert status["packages"] == ["glibc", "kernel"] and "needs-restarting" in status["reasons"][0]
+    assert (error in status["errors"][0]) if error else status["errors"] == []
+
+
 # --------------------------------------------------------------------- the built-in tools
 
 def test_maintenance_tools_ship_lint_clean_with_check_mode():

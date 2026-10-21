@@ -2,7 +2,7 @@
 
 mucli's tests validate the product's core requirements. They are grouped by pillar, one folder each, and every test exercises behaviour. This page lists what each pillar must prove and the files that prove it. AGENTS.md has the rules in short.
 
-**Size:** 1,535 tests in 101 files, plus 15 node tests in `tests/gui/frontend/`. A full run takes about 7 minutes: ~6.1 min is the Docker suites, the rest ~67 s.
+**Size:** 1,535 tests in 101 files, plus 27 node tests in `tests/gui/frontend/`. A full run takes about 7 minutes: ~6.1 min is the Docker suites, the rest ~67 s.
 
 ```bash
 python3 -m pytest tests/ -q                 # everything (Docker required)
@@ -217,11 +217,14 @@ Must prove:
 - Runs plan, batch, pause and roll back; canary/test-key/digest/typed-confirm are enforced
 - Remote policy edits are operator-only; CSRF on every mutating route
 - The web schema mirrors node/schema.py
+- Groups (members or selector) target runs; the node dashboard reports health with reasons; group changes are operator-only
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
 | `test_fleet_chat.py` | 7 | 1.3 s | The fleet chat: never takes the main chat's focus, never listed with sessions, temporary (a new one deletes the old) |
-| `test_fleet_tools.py` | 6 | 0.3 s | Fleet results from every part of μcli: read-only fleet_* tools for any interactive session, |
+| `test_fleet_tools.py` | 7 | 0.3 s | Fleet results from every part of μcli: read-only fleet_* tools for any interactive session, |
+| `test_node_history.py` | 6 | 1.0 s | Node history: the agent's sampler (CPU/network/disk-I/O rates from /proc deltas), clean samples on the master clock, node/group series, rollups and retention, the API, terminal sparklines |
+| `test_node_groups.py` | 7 | 0.3 s | Node groups (members and selectors), run targeting, the node dashboard's health, AI refused, `mucli orch groups/dashboard` |
 | `test_orch_container_nodes.py` | 1 | 7.6 s | Disposable container test nodes (plan §6.8): needs Docker (mandatory) and pulls an image |
 | `test_orch_crypto.py` | 25 | 0.2 s | Vendored Ed25519 verification and signed envelopes (orchestration plan §6.3) |
 | `test_orch_integration.py` | 10 | 14.9 s | Master and real node agents over HTTPS long-poll on loopback (plan §11 integration, P0/P1) |
@@ -231,6 +234,7 @@ Must prove:
 | `test_orch_remote_policy.py` | 5 | 0.1 s | Editing a node's policy.yaml from the master: operator only (never the AI), audited, no |
 | `test_orch_results.py` | 5 | 0.4 s | Fleet results (mu/orchestration/results.py): a tool's output schema becomes sortable tables |
 | `test_orch_surfaces.py` | 16 | 5.4 s | Security regressions and surfaces (plan §11): CSRF, session-type gating, AI tool limits, |
+| `test_orch_tui_groups.py` | 7 | 0.2 s | `/orch dashboard`, `/orch groups`, `/orch group …` and the launcher menu's Dashboard and Groups |
 | `test_orch_web_pickers.py` | 3 | 0.1 s | Web pickers (documentation/plans/runbook_editor.md §4.1): the JS schema validator agrees with |
 
 ### Web GUI — `tests/gui/`

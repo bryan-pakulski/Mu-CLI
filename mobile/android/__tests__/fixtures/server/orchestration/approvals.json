@@ -131,7 +131,7 @@
    ],
    "address": "",
    "agent": {
-    "current": "1.2.0",
+    "current": "1.3.0",
     "outdated": true,
     "reason": "agent test can't update itself: update it once by hand",
     "updatable": false,
@@ -140,16 +140,16 @@
    "agent_version": "test",
    "busy": null,
    "canary": false,
-   "created_at": 1792491810.905049,
-   "facts_at": 1792491810.905049,
+   "created_at": 1792569503.2240949,
+   "facts_at": 1792569503.2240949,
    "groups": [],
-   "id": "n_7678830af2",
+   "id": "n_aada500c75",
    "kind": "host",
    "labels": {
     "env": "prod",
     "role": "db"
    },
-   "last_seen": 1792491810.905049,
+   "last_seen": 1792569503.2240949,
    "last_seen_ago": "0s ago",
    "name": "db-new",
    "online": true,
@@ -300,15 +300,15 @@
    "approved_by": "",
    "batches": [
     [
-     "n_a1105c121a"
+     "n_a9c30453f8"
     ],
     [
-     "n_ebaad05f6a"
+     "n_a2c603ee94"
     ]
    ],
    "blast_radius": "2 nodes (prod) in 2 batches",
    "check_mode": false,
-   "created_at": 1792491810.905049,
+   "created_at": 1792569503.2240949,
    "decision": {
     "level": "confirm",
     "rule": "Anything that changes a system is confirmed",
@@ -319,12 +319,12 @@
     "per_node": [
      {
       "level": "confirm",
-      "node_id": "n_a1105c121a",
+      "node_id": "n_a9c30453f8",
       "rule": "Anything that changes a system is confirmed"
      },
      {
       "level": "confirm",
-      "node_id": "n_ebaad05f6a",
+      "node_id": "n_a2c603ee94",
       "rule": "Anything that changes a system is confirmed"
      }
     ],
@@ -362,7 +362,7 @@
       "role": "web"
      },
      "name": "web-1",
-     "node_id": "n_a1105c121a",
+     "node_id": "n_a9c30453f8",
      "online": true,
      "progress": "ready",
      "rollbacks": []
@@ -389,20 +389,20 @@
       "role": "web"
      },
      "name": "web-2",
-     "node_id": "n_ebaad05f6a",
+     "node_id": "n_a2c603ee94",
      "online": true,
      "progress": "ready",
      "rollbacks": []
     }
    ],
-   "id": "r_fd7f720abb75",
+   "id": "r_eab92926a20c",
    "kind": "tool",
    "nodes": 2,
    "notes": [
     {
      "action": "run.propose",
      "actor": "operator",
-     "at": 1792491810.905049,
+     "at": 1792569503.2240949,
      "seq": 78,
      "text": "Proposed by operator",
      "tone": "info"

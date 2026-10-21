@@ -1,9 +1,9 @@
 {
  "agents": {
   "auto": false,
-  "current": "1.2.0",
+  "current": "1.3.0",
   "open_run": "",
-  "outdated": 3,
+  "outdated": 1,
   "updatable": 0
  },
  "endpoint": {
@@ -15,7 +15,22 @@
   "running": false,
   "url": ""
  },
- "groups": [],
+ "groups": [
+  {
+   "description": "",
+   "members": [
+    "n_a9c30453f8"
+   ],
+   "name": "canaries",
+   "selector": ""
+  },
+  {
+   "description": "Front ends",
+   "members": [],
+   "name": "web",
+   "selector": "role=web"
+  }
+ ],
  "nodes": [
   {
    "accepted_at": null,
@@ -148,7 +163,7 @@
    ],
    "address": "",
    "agent": {
-    "current": "1.2.0",
+    "current": "1.3.0",
     "outdated": true,
     "reason": "agent test can't update itself: update it once by hand",
     "updatable": false,
@@ -157,16 +172,16 @@
    "agent_version": "test",
    "busy": null,
    "canary": false,
-   "created_at": 1792491810.905049,
-   "facts_at": 1792491810.905049,
+   "created_at": 1792569503.2240949,
+   "facts_at": 1792569503.2240949,
    "groups": [],
-   "id": "n_7678830af2",
+   "id": "n_aada500c75",
    "kind": "host",
    "labels": {
     "env": "prod",
     "role": "db"
    },
-   "last_seen": 1792491810.905049,
+   "last_seen": 1792569503.2240949,
    "last_seen_ago": "0s ago",
    "name": "db-new",
    "online": true,
@@ -212,7 +227,7 @@
    }
   },
   {
-   "accepted_at": 1792491810.905049,
+   "accepted_at": 1792569503.2240949,
    "actions": [
     {
      "args": {},
@@ -342,25 +357,28 @@
    ],
    "address": "",
    "agent": {
-    "current": "1.2.0",
-    "outdated": true,
-    "reason": "agent test can't update itself: update it once by hand",
+    "current": "1.3.0",
+    "outdated": false,
+    "reason": "",
     "updatable": false,
-    "version": "test"
+    "version": "1.3.0"
    },
-   "agent_version": "test",
+   "agent_version": "1.3.0",
    "busy": null,
    "canary": true,
-   "created_at": 1792491810.905049,
-   "facts_at": 1792491810.905049,
-   "groups": [],
-   "id": "n_a1105c121a",
+   "created_at": 1792569503.2240949,
+   "facts_at": 1792569503.2240949,
+   "groups": [
+    "canaries",
+    "web"
+   ],
+   "id": "n_a9c30453f8",
    "kind": "host",
    "labels": {
     "env": "prod",
     "role": "web"
    },
-   "last_seen": 1792491810.905049,
+   "last_seen": 1792569503.2240949,
    "last_seen_ago": "0s ago",
    "name": "web-1",
    "online": true,
@@ -412,26 +430,22 @@
     "arch": "",
     "cpus": 2,
     "hostname": "",
-    "kernel": "6.1.0",
-    "load": null,
-    "max_disk_used_pct": null,
-    "memory_gb": null,
-    "memory_used_pct": null,
+    "kernel": "",
+    "load": 0.4,
+    "max_disk_used_pct": 40,
+    "memory_gb": 8.0,
+    "memory_used_pct": 52,
     "os": "Debian 12",
-    "provides": [
-     "systemd",
-     "ss",
-     "openssl"
-    ],
+    "provides": [],
     "reboot_reasons": [],
     "reboot_required": null,
     "services": 0,
-    "systemd": true,
-    "uptime_days": null
+    "systemd": null,
+    "uptime_days": 3.0
    }
   },
   {
-   "accepted_at": 1792491810.905049,
+   "accepted_at": 1792569503.2240949,
    "actions": [
     {
      "args": {},
@@ -561,25 +575,27 @@
    ],
    "address": "",
    "agent": {
-    "current": "1.2.0",
-    "outdated": true,
-    "reason": "agent test can't update itself: update it once by hand",
+    "current": "1.3.0",
+    "outdated": false,
+    "reason": "",
     "updatable": false,
-    "version": "test"
+    "version": "1.3.0"
    },
-   "agent_version": "test",
+   "agent_version": "1.3.0",
    "busy": null,
    "canary": false,
-   "created_at": 1792491810.905049,
-   "facts_at": 1792491810.905049,
-   "groups": [],
-   "id": "n_ebaad05f6a",
+   "created_at": 1792569503.2240949,
+   "facts_at": 1792569503.2240949,
+   "groups": [
+    "web"
+   ],
+   "id": "n_a2c603ee94",
    "kind": "host",
    "labels": {
     "env": "prod",
     "role": "web"
    },
-   "last_seen": 1792491810.905049,
+   "last_seen": 1792569503.2240949,
    "last_seen_ago": "0s ago",
    "name": "web-2",
    "online": true,
@@ -631,22 +647,18 @@
     "arch": "",
     "cpus": 2,
     "hostname": "",
-    "kernel": "6.1.0",
-    "load": null,
-    "max_disk_used_pct": null,
-    "memory_gb": null,
-    "memory_used_pct": null,
+    "kernel": "",
+    "load": 0.4,
+    "max_disk_used_pct": 96,
+    "memory_gb": 8.0,
+    "memory_used_pct": 52,
     "os": "Debian 12",
-    "provides": [
-     "systemd",
-     "ss",
-     "openssl"
-    ],
+    "provides": [],
     "reboot_reasons": [],
     "reboot_required": null,
     "services": 0,
-    "systemd": true,
-    "uptime_days": null
+    "systemd": null,
+    "uptime_days": 3.0
    }
   }
  ],
@@ -655,42 +667,42 @@
  "tokens": [
   {
    "canary": true,
-   "created_at": 1792491810.905049,
-   "expires_at": 1792495410.905049,
+   "created_at": 1792569503.2240949,
+   "expires_at": 1792573103.2240949,
    "labels": {
     "env": "prod",
     "role": "web"
    },
-   "node_id": "n_a1105c121a",
+   "node_id": "n_a9c30453f8",
    "note": "",
-   "token_id": "1c39b03a616e96f4",
-   "used_at": 1792491810.905049
+   "token_id": "7825d7f3708f0b7b",
+   "used_at": 1792569503.2240949
   },
   {
    "canary": false,
-   "created_at": 1792491810.905049,
-   "expires_at": 1792495410.905049,
+   "created_at": 1792569503.2240949,
+   "expires_at": 1792573103.2240949,
    "labels": {
     "env": "prod",
     "role": "web"
    },
-   "node_id": "n_ebaad05f6a",
+   "node_id": "n_a2c603ee94",
    "note": "",
-   "token_id": "70f59db5865b0673",
-   "used_at": 1792491810.905049
+   "token_id": "ccfdeb397ce4f401",
+   "used_at": 1792569503.2240949
   },
   {
    "canary": false,
-   "created_at": 1792491810.905049,
-   "expires_at": 1792495410.905049,
+   "created_at": 1792569503.2240949,
+   "expires_at": 1792573103.2240949,
    "labels": {
     "env": "prod",
     "role": "db"
    },
-   "node_id": "n_7678830af2",
+   "node_id": "n_aada500c75",
    "note": "",
-   "token_id": "91f9d02865413371",
-   "used_at": 1792491810.905049
+   "token_id": "2cef5397b4183acc",
+   "used_at": 1792569503.2240949
   }
  ]
 }

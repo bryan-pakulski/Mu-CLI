@@ -6,7 +6,7 @@ imports the shared primitives (``canonical``, ``schema``, ``envelope``) from her
 encode, hash and validate identically.
 """
 
-AGENT_VERSION = "1.2.0"
+AGENT_VERSION = "1.3.1"     # 1.3.0: utilisation samples (history charts); 1.3.1: a failed needs-restarting is not a reboot
 # The first agent that can update itself (older ones are updated once by hand).
 SELF_UPDATE_SINCE = "1.1.0"
 

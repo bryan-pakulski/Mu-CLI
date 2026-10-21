@@ -1,0 +1,136 @@
+{
+ "fleet": {
+  "health": {
+   "critical": 1,
+   "ok": 1,
+   "pending": 1,
+   "warning": 0
+  },
+  "nodes": 3,
+  "online": 2
+ },
+ "groups": [
+  {
+   "description": "",
+   "health": {
+    "critical": 0,
+    "ok": 1,
+    "pending": 0,
+    "warning": 0
+   },
+   "members": [
+    "n_a9c30453f8"
+   ],
+   "name": "canaries",
+   "nodes": 1,
+   "online": 1,
+   "selector": ""
+  },
+  {
+   "description": "Front ends",
+   "health": {
+    "critical": 1,
+    "ok": 1,
+    "pending": 0,
+    "warning": 0
+   },
+   "members": [],
+   "name": "web",
+   "nodes": 2,
+   "online": 2,
+   "selector": "role=web"
+  }
+ ],
+ "nodes": [
+  {
+   "agent_version": "test",
+   "busy": null,
+   "canary": false,
+   "cpus": 2,
+   "groups": [],
+   "health": {
+    "level": "pending",
+    "reasons": [
+     "waiting to be accepted"
+    ],
+    "style": {
+     "glyph": "\u25c6",
+     "label": "awaiting acceptance",
+     "semantic": "attention",
+     "status": "waiting"
+    }
+   },
+   "id": "n_aada500c75",
+   "labels": {
+    "env": "prod",
+    "role": "db"
+   },
+   "last_seen_ago": "0s ago",
+   "load": null,
+   "max_disk_used_pct": null,
+   "memory_used_pct": null,
+   "name": "db-new",
+   "os": "Debian 12",
+   "presence": "online",
+   "status": "pending",
+   "style": {
+    "glyph": "\u25c6",
+    "label": "awaiting acceptance",
+    "semantic": "attention",
+    "status": "waiting"
+   },
+   "uptime_days": null
+  }
+ ],
+ "resources": {
+  "disk_used_avg": null,
+  "disk_used_max": null,
+  "load_per_cpu_avg": null,
+  "load_per_cpu_max": null,
+  "memory_used_avg": null,
+  "memory_used_max": null
+ },
+ "runs_24h": {
+  "executions": 0,
+  "failed": 0,
+  "recent": [],
+  "succeeded": 0
+ },
+ "scope": {
+  "group": "-",
+  "label": "Ungrouped"
+ },
+ "thresholds": {
+  "disk_crit": 95,
+  "disk_warn": 85,
+  "load_per_cpu_warn": 1.5,
+  "memory_crit": 95,
+  "memory_warn": 90
+ },
+ "totals": {
+  "busy": 0,
+  "health": {
+   "critical": 0,
+   "ok": 0,
+   "pending": 1,
+   "warning": 0
+  },
+  "nodes": 1,
+  "pending": 1,
+  "presence": {
+   "connecting": 0,
+   "offline": 0,
+   "online": 0
+  }
+ },
+ "ungrouped": {
+  "health": {
+   "critical": 0,
+   "ok": 0,
+   "pending": 1,
+   "warning": 0
+  },
+  "nodes": 1,
+  "online": 0
+ }
+}

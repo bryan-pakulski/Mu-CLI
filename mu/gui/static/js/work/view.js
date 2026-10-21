@@ -1459,18 +1459,25 @@
             await refreshHome();
             const initial = home.needs_you[0] || home.running[0] || home.jobs[0];
             if (autoSelect && initial) await select(initial.id);
-            const connect = () => {
-                source = new EventSource('/api/jobs/events');
-                source.onmessage = async event => { try { const change = JSON.parse(event.data); if (change.scope === 'home') await refreshHome(); if (change.scope === 'job' && change.id === selectedId) await refreshParts(change.parts); } catch (e) { notify(e.message, 'danger'); } };
-                source.addEventListener('hello', () => { onConnection?.(true); refreshHome().catch(() => {}); if (selectedId) refreshParts().catch(() => {}); });
-                source.onerror = () => onConnection?.(false);
-                source.onopen = () => onConnection?.(true);
-            };
-            connect();
-            // pagehide/pageshow (not beforeunload) keep the page eligible for the back/forward
-            // cache, so Back to /work is instant; the stream reconnects when the page returns.
-            window.addEventListener('pagehide', () => source?.close());
-            window.addEventListener('pageshow', event => { if (event.persisted) connect(); });
+            const onMessage = async event => { try { const change = JSON.parse(event.data); if (change.scope === 'home') await refreshHome(); if (change.scope === 'job' && change.id === selectedId) await refreshParts(change.parts); } catch (e) { notify(e.message, 'danger'); } };
+            // Every hello (first connect or a reconnect) refetches, so nothing missed while the
+            // stream was down or released (hidden view or tab) stays stale.
+            const onHello = () => { onConnection?.(true); refreshHome().catch(() => {}); if (selectedId) refreshParts().catch(() => {}); };
+            if (window.MuLive) {
+                // Open only while on screen; self-healing (mu_live.js MuLive).
+                source = window.MuLive.stream('/api/jobs/events', { onMessage, events: { hello: onHello }, onState: live => onConnection?.(live) });
+            } else {
+                const connect = () => {
+                    source = new EventSource('/api/jobs/events');
+                    source.onmessage = onMessage;
+                    source.addEventListener('hello', onHello);
+                    source.onerror = () => onConnection?.(false);
+                    source.onopen = () => onConnection?.(true);
+                };
+                connect();
+                window.addEventListener('pagehide', () => source?.close());
+                window.addEventListener('pageshow', event => { if (event.persisted) connect(); });
+            }
             setInterval(() => { if (home && document.visibilityState === 'visible') renderHome(); }, 30000);
             setInterval(() => { void refreshLiveDiff(); }, LIVE_DIFF_MS);
         }

@@ -1,0 +1,146 @@
+{
+ "fleet": {
+  "health": {
+   "critical": 1,
+   "ok": 1,
+   "pending": 1,
+   "warning": 0
+  },
+  "nodes": 3,
+  "online": 2
+ },
+ "groups": [
+  {
+   "description": "",
+   "health": {
+    "critical": 0,
+    "ok": 1,
+    "pending": 0,
+    "warning": 0
+   },
+   "members": [
+    "n_a9c30453f8"
+   ],
+   "name": "canaries",
+   "nodes": 1,
+   "online": 1,
+   "selector": ""
+  },
+  {
+   "description": "Front ends",
+   "health": {
+    "critical": 1,
+    "ok": 1,
+    "pending": 0,
+    "warning": 0
+   },
+   "members": [],
+   "name": "web",
+   "nodes": 2,
+   "online": 2,
+   "selector": "role=web"
+  }
+ ],
+ "nodes": [
+  {
+   "groups": [
+    "web"
+   ],
+   "health": {
+    "level": "critical",
+    "reasons": [
+     "disk 96% full"
+    ],
+    "style": {
+     "glyph": "\u2717",
+     "label": "critical",
+     "semantic": "danger",
+     "status": "failed"
+    }
+   },
+   "id": "n_a2c603ee94",
+   "labels": {
+    "env": "prod",
+    "role": "web"
+   },
+   "name": "web-2",
+   "presence": "online",
+   "status": "active",
+   "style": {
+    "glyph": "\u2713",
+    "label": "active",
+    "semantic": "ok",
+    "status": "done"
+   }
+  },
+  {
+   "groups": [],
+   "health": {
+    "level": "pending",
+    "reasons": [
+     "waiting to be accepted"
+    ],
+    "style": {
+     "glyph": "\u25c6",
+     "label": "awaiting acceptance",
+     "semantic": "attention",
+     "status": "waiting"
+    }
+   },
+   "id": "n_aada500c75",
+   "labels": {
+    "env": "prod",
+    "role": "db"
+   },
+   "name": "db-new",
+   "presence": "online",
+   "status": "pending",
+   "style": {
+    "glyph": "\u25c6",
+    "label": "awaiting acceptance",
+    "semantic": "attention",
+    "status": "waiting"
+   }
+  },
+  {
+   "groups": [
+    "canaries",
+    "web"
+   ],
+   "health": {
+    "level": "ok",
+    "reasons": [],
+    "style": {
+     "glyph": "\u2713",
+     "label": "healthy",
+     "semantic": "ok",
+     "status": "done"
+    }
+   },
+   "id": "n_a9c30453f8",
+   "labels": {
+    "env": "prod",
+    "role": "web"
+   },
+   "name": "web-1",
+   "presence": "online",
+   "status": "active",
+   "style": {
+    "glyph": "\u2713",
+    "label": "active",
+    "semantic": "ok",
+    "status": "done"
+   }
+  }
+ ],
+ "ungrouped": {
+  "health": {
+   "critical": 0,
+   "ok": 0,
+   "pending": 1,
+   "warning": 0
+  },
+  "nodes": 1,
+  "online": 0
+ }
+}

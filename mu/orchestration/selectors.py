@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Callable, List, Mapping, Tuple
+from typing import Any, Callable, List, Mapping, Tuple
 
 _KEY = r"[A-Za-z0-9][A-Za-z0-9_./-]{0,62}"
 _VAL = r"[A-Za-z0-9_.:/-]{0,63}"
@@ -112,3 +112,18 @@ def validate_labels(labels: Mapping[str, str]) -> List[str]:
         if not LABEL_VALUE.match(str(value)):
             errors.append(f"invalid value for label {key!r}")
     return errors
+
+
+def in_group(group: Mapping[str, Any], node_id: str, labels: Mapping[str, str]) -> bool:
+    """Whether a node belongs to a group: an explicit member (dragged in), or its labels match the
+    group's selector. An empty selector matches nothing (a members-only group); a bad one matches
+    nothing either."""
+    if str(node_id) in (group.get("members") or ()):
+        return True
+    text = str(group.get("selector") or "").strip()
+    if not text:
+        return False
+    try:
+        return matches(text, labels)
+    except SelectorError:
+        return False

@@ -217,8 +217,11 @@ type Plan = { ok?: boolean; nodes?: string[]; errors?: string[]; warnings?: stri
   decision?: { level?: string; summary?: string }; excluded?: Array<{ node_id: string; name?: string; reason: string }>; check_mode?: boolean };
 
 /** Run a published tool or runbook: choose nodes and inputs, read the plan, then propose (web new-run). */
-export function RunSheet({ kind, target, inputs, visible, onClose, onProposed }: {
-  kind: 'tool' | 'runbook'; target: string; inputs: Schema | null | undefined; visible: boolean; onClose: () => void; onProposed: (runId: string, message: string) => void;
+export function RunSheet({ kind, target, inputs, groups, visible, onClose, onProposed }: {
+  kind: 'tool' | 'runbook'; target: string; inputs: Schema | null | undefined;
+  /** Aim at these node groups (Run on this group); labels then only narrow them. */
+  groups?: string[];
+  visible: boolean; onClose: () => void; onProposed: (runId: string, message: string) => void;
 }) {
   const [all, setAll] = useState(false);
   const [labels, setLabels] = useState('');
@@ -228,12 +231,14 @@ export function RunSheet({ kind, target, inputs, visible, onClose, onProposed }:
   const [plan, setPlan] = useState<Plan | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const selector = useMemo(() => (all ? { all: true } : { labels: labels.trim() }), [all, labels]);
+  const grouped = !!groups?.length;
+  const selector = useMemo(() => (grouped ? { groups: groups as string[], ...(labels.trim() ? { labels: labels.trim() } : {}) }
+    : all ? { all: true } : { labels: labels.trim() }), [grouped, groups, all, labels]);
   useEffect(() => { setPlan(null); }, [selector, params, check]);
   const read = () => {
     const r = readParams(inputs, params);
     if (r.errors.length) { setError(r.errors.join('; ')); return null; }
-    if (!all && !labels.trim()) { setError('Choose nodes: a label selector like role=web, or all nodes.'); return null; }
+    if (!grouped && !all && !labels.trim()) { setError('Choose nodes: a label selector like role=web, or all nodes.'); return null; }
     return r.values;
   };
   const preview = async () => {
@@ -266,8 +271,19 @@ export function RunSheet({ kind, target, inputs, visible, onClose, onProposed }:
           : <Button variant="primary" label="Preview the plan" loading={busy} onPress={() => { void preview(); }} testID="orch-run-sheet-plan" />}
       </>}>
       <View style={styles.form}>
-        <SwitchRow label="All nodes" value={all} onValueChange={setAll} testID="orch-run-sheet-all" />
-        {!all ? <Field label="Nodes" hint="A label selector, e.g. role=web,env!=prod"><TextField value={labels} onChangeText={setLabels} mono autoCapitalize="none" autoCorrect={false} testID="orch-run-sheet-labels" /></Field> : null}
+        {grouped ? (
+          <>
+            <KV label={groups!.length === 1 ? 'Group' : 'Groups'}><Text testID="orch-run-sheet-groups">{groups!.join(', ')}</Text></KV>
+            <Field label="Only nodes with these labels" optional hint="Narrows the group, e.g. env=prod">
+              <TextField value={labels} onChangeText={setLabels} mono autoCapitalize="none" autoCorrect={false} testID="orch-run-sheet-labels" />
+            </Field>
+          </>
+        ) : (
+          <>
+            <SwitchRow label="All nodes" value={all} onValueChange={setAll} testID="orch-run-sheet-all" />
+            {!all ? <Field label="Nodes" hint="A label selector, e.g. role=web,env!=prod"><TextField value={labels} onChangeText={setLabels} mono autoCapitalize="none" autoCorrect={false} testID="orch-run-sheet-labels" /></Field> : null}
+          </>
+        )}
         <ParamsForm schema={inputs} value={params} onChange={setParams} empty={kind === 'runbook' ? 'This runbook takes no inputs.' : 'This tool takes no inputs.'} />
         <SwitchRow label="Check mode (dry run)" value={check} onValueChange={setCheck} />
         <Field label="Title" optional><TextField value={title} onChangeText={setTitle} testID="orch-run-sheet-title" /></Field>

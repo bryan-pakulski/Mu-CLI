@@ -1,162 +1,163 @@
 {
  "entries": [
   {
+   "action": "group.put",
+   "actor": "operator",
+   "at": 1792569503.2240949,
+   "digest": "sha256:81367f7a4ca2158d57f3ccfa3c147eaa970e4f5da456a4cec4a1fdbce5599afd",
+   "hash": "6054f3a93598afd9f49e1976d349be35627f916b25f81102dd4d84c29e12ad52",
+   "payload": {
+    "members": [
+     "n_a9c30453f8"
+    ],
+    "selector": ""
+   },
+   "prev_hash": "d8a8cb99dc7e1209dedc1acb6c06a0272a1386839f2859fd7f7751cb5964c9d7",
+   "seq": 82,
+   "subject": "canaries"
+  },
+  {
+   "action": "group.put",
+   "actor": "operator",
+   "at": 1792569503.2240949,
+   "digest": "sha256:f59d27b8edba7303f0fb601d9a77356a3adabc98de2f28aee7c825d568096721",
+   "hash": "d8a8cb99dc7e1209dedc1acb6c06a0272a1386839f2859fd7f7751cb5964c9d7",
+   "payload": {
+    "members": null,
+    "selector": "role=web"
+   },
+   "prev_hash": "e560acef14bebaf1d5c5cafff03f1a1b815da2a98c48901a95f398abac35180c",
+   "seq": 81,
+   "subject": "web"
+  },
+  {
    "action": "runbook.draft.create",
    "actor": "operator",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "digest": "sha256:e563831ff7f9fe50a05b635a0f2ad05a0c8e317b18463532cbf87c4a0a548463",
-   "hash": "522cb3be9cb3903a257a7c8065c552d2c430c8cb35eab868f048589aeffb889d",
+   "hash": "e560acef14bebaf1d5c5cafff03f1a1b815da2a98c48901a95f398abac35180c",
    "payload": {
     "digest": "sha256:138556d8049dcab56c0eefe7680cfa5e31815cdda4e0c3a8b8e031761069624d",
     "parses": true
    },
-   "prev_hash": "e448200f1c01a2ed0812766cdc10f1452e125e6b3aa1cd5f10d5a5cae20a6877",
+   "prev_hash": "939c4d7a735c7711301f2335703bf56fe965a9360db3134eb150949635131442",
    "seq": 80,
    "subject": "web.safe-check@1"
   },
   {
    "action": "tool.draft.create",
    "actor": "operator",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "digest": "sha256:7a49a62cd5cb4aa2f2df5655294fe155428d0ac988c9c1282acdd20b28c5052e",
-   "hash": "e448200f1c01a2ed0812766cdc10f1452e125e6b3aa1cd5f10d5a5cae20a6877",
+   "hash": "939c4d7a735c7711301f2335703bf56fe965a9360db3134eb150949635131442",
    "payload": {
     "digest": "sha256:356e0cc86d1d027a0cc7719e58884c0cfcc3732e4a369417a8886f936de2fcaf",
     "intent": "Rotate logs older than N days."
    },
-   "prev_hash": "d961a81d28ee4472cab397771611e1f4bd34c0182d6f0438e088fb43293f83c3",
+   "prev_hash": "f2595542a12e1665013bde59063c13f0f3a6c6e3b81e70c21c7e9725d35c6841",
    "seq": 79,
    "subject": "demo.rotate@1"
   },
   {
    "action": "run.propose",
    "actor": "operator",
-   "at": 1792491810.905049,
-   "digest": "sha256:08b293f09b025bb91d8d4880b953a2cf2bff10fc4364e563411f4fd2e1d76089",
-   "hash": "d961a81d28ee4472cab397771611e1f4bd34c0182d6f0438e088fb43293f83c3",
+   "at": 1792569503.2240949,
+   "digest": "sha256:111d0086bdf38c2fcdb612d32e8c05c5d88e156c10d91b5326fbfa846bc7f3ab",
+   "hash": "f2595542a12e1665013bde59063c13f0f3a6c6e3b81e70c21c7e9725d35c6841",
    "payload": {
     "check_mode": false,
     "decision": "needs confirmation by rule \u201cAnything that changes a system is confirmed\u201d",
     "kind": "tool",
     "nodes": [
-     "n_a1105c121a",
-     "n_ebaad05f6a"
+     "n_a9c30453f8",
+     "n_a2c603ee94"
     ],
     "params": {
      "message": "hi"
     },
     "target": "demo.restart@1"
    },
-   "prev_hash": "25304a2251c718af82f8d01136eb4b6af3522e6bce828182c52d11c971021b0b",
+   "prev_hash": "4a0aec1523d9153c706ba79e6fe4a68aff139ad6dd683b3ac0a194df60454419",
    "seq": 78,
-   "subject": "r_fd7f720abb75"
+   "subject": "r_eab92926a20c"
   },
   {
    "action": "run.succeeded",
    "actor": "system",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "digest": "sha256:ce54ca997f9c99d87433f91ee8c0654d9c8fa8434dc97af5714af034ec846492",
-   "hash": "25304a2251c718af82f8d01136eb4b6af3522e6bce828182c52d11c971021b0b",
+   "hash": "4a0aec1523d9153c706ba79e6fe4a68aff139ad6dd683b3ac0a194df60454419",
    "payload": {
     "reason": "all nodes succeeded"
    },
-   "prev_hash": "322e5654eb286416169bbbc022bc6a75acb463a1cbe4a74744d21ad6f634d522",
+   "prev_hash": "679a4e3d762da75eb4220f6d886e826603d0e9a923ca36cc2b89586eb5a8b0a9",
    "seq": 77,
-   "subject": "r_fd98e12fc9d8"
+   "subject": "r_9f2384d1247f"
   },
   {
    "action": "execution.result",
-   "actor": "node:n_ebaad05f6a",
-   "at": 1792491810.905049,
-   "digest": "sha256:d98997fd1e97a42c32dfbe3cac51122630a833f1b597d6c03c700bf5678aff26",
-   "hash": "322e5654eb286416169bbbc022bc6a75acb463a1cbe4a74744d21ad6f634d522",
+   "actor": "node:n_a2c603ee94",
+   "at": 1792569503.2240949,
+   "digest": "sha256:44fda632f060f0d4fac8c77f2de10b2ac0d0d606656954be66e0434fae02e754",
+   "hash": "679a4e3d762da75eb4220f6d886e826603d0e9a923ca36cc2b89586eb5a8b0a9",
    "payload": {
     "exit_code": 0,
     "output_digest": "sha256:604f7efda15942e8fc1a1940f2e38aa6445ae2a0d9f1f1736d549265a187f8d2",
     "reason": "",
-    "run": "r_fd98e12fc9d8",
+    "run": "r_9f2384d1247f",
     "state": "succeeded"
    },
-   "prev_hash": "88c410cc60b7ab01d0db6f1159ebf840090f92a7b7ed251a2212fa9514e822b1",
+   "prev_hash": "9e55ab568d8e8af3549b48fd157f7f01bbf58fa7ee8787d61f967e1770653870",
    "seq": 76,
-   "subject": "x_973d45f0eb43"
+   "subject": "x_112f5206b892"
   },
   {
    "action": "execution.dispatch",
    "actor": "system",
-   "at": 1792491810.905049,
-   "digest": "sha256:fb340acb9ac9bf751fce7565956f5f20d65b6b81de5d7870b7d04c56d036a3e4",
-   "hash": "88c410cc60b7ab01d0db6f1159ebf840090f92a7b7ed251a2212fa9514e822b1",
+   "at": 1792569503.2240949,
+   "digest": "sha256:e6954e40318390a7fca46e52efcf2af2c5a26d83d02e4f49013c44dd7995592b",
+   "hash": "9e55ab568d8e8af3549b48fd157f7f01bbf58fa7ee8787d61f967e1770653870",
    "payload": {
     "attempt": 1,
     "check_mode": false,
-    "node": "n_ebaad05f6a",
+    "node": "n_a2c603ee94",
     "params_digest": "sha256:9b2d43affbf49a367028df2e1414f84c0e099ac98c3d54a8a80157fd7771af25",
-    "run": "r_fd98e12fc9d8",
+    "run": "r_9f2384d1247f",
     "tool": "demo.echo@1"
    },
-   "prev_hash": "03c32180e76597b66d2b9cb5ececf9e72c89ab307452187755126fe5abc72b31",
+   "prev_hash": "c7e5249faa303b4cd32e470ef5b8ab5ca4a3971fbc5b25c82f6348d26c3205d4",
    "seq": 75,
-   "subject": "x_973d45f0eb43"
+   "subject": "x_112f5206b892"
   },
   {
    "action": "run.batch",
    "actor": "system",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "digest": "sha256:306d9133d7bc0efc2a5597e1106905d2dd7b86c2bf1da9aa2653dbb90dc77e2c",
-   "hash": "03c32180e76597b66d2b9cb5ececf9e72c89ab307452187755126fe5abc72b31",
+   "hash": "c7e5249faa303b4cd32e470ef5b8ab5ca4a3971fbc5b25c82f6348d26c3205d4",
    "payload": {
     "batch": 1
    },
-   "prev_hash": "6d383420a8c8b80ce7edc69f632735c91895ce7232c7b149ca04e79494fb898b",
+   "prev_hash": "1ae83797e1d697a3135d32989a28530f0ac18f0bca70fcf259632c800bb23d49",
    "seq": 74,
-   "subject": "r_fd98e12fc9d8"
+   "subject": "r_9f2384d1247f"
   },
   {
    "action": "execution.result",
-   "actor": "node:n_a1105c121a",
-   "at": 1792491810.905049,
-   "digest": "sha256:a306f3c00f0d45908dffd2cbadc7d86b5eca8a39cad07885290227849d2009e3",
-   "hash": "6d383420a8c8b80ce7edc69f632735c91895ce7232c7b149ca04e79494fb898b",
+   "actor": "node:n_a9c30453f8",
+   "at": 1792569503.2240949,
+   "digest": "sha256:d389625a65307abf1404b4f49ce0b2ec515cdc31b81a1100f0df2d1d976ab127",
+   "hash": "1ae83797e1d697a3135d32989a28530f0ac18f0bca70fcf259632c800bb23d49",
    "payload": {
     "exit_code": 0,
     "output_digest": "sha256:259d415d5c559e2c96283b3b70f1f4ffac60768f6688b5e580093ad9a0d0f83e",
     "reason": "",
-    "run": "r_fd98e12fc9d8",
+    "run": "r_9f2384d1247f",
     "state": "succeeded"
    },
-   "prev_hash": "a9a288ffaf154746bceba9a54ff0a47776d27f30cb33f1d73a8421b614769e2d",
+   "prev_hash": "7c87f4ac354114b3b9c7609434390af941c957a3dacf4c01e965000d834ed8b0",
    "seq": 73,
-   "subject": "x_54f69181f848"
-  },
-  {
-   "action": "execution.dispatch",
-   "actor": "system",
-   "at": 1792491810.905049,
-   "digest": "sha256:bedeff38865fe2312bb16123cb76f0834de6ba8b1a7b6d098f80ef9fec9f3b73",
-   "hash": "a9a288ffaf154746bceba9a54ff0a47776d27f30cb33f1d73a8421b614769e2d",
-   "payload": {
-    "attempt": 1,
-    "check_mode": false,
-    "node": "n_a1105c121a",
-    "params_digest": "sha256:9b2d43affbf49a367028df2e1414f84c0e099ac98c3d54a8a80157fd7771af25",
-    "run": "r_fd98e12fc9d8",
-    "tool": "demo.echo@1"
-   },
-   "prev_hash": "0a9a06c2a6cbd68693af6e58d0bce64ad6f83c62a36f1278d323886980a4298c",
-   "seq": 72,
-   "subject": "x_54f69181f848"
-  },
-  {
-   "action": "run.start",
-   "actor": "system",
-   "at": 1792491810.905049,
-   "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-   "hash": "0a9a06c2a6cbd68693af6e58d0bce64ad6f83c62a36f1278d323886980a4298c",
-   "payload": {},
-   "prev_hash": "d8748286577142e810432b983dbae2495a0f2fc252c77d27b734e80b20a97d61",
-   "seq": 71,
-   "subject": "r_fd98e12fc9d8"
+   "subject": "x_458bbd53061a"
   }
  ]
 }

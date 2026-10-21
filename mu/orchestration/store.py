@@ -18,7 +18,7 @@ import tempfile
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
 
 from .models import Execution, Node, Run, RunbookVersion, ToolVersion
 from .node.canonical import canonical, sha256_hex
@@ -55,6 +55,12 @@ CREATE TABLE IF NOT EXISTS join_tokens(
     note TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS groups(
     name TEXT PRIMARY KEY, selector TEXT NOT NULL, description TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS node_metrics(
+    node_id TEXT NOT NULL, ts REAL NOT NULL, res INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL,
+    PRIMARY KEY(node_id, res, ts));
+CREATE TABLE IF NOT EXISTS group_members(
+    group_name TEXT NOT NULL, node_id TEXT NOT NULL, added_at REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY(group_name, node_id));
 CREATE TABLE IF NOT EXISTS tools(
     id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL, updated_at REAL NOT NULL);
@@ -365,10 +371,87 @@ class OrchestrationStore:
             with self.conn() as c:
                 c.execute(sql, args)
 
+    # ------------------------------------------------------------ node metrics (history charts)
+    # Raw samples (res 0) as the nodes send them, kept METRICS_RAW_KEEP_S; older ones are rolled
+    # into 5-minute averages (res 300), kept METRICS_ROLLUP_KEEP_S (mu/orchestration/metrics.py).
+    def add_metrics(self, node_id: str, ts: float, sample: Mapping[str, Any]) -> None:
+        with self.conn() as conn:
+            conn.execute("INSERT OR REPLACE INTO node_metrics(node_id, ts, res, data) VALUES(?,?,0,?)",
+                         (node_id, float(ts), json.dumps(dict(sample), separators=(",", ":"))))
+
+    def list_metrics(self, node_ids: Iterable[str], since: float, until: float, res: int) -> List[Tuple[str, float, Dict[str, Any]]]:
+        ids = [str(n) for n in node_ids]
+        if not ids:
+            return []
+        sql = (f"SELECT node_id, ts, data FROM node_metrics WHERE res=? AND ts>=? AND ts<=? AND node_id IN "
+               f"({','.join('?' * len(ids))}) ORDER BY ts")
+        with self.conn() as conn:
+            return [(r["node_id"], r["ts"], json.loads(r["data"])) for r in conn.execute(sql, [int(res), since, until, *ids])]
+
+    def rollup_metrics(self, older_than: float, bucket_s: int, drop_rollups_before: float) -> int:
+        """Average raw samples older than ``older_than`` into ``bucket_s`` buckets per node, delete
+        them, and drop rollups older than ``drop_rollups_before``. Returns raw rows rolled."""
+        with self.conn() as conn:
+            rows = conn.execute("SELECT node_id, ts, data FROM node_metrics WHERE res=0 AND ts<?", (older_than,)).fetchall()
+            buckets: Dict[Tuple[str, float], List[Dict[str, Any]]] = {}
+            for r in rows:
+                key = (r["node_id"], float(int(r["ts"] // bucket_s) * bucket_s))
+                buckets.setdefault(key, []).append(json.loads(r["data"]))
+            for (node_id, ts), samples in buckets.items():
+                avg: Dict[str, Any] = {}
+                for name in {k for sm in samples for k in sm}:
+                    values = [float(sm[name]) for sm in samples if isinstance(sm.get(name), (int, float))]
+                    if values:
+                        avg[name] = round(sum(values) / len(values), 2)
+                conn.execute("INSERT OR REPLACE INTO node_metrics(node_id, ts, res, data) VALUES(?,?,?,?)",
+                             (node_id, ts, int(bucket_s), json.dumps(avg, separators=(",", ":"))))
+            conn.execute("DELETE FROM node_metrics WHERE res=0 AND ts<?", (older_than,))
+            conn.execute("DELETE FROM node_metrics WHERE res>0 AND ts<?", (drop_rollups_before,))
+            return len(rows)
+
     # ------------------------------------------------------------ groups
+    # A group is a name, an optional label selector and explicit members (nodes dragged into it);
+    # a node belongs when it is a member or the selector matches its labels (selectors.in_group).
     def list_groups(self) -> List[Dict[str, Any]]:
         with self.conn() as conn:
-            return [dict(r) for r in conn.execute("SELECT * FROM groups ORDER BY name").fetchall()]
+            rows = [dict(r) for r in conn.execute("SELECT * FROM groups ORDER BY name").fetchall()]
+            members: Dict[str, List[str]] = {}
+            for r in conn.execute("SELECT group_name, node_id FROM group_members ORDER BY added_at, node_id").fetchall():
+                members.setdefault(r["group_name"], []).append(r["node_id"])
+        for row in rows:
+            row["members"] = members.get(row["name"], [])
+        return rows
+
+    def get_group(self, name: str) -> Optional[Dict[str, Any]]:
+        return next((g for g in self.list_groups() if g["name"] == name), None)
+
+    def add_group_members(self, name: str, node_ids: Iterable[str], conn=None) -> int:
+        now = self.now()
+        rows = [(name, str(n), now) for n in node_ids]
+        sql = "INSERT OR IGNORE INTO group_members(group_name, node_id, added_at) VALUES(?,?,?)"
+        if conn is not None:
+            return conn.executemany(sql, rows).rowcount
+        with self.conn() as c:
+            return c.executemany(sql, rows).rowcount
+
+    def remove_group_members(self, name: str, node_ids: Iterable[str], conn=None) -> int:
+        ids = [str(n) for n in node_ids]
+        if not ids:
+            return 0
+        sql = f"DELETE FROM group_members WHERE group_name=? AND node_id IN ({','.join('?' * len(ids))})"
+        if conn is not None:
+            return conn.execute(sql, [name, *ids]).rowcount
+        with self.conn() as c:
+            return c.execute(sql, [name, *ids]).rowcount
+
+    def rename_group(self, old: str, new: str) -> bool:
+        with self.conn() as conn:
+            if conn.execute("SELECT 1 FROM groups WHERE name=?", (new,)).fetchone():
+                raise ValueError(f"a group named {new!r} exists")
+            if conn.execute("UPDATE groups SET name=? WHERE name=?", (new, old)).rowcount == 0:
+                return False
+            conn.execute("UPDATE group_members SET group_name=? WHERE group_name=?", (new, old))
+            return True
 
     def put_group(self, name: str, selector: str, description: str = "", conn=None) -> None:
         sql = ("INSERT INTO groups(name, selector, description) VALUES(?,?,?) ON CONFLICT(name) DO UPDATE SET"
@@ -381,6 +464,7 @@ class OrchestrationStore:
 
     def delete_group(self, name: str) -> bool:
         with self.conn() as conn:
+            conn.execute("DELETE FROM group_members WHERE group_name=?", (name,))
             return conn.execute("DELETE FROM groups WHERE name=?", (name,)).rowcount > 0
 
     # ------------------------------------------------------------ tools

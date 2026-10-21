@@ -15,8 +15,8 @@
    "tool": "sys.pending-updates@1"
   },
   {
-   "available": true,
-   "check_available": true,
+   "available": false,
+   "check_available": false,
    "danger": false,
    "effect": "mutating",
    "help": "Install packages with security updates; refused packages are skipped and reported.",
@@ -27,12 +27,12 @@
    "params": {
     "refresh": true
    },
-   "reason": "",
+   "reason": "missing systemd",
    "tool": "os.security-updates@1"
   },
   {
-   "available": true,
-   "check_available": true,
+   "available": false,
+   "check_available": false,
    "danger": false,
    "effect": "mutating",
    "help": "Upgrade every package. No removals unless allowed.",
@@ -43,12 +43,12 @@
    "params": {
     "allow_removals": false
    },
-   "reason": "",
+   "reason": "missing systemd",
    "tool": "os.full-upgrade@1"
   },
   {
-   "available": true,
-   "check_available": true,
+   "available": false,
+   "check_available": false,
    "danger": true,
    "effect": "mutating",
    "help": "Schedule a reboot 30 seconds out; the node comes back on its own.",
@@ -60,12 +60,12 @@
     "delay_s": 30,
     "only_if_required": false
    },
-   "reason": "",
+   "reason": "missing systemd",
    "tool": "os.reboot@1"
   },
   {
-   "available": true,
-   "check_available": true,
+   "available": false,
+   "check_available": false,
    "danger": false,
    "effect": "mutating",
    "help": "Restart, reload, start or stop one systemd unit.",
@@ -76,14 +76,14 @@
    "params": {
     "action": "restart"
    },
-   "reason": "",
+   "reason": "missing systemd",
    "tool": "os.service@1"
   }
  ],
  "installed": true,
- "kernel": "6.1.0",
+ "kernel": "",
  "name": "web-1",
- "node_id": "n_a1105c121a",
+ "node_id": "n_a9c30453f8",
  "open_runs": [
   {
    "actions": [
@@ -184,7 +184,7 @@
     }
    ],
    "check_mode": false,
-   "created_at": 1792491810.905049,
+   "created_at": 1792569503.2240949,
    "decision": {
     "level": "confirm",
     "rule": "Anything that changes a system is confirmed",
@@ -196,7 +196,7 @@
     "semantic": "attention"
    },
    "here": "not started",
-   "id": "r_fd7f720abb75",
+   "id": "r_eab92926a20c",
    "nodes": 2,
    "paused_reason": "",
    "progress": "ready",
@@ -222,5 +222,5 @@
  },
  "recent": [],
  "services": [],
- "uptime_days": null
+ "uptime_days": 3.0
 }

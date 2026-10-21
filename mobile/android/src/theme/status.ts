@@ -132,7 +132,7 @@ export const stripAnsi = (text: string | null | undefined) => String(text ?? '')
 
 // Orchestration vocabulary (orchestration.md §8): node status, run state, execution state and
 // tool status map onto the shared status rows; effects carry a semantic tone.
-export type OrchTable = 'orch_node_status' | 'orch_run_state' | 'orch_exec_state' | 'orch_tool_status';
+export type OrchTable = 'orch_node_status' | 'orch_node_health' | 'orch_run_state' | 'orch_exec_state' | 'orch_tool_status';
 const orchEffectRows = vocabulary.orch_effect as Record<string, { semantic: string; label: string }>;
 
 /**

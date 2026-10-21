@@ -9,7 +9,7 @@ import { ThemeProvider } from '../../src/theme/ThemeContext';
 
 jest.mock('../../src/api/orchestration', () => ({
   ...jest.requireActual('../../src/api/orchestration'),
-  orchestrationApi: { nodes: jest.fn(), node: jest.fn(), maintenance: jest.fn(), command: jest.fn(), proposeAgentUpdate: jest.fn() },
+  orchestrationApi: { nodes: jest.fn(), node: jest.fn(), maintenance: jest.fn(), command: jest.fn(), proposeAgentUpdate: jest.fn(), dashboard: jest.fn(), groups: jest.fn(), nodeMetrics: jest.fn(), dashboardMetrics: jest.fn() },
   subscribeToOrchestrationChanges: jest.fn(() => ({ close: jest.fn() })),
 }));
 
@@ -26,8 +26,11 @@ const busy = { run_id: 'r_9', title: 'Restart web', tool: 'demo.restart@1', stat
 
 beforeEach(() => {
   jest.clearAllMocks();
+  (orchestrationApi as unknown as Record<string, jest.Mock>).nodeMetrics?.mockResolvedValue(JSON.parse(JSON.stringify(require('../fixtures/server/orchestration/node_metrics.json'))));
+  (orchestrationApi as unknown as Record<string, jest.Mock>).dashboardMetrics?.mockResolvedValue(JSON.parse(JSON.stringify(require('../fixtures/server/orchestration/dashboard_metrics.json'))));
   api.command.mockResolvedValue({ ok: true, command: 'x', data: {} });
   api.nodes.mockResolvedValue(fx('nodes'));
+  api.dashboard.mockResolvedValue(fx('dashboard'));
   api.node.mockResolvedValue(fx('node'));
   api.maintenance.mockResolvedValue(fx('maintenance'));
 });

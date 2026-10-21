@@ -13,6 +13,7 @@ import { spacing } from '../../theme/tokens';
 import { Banner, BoardSection, Button, CheckRow, ErrorState, Field, KV, Loading, Meter, PageHeader, Row, Rows, Segmented, Sheet, Text, TextField, useToast, type StatePart } from '../../ui';
 import { OrchActionBar, ago, busyRunning, cap, errorText, meterTone, nodeStateKey, plural, useOrchActions } from './parts';
 import { useOrchData } from './useOrchData';
+import { NodeHistory } from './history';
 
 export const POLICY_ROWS: Array<[string, string]> = [
   ['max_effect', 'Highest effect'], ['max_privilege', 'Highest privilege'], ['allowed_run_as', 'Run as'],
@@ -114,6 +115,8 @@ export function OrchNodeScreen({ route, navigation }: { route: { params: { nodeI
             {n.address ? <KV label="Address"><Text variant="monoSm" selectable>{n.address}</Text></KV> : null}
           </View>
         </BoardSection>
+
+        {n.status !== 'pending' ? <NodeHistory nodeId={n.id} nodeName={n.name} onUpdateAgent={n.agent?.updatable ? () => { void updateAgent(); } : undefined} /> : null}
 
         <BoardSection title="Labels and groups" testID="orch-node-labels">
           <View style={styles.kv}>

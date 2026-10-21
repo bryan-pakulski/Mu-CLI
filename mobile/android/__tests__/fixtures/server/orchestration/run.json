@@ -99,15 +99,15 @@
  "approved_by": "policy:Operator read-only runs need no extra confirmation",
  "batches": [
   [
-   "n_a1105c121a"
+   "n_a9c30453f8"
   ],
   [
-   "n_ebaad05f6a"
+   "n_a2c603ee94"
   ]
  ],
  "blast_radius": "2 nodes (prod) in 2 batches",
  "check_mode": false,
- "created_at": 1792491810.905049,
+ "created_at": 1792569503.2240949,
  "decision": {
   "level": "allow",
   "rule": "Operator read-only runs need no extra confirmation",
@@ -118,12 +118,12 @@
   "per_node": [
    {
     "level": "allow",
-    "node_id": "n_a1105c121a",
+    "node_id": "n_a9c30453f8",
     "rule": "Operator read-only runs need no extra confirmation"
    },
    {
     "level": "allow",
-    "node_id": "n_ebaad05f6a",
+    "node_id": "n_a2c603ee94",
     "rule": "Operator read-only runs need no extra confirmation"
    }
   ],
@@ -137,7 +137,7 @@
   "semantic": "ok"
  },
  "excluded": [],
- "finished_at": 1792491810.905049,
+ "finished_at": 1792569503.2240949,
  "grid": [
   {
    "batch": 0,
@@ -148,15 +148,15 @@
       "attempts": 1,
       "batch": 0,
       "check_mode": false,
-      "created_at": 1792491810.905049,
-      "dispatched_at": 1792491810.905049,
+      "created_at": 1792569503.2240949,
+      "dispatched_at": 1792569503.2240949,
       "duration_s": 0.1,
       "exit_code": 0,
-      "finished_at": 1792491810.905049,
-      "id": "x_54f69181f848",
+      "finished_at": 1792569503.2240949,
+      "id": "x_458bbd53061a",
       "log": "message: hello\n",
       "log_truncated": false,
-      "node_id": "n_a1105c121a",
+      "node_id": "n_a9c30453f8",
       "output": {
        "message": "hello from web-1"
       },
@@ -167,8 +167,8 @@
       "reason": "",
       "redactions": 0,
       "rollback_of": "",
-      "run_id": "r_fd98e12fc9d8",
-      "started_at": 1792491810.905049,
+      "run_id": "r_9f2384d1247f",
+      "started_at": 1792569503.2240949,
       "state": "succeeded",
       "step": 0,
       "step_name": "main",
@@ -196,7 +196,7 @@
     "role": "web"
    },
    "name": "web-1",
-   "node_id": "n_a1105c121a",
+   "node_id": "n_a9c30453f8",
    "online": true,
    "progress": "done",
    "rollbacks": []
@@ -210,15 +210,15 @@
       "attempts": 1,
       "batch": 1,
       "check_mode": false,
-      "created_at": 1792491810.905049,
-      "dispatched_at": 1792491810.905049,
+      "created_at": 1792569503.2240949,
+      "dispatched_at": 1792569503.2240949,
       "duration_s": 0.1,
       "exit_code": 0,
-      "finished_at": 1792491810.905049,
-      "id": "x_973d45f0eb43",
+      "finished_at": 1792569503.2240949,
+      "id": "x_112f5206b892",
       "log": "message: hello\n",
       "log_truncated": false,
-      "node_id": "n_ebaad05f6a",
+      "node_id": "n_a2c603ee94",
       "output": {
        "message": "hello from web-2"
       },
@@ -229,8 +229,8 @@
       "reason": "",
       "redactions": 0,
       "rollback_of": "",
-      "run_id": "r_fd98e12fc9d8",
-      "started_at": 1792491810.905049,
+      "run_id": "r_9f2384d1247f",
+      "started_at": 1792569503.2240949,
       "state": "succeeded",
       "step": 0,
       "step_name": "main",
@@ -258,20 +258,20 @@
     "role": "web"
    },
    "name": "web-2",
-   "node_id": "n_ebaad05f6a",
+   "node_id": "n_a2c603ee94",
    "online": true,
    "progress": "done",
    "rollbacks": []
   }
  ],
- "id": "r_fd98e12fc9d8",
+ "id": "r_9f2384d1247f",
  "kind": "tool",
  "nodes": 2,
  "notes": [
   {
    "action": "run.propose",
    "actor": "operator",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "seq": 69,
    "text": "Proposed by operator",
    "tone": "info"
@@ -279,7 +279,7 @@
   {
    "action": "run.approve",
    "actor": "policy",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "seq": 70,
    "text": "Approved by access policy (policy rule: Operator read-only runs need no extra confirmation)",
    "tone": "ok"
@@ -287,7 +287,7 @@
   {
    "action": "run.start",
    "actor": "system",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "seq": 71,
    "text": "Started",
    "tone": "running"
@@ -295,7 +295,7 @@
   {
    "action": "run.batch",
    "actor": "system",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "seq": 74,
    "text": "Batch 2 started",
    "tone": "running"
@@ -303,7 +303,7 @@
   {
    "action": "run.succeeded",
    "actor": "system",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "seq": 77,
    "text": "Succeeded: all nodes succeeded",
    "tone": "ok"
@@ -320,7 +320,7 @@
  "selector": {
   "labels": "role=web"
  },
- "started_at": 1792491810.905049,
+ "started_at": 1792569503.2240949,
  "state": "succeeded",
  "steps": [
   {

@@ -1,5 +1,5 @@
 {
- "accepted_at": 1792491810.905049,
+ "accepted_at": 1792569503.2240949,
  "actions": [
   {
    "args": {},
@@ -129,40 +129,50 @@
  ],
  "address": "",
  "agent": {
-  "current": "1.2.0",
-  "outdated": true,
-  "reason": "agent test can't update itself: update it once by hand",
+  "current": "1.3.0",
+  "outdated": false,
+  "reason": "",
   "updatable": false,
-  "version": "test"
+  "version": "1.3.0"
  },
- "agent_version": "test",
+ "agent_version": "1.3.0",
  "busy": null,
  "canary": true,
- "created_at": 1792491810.905049,
+ "created_at": 1792569503.2240949,
  "facts": {
   "cpu_count": 2,
-  "kernel": "6.1.0",
+  "disks": [
+   {
+    "mount": "/",
+    "used_pct": 40
+   }
+  ],
+  "memory": {
+   "total_bytes": 8589934592,
+   "used_pct": 52
+  },
   "os": {
-   "id": "debian",
    "pretty_name": "Debian 12"
   },
-  "provides": [
-   "systemd",
-   "ss",
-   "openssl"
-  ],
-  "system": "linux",
-  "systemd": true
+  "uptime": {
+   "load": [
+    0.4
+   ],
+   "uptime_s": 259200
+  }
  },
- "facts_at": 1792491810.905049,
- "groups": [],
- "id": "n_a1105c121a",
+ "facts_at": 1792569503.2240949,
+ "groups": [
+  "canaries",
+  "web"
+ ],
+ "id": "n_a9c30453f8",
  "kind": "host",
  "labels": {
   "env": "prod",
   "role": "web"
  },
- "last_seen": 1792491810.905049,
+ "last_seen": 1792569503.2240949,
  "last_seen_ago": "0s ago",
  "name": "web-1",
  "online": true,
@@ -199,15 +209,15 @@
    "attempts": 1,
    "batch": 0,
    "check_mode": false,
-   "created_at": 1792491810.905049,
-   "dispatched_at": 1792491810.905049,
+   "created_at": 1792569503.2240949,
+   "dispatched_at": 1792569503.2240949,
    "duration_s": 0.1,
    "exit_code": 0,
-   "finished_at": 1792491810.905049,
-   "id": "x_54f69181f848",
+   "finished_at": 1792569503.2240949,
+   "id": "x_458bbd53061a",
    "log": "message: hello\n",
    "log_truncated": false,
-   "node_id": "n_a1105c121a",
+   "node_id": "n_a9c30453f8",
    "output": {
     "message": "hello from web-1"
    },
@@ -218,8 +228,8 @@
    "reason": "",
    "redactions": 0,
    "rollback_of": "",
-   "run_id": "r_fd98e12fc9d8",
-   "started_at": 1792491810.905049,
+   "run_id": "r_9f2384d1247f",
+   "started_at": 1792569503.2240949,
    "state": "succeeded",
    "step": 0,
    "step_name": "main",
@@ -252,21 +262,17 @@
   "arch": "",
   "cpus": 2,
   "hostname": "",
-  "kernel": "6.1.0",
-  "load": null,
-  "max_disk_used_pct": null,
-  "memory_gb": null,
-  "memory_used_pct": null,
+  "kernel": "",
+  "load": 0.4,
+  "max_disk_used_pct": 40,
+  "memory_gb": 8.0,
+  "memory_used_pct": 52,
   "os": "Debian 12",
-  "provides": [
-   "systemd",
-   "ss",
-   "openssl"
-  ],
+  "provides": [],
   "reboot_reasons": [],
   "reboot_required": null,
   "services": 0,
-  "systemd": true,
-  "uptime_days": null
+  "systemd": null,
+  "uptime_days": 3.0
  }
 }

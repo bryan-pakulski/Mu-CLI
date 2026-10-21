@@ -176,7 +176,7 @@
  },
  "category": "diagnostics",
  "check_mode": true,
- "created_at": 1792491810.905049,
+ "created_at": 1792569503.2240949,
  "created_by": "operator",
  "diff": "",
  "effect": "read_only",
@@ -189,7 +189,7 @@
  },
  "idempotent": true,
  "intent": "",
- "key_id": "b58c9f6576ddfb37",
+ "key_id": "752908aa96ee7849",
  "lint": {
   "counts": {
    "error": 0,
@@ -205,7 +205,7 @@
    "ruff": "ran",
    "shellcheck": "not needed"
   },
-  "at": 1792491810.905049,
+  "at": 1792569503.2240949,
   "counts": {
    "error": 0,
    "info": 0,
@@ -292,7 +292,7 @@
   {
    "action": "tool.draft.create",
    "actor": "operator",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "seq": 61,
    "text": "Draft created by operator",
    "tone": "info"
@@ -300,7 +300,7 @@
   {
    "action": "tool.lint",
    "actor": "operator",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "seq": 62,
    "text": "Lint passed",
    "tone": "info"
@@ -308,7 +308,7 @@
   {
    "action": "tool.submit",
    "actor": "operator",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "seq": 63,
    "text": "Submitted for review by operator: test",
    "tone": "attention"
@@ -316,35 +316,35 @@
   {
    "action": "tool.publish",
    "actor": "operator",
-   "at": 1792491810.905049,
+   "at": 1792569503.2240949,
    "seq": 64,
-   "text": "Published and signed (key b58c9f6576ddfb37)",
+   "text": "Published and signed (key 752908aa96ee7849)",
    "tone": "ok"
   }
  ],
  "origin": "studio",
  "previous": "",
- "published_at": 1792491810.905049,
+ "published_at": 1792569503.2240949,
  "ref": "demo.echo@1",
  "review": {
   "headline": "test",
   "history": [
    {
-    "at": 1792491810.905049,
+    "at": 1792569503.2240949,
     "by": "operator",
     "decision": "published"
    }
   ],
   "notes": "",
   "risks": [],
-  "submitted_at": 1792491810.905049,
+  "submitted_at": 1792569503.2240949,
   "submitted_by": "operator"
  },
  "rollback": "",
  "run_as": "root",
  "secrets": [],
  "session_name": "",
- "signature": "YSA7qPOIEvtS6EHBdluYHRFK\u2026",
+ "signature": "XqfWGNsOZn4Irjxq2C2nLysJ\u2026",
  "stage": "publish",
  "status": "published",
  "style": {
@@ -361,13 +361,13 @@
  },
  "title": "Tool demo.echo",
  "tool_id": "demo.echo",
- "updated_at": 1792491810.905049,
+ "updated_at": 1792569503.2240949,
  "usage": [
   {
    "approved_by": "policy:Operator read-only runs need no extra confirmation",
    "blast_radius": "2 nodes (prod) in 2 batches",
    "check_mode": false,
-   "created_at": 1792491810.905049,
+   "created_at": 1792569503.2240949,
    "decision": {
     "level": "allow",
     "rule": "Operator read-only runs need no extra confirmation",
@@ -378,14 +378,14 @@
     "label": "read-only",
     "semantic": "ok"
    },
-   "finished_at": 1792491810.905049,
-   "id": "r_fd98e12fc9d8",
+   "finished_at": 1792569503.2240949,
+   "id": "r_9f2384d1247f",
    "kind": "tool",
    "nodes": 2,
    "paused_reason": "",
    "proposed_by": "operator",
    "reason": "all nodes succeeded",
-   "started_at": 1792491810.905049,
+   "started_at": 1792569503.2240949,
    "state": "succeeded",
    "style": {
     "glyph": "\u2713",

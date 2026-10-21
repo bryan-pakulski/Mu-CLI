@@ -19,7 +19,7 @@ import subprocess
 
 from . import AGENT_VERSION
 from . import update as agent_update
-from .collectors import collect_facts
+from .collectors import MetricsSampler, collect_facts
 from .envelope import b64d, verify_cancel, verify_update
 from .executor import Executor, Keys, authorize
 from .policy import NodePolicy, decide_update, load_policy_file
@@ -30,6 +30,7 @@ from .transport import AuthRejected, MasterClient, TransportError, fetch_certifi
 DEFAULT_STATE_DIR = "/var/lib/mucli-node"
 DEFAULT_ETC_DIR = "/etc/mucli-node"
 FACTS_INTERVAL_S = 600.0
+METRICS_INTERVAL_S = 20.0      # a utilisation sample rides on the poll at most this often (history charts)
 MAX_CONCURRENT = 4
 
 
@@ -97,6 +98,8 @@ class NodeAgent:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._facts_at = 0.0
+        self._metrics = MetricsSampler()
+        self._metrics_at = 0.0
         self._sender: Optional[threading.Thread] = None
         self._pending_update: Optional[Dict[str, Any]] = None
         self._policy_result: Optional[Dict[str, Any]] = None
@@ -155,6 +158,12 @@ class NodeAgent:
         if time.time() - self._facts_at > FACTS_INTERVAL_S:
             body["facts"] = self.facts_fn()
             self._facts_at = time.time()
+        if time.time() - self._metrics_at >= METRICS_INTERVAL_S:
+            try:
+                body["metrics"] = self._metrics.sample()
+            except Exception:  # noqa: BLE001 - metrics are best effort, the poll is not
+                pass
+            self._metrics_at = time.time()
         if self._policy_result is not None:
             body["policy_result"] = self._policy_result
         reply = self.client.post("/api/orchestration/node/poll", body, timeout=wait + 15)

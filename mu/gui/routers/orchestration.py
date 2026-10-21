@@ -117,6 +117,60 @@ def list_nodes(request: Request):
             "test_node_ids": list((orch.store.get_setting("test_nodes", {}) or {}).keys())}
 
 
+@router.get("/api/orchestration/dashboard")
+def node_dashboard(request: Request, group: Optional[str] = Query(None)):
+    """The node dashboard (mu/orchestration/vm.py fleet_dashboard): the whole fleet, one group
+    (``?group=NAME``) or the ungrouped nodes (``?group=-``), with every group's health counts."""
+    orch = orch_for(request)
+    try:
+        return vm.fleet_dashboard(orch.store, group)
+    except KeyError:
+        raise HTTPException(404, "unknown group")
+
+
+@router.get("/api/orchestration/dashboard/metrics")
+def dashboard_metrics(request: Request, group: Optional[str] = Query(None), range: str = Query("6h"),
+                      per_node: bool = Query(False)):
+    """History charts for the fleet, one group or the ungrouped nodes: per-bucket CPU, memory and
+    load averages, the fullest disk, summed network and disk I/O (mu/orchestration/metrics.py).
+    ``per_node=1`` adds each node's small series for the health rows' sparklines."""
+    from mu.orchestration import metrics
+    orch = orch_for(request)
+    try:
+        board = vm.fleet_dashboard(orch.store, group)
+    except KeyError:
+        raise HTTPException(404, "unknown group")
+    ids = {n["id"] for n in board["nodes"] if n["status"] != "pending"}
+    nodes = [n for n in orch.store.list_nodes() if n.id in ids]
+    out = {**metrics.series(orch.store, ids, range), **metrics.reporting(nodes), "scope": board["scope"]}
+    if per_node:
+        out["per_node"] = metrics.per_node(orch.store, ids, range)
+    return out
+
+
+@router.get("/api/orchestration/nodes/{node_id}/metrics")
+def node_metrics(node_id: str, request: Request, range: str = Query("6h")):
+    """One node's history charts (agent 1.3.0 or newer reports them)."""
+    from mu.orchestration import metrics
+    orch = orch_for(request)
+    node = orch.store.get_node(node_id)
+    if node is None:
+        raise HTTPException(404, "unknown node")
+    return {**metrics.series(orch.store, [node.id], range), **metrics.reporting([node])}
+
+
+@router.get("/api/orchestration/groups")
+def list_node_groups(request: Request):
+    """Groups with their selector, explicit members, member count and health counts, and the
+    nodes (for the Groups tab's membership editor)."""
+    orch = orch_for(request)
+    board = vm.fleet_dashboard(orch.store)
+    return {"groups": board["groups"], "ungrouped": board["ungrouped"], "fleet": board["fleet"],
+            "nodes": [{"id": n["id"], "name": n["name"], "groups": n["groups"], "labels": n["labels"],
+                       "health": n["health"], "presence": n["presence"], "status": n["status"], "style": n["style"]}
+                      for n in board["nodes"]]}
+
+
 @router.get("/api/orchestration/nodes/{node_id}/maintenance")
 def node_maintenance(node_id: str, request: Request):
     """The node page's Maintenance panel (mu/orchestration/maintenance.py)."""
@@ -658,7 +712,7 @@ async def events(request: Request, after: int = Query(0, ge=0), once: bool = Fal
             changes = await asyncio.to_thread(_BUS.wait, seq, 0.5)
             if not changes:
                 if time.monotonic() - heartbeat >= 15:
-                    yield ": keepalive\n\n"
+                    yield "event: ping\ndata: {}\n\n"   # a named event: the page's watchdog sees it (comments are invisible)
                     heartbeat = time.monotonic()
                 if once:
                     return

@@ -90,24 +90,28 @@
         return request('POST', path, { form });
     }
 
-    /* SSE with reconnect; pagehide closes it (keeps the page bfcache-eligible). */
-    function events({ onChange, onHello, onState } = {}) {
-        let source = null;
-        const connect = () => {
-            source?.close();
-            source = new EventSource(`${BASE}/events`);
-            source.addEventListener('hello', ev => {
-                onState?.(true);
-                try { onHello?.(JSON.parse(ev.data)); } catch (_) { /* ignore a malformed hello */ }
-            });
-            source.onmessage = ev => { try { onChange?.(JSON.parse(ev.data)); } catch (_) { /* skip */ } };
-            source.onopen = () => onState?.(true);
-            source.onerror = () => onState?.(false);
+    /* The live stream (MuLive.stream, mu_live.js): open only while this view is on screen,
+     * self-healing (backoff after any error, a watchdog on the server's pings). Every hello after
+     * the first means it reconnected: onResync lets the page catch up on what it missed. */
+    function events({ onChange, onHello, onState, onResync } = {}) {
+        let hellos = 0;
+        const handlers = {
+            onMessage: ev => { try { onChange?.(JSON.parse(ev.data)); } catch (_) { /* skip */ } },
+            events: {
+                hello: ev => {
+                    try { onHello?.(JSON.parse(ev.data)); } catch (_) { /* ignore a malformed hello */ }
+                    if (hellos++ > 0) onResync?.();
+                },
+            },
+            onState,
         };
-        connect();
-        window.addEventListener('pagehide', () => source?.close());
-        window.addEventListener('pageshow', ev => { if (ev.persisted) connect(); });
-        return { close: () => source?.close(), reconnect: connect };
+        if (window.MuLive) return window.MuLive.stream(`${BASE}/events`, handlers);
+        const source = new EventSource(`${BASE}/events`);       // no shell script: plain stream
+        source.addEventListener('hello', handlers.events.hello);
+        source.onmessage = handlers.onMessage;
+        source.onopen = () => onState?.(true);
+        source.onerror = () => onState?.(false);
+        return { close: () => source.close(), reconnect: () => {} };
     }
 
     window.OrchAPI = { get, getSecure, cmd, plan, post, upload, download, request, events, freshToken, BASE };

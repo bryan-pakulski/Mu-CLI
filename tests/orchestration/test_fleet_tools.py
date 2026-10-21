@@ -114,6 +114,19 @@ def test_fleet_overview_lists_nodes_runs_and_tools_with_results(fleet):
     assert set(data["needs_you"]) == {"approvals", "paused_runs", "reviews", "pending_nodes", "offline_nodes"}
 
 
+def test_fleet_overview_reports_groups_and_health_read_only(fleet):
+    from mu.orchestration.commands import dispatch
+    orch, _ = fleet
+    db = next(n for n in orch.store.list_nodes() if n.name == "db-1")
+    dispatch(orch, {"type": "putGroup", "args": {"name": "data", "members": [db.id]}}, actor="operator")
+    data = _call("fleet_overview")["data"]
+    by_name = {n["name"]: n for n in data["nodes"]}
+    assert by_name["db-1"]["groups"] == ["data"] and by_name["web-1"]["groups"] == []
+    assert by_name["db-1"]["health"] in ("ok", "warning", "critical") and isinstance(by_name["db-1"]["health_reasons"], list)
+    assert [g["name"] for g in data["groups"]] == ["data"] and data["groups"][0]["nodes"] == 1
+    assert data["ungrouped"]["nodes"] == 2
+
+
 def test_terminal_orch_results(fleet, monkeypatch):
     orch, run = fleet
     monkeypatch.setattr("mu.commands.orch._orch", lambda: orch)

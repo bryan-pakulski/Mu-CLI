@@ -262,17 +262,90 @@ def _refresh(orch, args, actor):
 
 # --------------------------------------------------------------------- groups
 
-@handler("putGroup")
-def _put_group(orch, args, actor):
-    name = str(_arg(args, "name"))
+def _group_name(name: str) -> str:
+    name = str(name or "").strip()
     if not selectors.LABEL_KEY.match(name):
         raise CommandError("group names use letters, digits, '-', '_' and '.'")
-    selector = str(_arg(args, "selector"))
-    selectors.parse(selector)
-    orch.store.put_group(name, selector, str(args.get("description") or ""))
-    orch.store.audit(actor, "group.put", name, {"selector": selector})
+    return name
+
+
+def _known_nodes(orch, ids) -> List[str]:
+    ids = [str(n) for n in (ids or []) if str(n)]
+    known = {n.id for n in orch.store.list_nodes()}
+    missing = [n for n in ids if n not in known]
+    if missing:
+        raise CommandError(f"unknown node(s): {', '.join(missing)}")
+    return ids
+
+
+def _existing_group(orch, name: str) -> Dict[str, Any]:
+    group = orch.store.get_group(str(name or ""))
+    if group is None:
+        raise CommandError(f"unknown group {name!r}")
+    return group
+
+
+@handler("putGroup")
+def _put_group(orch, args, actor):
+    """Create or update a group: a name, an optional label selector (empty = members only), a
+    description, and optionally the full member list."""
+    name = _group_name(_arg(args, "name"))
+    current = orch.store.get_group(name)
+    selector = str(args.get("selector", current["selector"] if current else "") or "").strip()
+    if selector:
+        selectors.parse(selector)
+    description = str(args.get("description", current["description"] if current else "") or "")
+    members = _known_nodes(orch, args["members"]) if "members" in args else None
+    with orch.store.conn() as conn:
+        orch.store.put_group(name, selector, description, conn=conn)
+        if members is not None:
+            conn.execute("DELETE FROM group_members WHERE group_name=?", (name,))
+            orch.store.add_group_members(name, members, conn=conn)
+    orch.store.audit(actor, "group.put", name, {"selector": selector, "members": members})
     orch.store.change("node", "", ["state"])
-    return {"name": name}
+    return {"name": name, "created": current is None}
+
+
+@handler("addToGroup")
+def _add_to_group(orch, args, actor):
+    """Put nodes in a group (drag and drop). With ``from``, they leave that group too (a move)."""
+    name = _existing_group(orch, _arg(args, "name"))["name"]
+    nodes = _known_nodes(orch, _arg(args, "node_ids"))
+    source = str(args.get("from") or "")
+    if source and source != name:
+        _existing_group(orch, source)
+    with orch.store.conn() as conn:
+        added = orch.store.add_group_members(name, nodes, conn=conn)
+        removed = orch.store.remove_group_members(source, nodes, conn=conn) if source and source != name else 0
+    orch.store.audit(actor, "group.add", name, {"nodes": nodes, "from": source or None})
+    orch.store.change("node", "", ["state"])
+    return {"name": name, "added": added, "removed_from_source": removed}
+
+
+@handler("removeFromGroup")
+def _remove_from_group(orch, args, actor):
+    """Take nodes out of a group's members. A node the group's selector matches stays in it."""
+    group = _existing_group(orch, _arg(args, "name"))
+    nodes = [str(n) for n in (_arg(args, "node_ids") or [])]
+    removed = orch.store.remove_group_members(group["name"], nodes)
+    still = [n.id for n in orch.store.list_nodes()
+             if n.id in nodes and selectors.in_group(dict(group, members=[]), n.id, n.labels)]
+    orch.store.audit(actor, "group.remove", group["name"], {"nodes": nodes})
+    orch.store.change("node", "", ["state"])
+    return {"name": group["name"], "removed": removed, "still_matched_by_selector": still}
+
+
+@handler("renameGroup")
+def _rename_group(orch, args, actor):
+    old = _existing_group(orch, _arg(args, "name"))["name"]
+    new = _group_name(_arg(args, "new_name"))
+    try:
+        orch.store.rename_group(old, new)
+    except ValueError as exc:
+        raise CommandError(str(exc)) from exc
+    orch.store.audit(actor, "group.rename", old, {"to": new})
+    orch.store.change("node", "", ["state"])
+    return {"name": new}
 
 
 @handler("deleteGroup")

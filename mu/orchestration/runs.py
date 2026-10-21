@@ -58,13 +58,13 @@ def resolve_selector(store, selector: Mapping[str, Any]) -> Tuple[List[Node], Op
         return [], "choose target nodes (labels, groups or explicit nodes)"
     try:
         label_match = selectors.compile_selector(labels)
-        group_rows = {g["name"]: g["selector"] for g in store.list_groups()}
-        unknown = [g for g in groups if g not in group_rows]
-        if unknown:
-            return [], f"unknown group(s): {', '.join(unknown)}"
-        group_matchers = [selectors.compile_selector(group_rows[g]) for g in groups]
     except selectors.SelectorError as exc:
         return [], str(exc)
+    group_rows = {g["name"]: g for g in store.list_groups()}
+    unknown = [g for g in groups if g not in group_rows]
+    if unknown:
+        return [], f"unknown group(s): {', '.join(unknown)}"
+    chosen = [group_rows[g] for g in groups]
     if explicit:
         known = {n.id for n in nodes}
         missing = [n for n in explicit if n not in known]
@@ -72,8 +72,8 @@ def resolve_selector(store, selector: Mapping[str, Any]) -> Tuple[List[Node], Op
             return [], f"unknown node(s): {', '.join(missing)}"
         nodes = [n for n in nodes if n.id in explicit]
     nodes = [n for n in nodes if label_match(n.labels)]
-    if group_matchers:
-        nodes = [n for n in nodes if any(m(n.labels) for m in group_matchers)]
+    if chosen:
+        nodes = [n for n in nodes if any(selectors.in_group(g, n.id, n.labels) for g in chosen)]
     return nodes, None
 
 
@@ -134,15 +134,10 @@ def preview_selector(store, selector: Any, *, test: bool = False) -> Dict[str, A
             "excluded": excluded}
 
 
-def node_groups(store, node: Node) -> List[str]:
-    out = []
-    for group in store.list_groups():
-        try:
-            if selectors.matches(group["selector"], node.labels):
-                out.append(group["name"])
-        except selectors.SelectorError:
-            continue
-    return out
+def node_groups(store, node: Node, groups: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+    """The groups a node belongs to (a member, or the group's selector matches its labels)."""
+    return [g["name"] for g in (store.list_groups() if groups is None else groups)
+            if selectors.in_group(g, node.id, node.labels)]
 
 
 # --------------------------------------------------------------------- plan

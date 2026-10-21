@@ -211,7 +211,9 @@
             picker.ready.then(() => targetChanged(picker.value(), picker.version()));
         };
         mountTarget(route.query.get('target') || '');
-        where = P.selectorBuilder(el.querySelector('[data-where]'), { value: { labels: route.query.get('labels') || '' }, label: 'Target nodes', onChange: stale });
+        /* ?groups=a,b preselects groups (a group dashboard's "Run on this group"). */
+        const presetGroups = (route.query.get('groups') || '').split(',').map(x => x.trim()).filter(Boolean);
+        where = P.selectorBuilder(el.querySelector('[data-where]'), { value: { labels: route.query.get('labels') || '', groups: presetGroups }, label: 'Target nodes', onChange: stale });
         el.querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => {
             if (kind === b.dataset.kind) return;
             kind = b.dataset.kind;

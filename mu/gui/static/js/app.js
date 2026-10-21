@@ -6868,7 +6868,32 @@ function bootSSE() {
     }
     window.__muReconnectWithFocus = reconnectWithFocus;
 
+    // The stream follows MuLive's rule (mu_live.js) so hidden pages don't hold scarce
+    // connections: off the chat page (Environments loads this runtime too) it is open only while
+    // the view is on screen; the chat page keeps it while another destination is shown in the
+    // same tab (session status keeps updating) and releases it only when the whole tab is in the
+    // background. Either way it reconnects and resyncs when shown again.
+    const gated = !!window.MuLive;
+    const chatPage = location.pathname === "/";
+    const shown = () => (chatPage ? window.MuLive.tabVisible() : window.MuLive.visible());
+    function release() {
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        if (pingTimer) { clearTimeout(pingTimer); pingTimer = null; }
+        if (stabilityTimer) { clearTimeout(stabilityTimer); stabilityTimer = null; }
+        if (source) { try { source.close(); } catch {} source = null; }
+    }
+    if (gated) {
+        window.MuLive.track("/api/events", () => (source ? ["connecting", "open", "closed"][source.readyState] : "released"));
+        let hideTimer = null;
+        window.MuLive.onChange(visible => {
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+            if (visible) { if (!source) { reconnectAttempt = 0; connect(); } }
+            else hideTimer = setTimeout(release, 30000);
+        }, { tabOnly: chatPage });
+    }
+
     function connect() {
+        if (gated && !shown()) return;     // reopened when shown (above)
         if (source) { try { source.close(); } catch {} source = null; }
         // Connection-alive watchdog. The server only emits a `ping` event
         // when its event queue goes idle for 15s — during a busy agent run

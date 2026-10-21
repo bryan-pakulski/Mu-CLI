@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import shlex
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import CommandResult, command
 
@@ -150,8 +150,8 @@ def _status(orch) -> List[str]:
                   "  " + ", ".join(reviews)]
     if att["offline_nodes"]:
         lines += ["", f"{GLYPH['danger']} {att['offline_nodes']} active node(s) offline — /orch nodes"]
-    lines += ["", "Commands: /orch runs [state] · /orch run <id> · /orch nodes · /orch pause [reason] · "
-                  "/orch resume · /orch update-agents [node...]"]
+    lines += ["", "Commands: /orch runs [state] · /orch run <id> · /orch nodes · /orch dashboard [group] · /orch history [node|group] [range] · /orch groups · "
+                  "/orch pause [reason] · /orch resume · /orch update-agents [node...]"]
     return lines
 
 
@@ -202,6 +202,196 @@ def _nodes(orch) -> List[str]:
                      f"seen {n['last_seen_ago']:<9} agent {n['agent_version'] or '-'}{flag}  "
                      f"{','.join(f'{k}={v}' for k, v in n['labels'].items())}")
     return lines
+
+
+def _pct(value: Any) -> str:
+    return "–" if not isinstance(value, (int, float)) else f"{value:.0f}%"
+
+
+def _health_counts(health: Dict[str, int]) -> str:
+    parts = [f"{health[k]} {k}" for k in ("critical", "warning", "pending") if health.get(k)]
+    return ", ".join(parts) or "all healthy"
+
+
+def _sign(style: Dict[str, Any]) -> str:
+    return f"{style.get('glyph', '')} {style.get('label', '')}".strip()
+
+
+def _scope_arg(value: Optional[str]) -> Optional[str]:
+    """``/orch dashboard`` scope: none = the fleet, "-" (or "ungrouped") = nodes in no group."""
+    if value is None or value == "":
+        return None
+    return "-" if value.lower() in ("-", "ungrouped") else value
+
+
+def _history(orch, rest: List[str]) -> List[str]:
+    """``/orch history [NODE|GROUP|-|all] [RANGE]``: sparklines of a node's (or a group's) CPU,
+    memory, disk, load, network and disk I/O (mu/orchestration/metrics.py)."""
+    from mu.orchestration import metrics, vm
+    ranges = set(metrics.RANGES)
+    words = [w for w in rest if w not in ranges]
+    range_key = next((w for w in rest if w in ranges), "6h")
+    target = words[0] if words else "all"
+    node = orch.store.get_node(target) or next((n for n in orch.store.list_nodes() if n.name == target), None)
+    if node is not None:
+        nodes, title = [node], node.name
+    else:
+        group = None if target in ("all", "*") else _scope_arg(target)
+        try:
+            board = vm.fleet_dashboard(orch.store, group)
+        except KeyError:
+            raise ValueError(f"no node or group called {target!r}; /orch nodes and /orch groups list them") from None
+        ids = {n["id"] for n in board["nodes"] if n["status"] != "pending"}
+        nodes, title = [n for n in orch.store.list_nodes() if n.id in ids], board["scope"]["label"]
+    data = {**metrics.series(orch.store, [n.id for n in nodes], range_key), **metrics.reporting(nodes)}
+    lines = [f"{title} · last {data['range']}" + ("" if len(nodes) == 1 else f" · {len(nodes)} nodes (CPU, memory, load averaged; network and I/O summed)")]
+    lines += metrics.text_lines(data) or ["No history yet: nodes report a sample about every 20 seconds."]
+    if data["needs_update"]:
+        lines.append(f"{GLYPH['attention']} No history from {', '.join(data['needs_update'])}: their agent predates "
+                     f"{metrics.METRICS_SINCE} — /orch update-agents")
+    return lines
+
+
+def _dashboard(orch, group: Optional[str]) -> List[str]:
+    """The node dashboard (mu/orchestration/vm.py fleet_dashboard) as terminal lines."""
+    from mu.orchestration import vm
+    try:
+        board = vm.fleet_dashboard(orch.store, group)
+    except KeyError:
+        raise ValueError(f"unknown group {group!r}; /orch groups lists them") from None
+    t, r, day = board["totals"], board["resources"], board["runs_24h"]
+    p = t["presence"]
+    lines = [f"{board['scope']['label']} · {t['nodes']} node(s) · {p.get('online', 0)} online · "
+             f"{p.get('connecting', 0)} connecting · {p.get('offline', 0)} offline · {t['busy']} busy",
+             f"Health: {_health_counts(t['health'])}",
+             f"Memory avg {_pct(r['memory_used_avg'])} max {_pct(r['memory_used_max'])} · disk avg {_pct(r['disk_used_avg'])} "
+             f"max {_pct(r['disk_used_max'])} · load/CPU max "
+             f"{r['load_per_cpu_max'] if r['load_per_cpu_max'] is not None else '–'}",
+             f"Last 24h: {day['executions']} execution(s) · {day['succeeded']} succeeded · {day['failed']} failed"]
+    if board["nodes"]:
+        from mu.orchestration import metrics
+        spark = metrics.per_node(orch.store, [n["id"] for n in board["nodes"]], "6h")
+        lines += ["", f"  {'NODE':<18} {'HEALTH':<14} {'STATUS':<20} {'CPU (last 6h)':<22} {'MEM':>5} {'DISK':>5}  {'GROUPS':<18} WHY"]
+        for n in board["nodes"]:
+            busy = " ● busy" if n.get("busy") else ""
+            h = spark.get(n["id"]) or {}
+            cpu = metrics.sparkline([p.get("cpu_pct") for p in h.get("points") or []], 16, 100.0) if h.get("points") else ""
+            now_cpu = _pct((h.get("latest") or {}).get("cpu_pct"))
+            lines.append(f"  {_short(n['name'], 18):<18} {_short(_sign(n['health']['style']), 14):<14} "
+                         f"{_short(_sign(n['style']), 20):<20} {cpu:<16} {now_cpu:>5} {_pct(n['memory_used_pct']):>5} {_pct(n['max_disk_used_pct']):>5}  "
+                         f"{_short(','.join(n['groups']) or '-', 18):<18} {'; '.join(n['health']['reasons'])}{busy}")
+    else:
+        lines += ["", "No nodes here."]
+    if day["recent"]:
+        lines += ["", "Recent runs"]
+        lines += [f"  {x['id']}  {_short(_sign(x['style']), 16):<16} {_short(x['title'], 48)}  {x['created_ago']}"
+                  for x in day["recent"]]
+    if group is None:
+        lines += ["", "Groups — /orch dashboard <group> · /orch dashboard - (ungrouped)"]
+        for g in board["groups"]:
+            lines.append(f"  {_short(g['name'], 18):<18} {g['nodes']:>3} node(s)  {_health_counts(g['health'])}")
+        lines.append(f"  {'(ungrouped)':<18} {board['ungrouped']['nodes']:>3} node(s)  {_health_counts(board['ungrouped']['health'])}")
+    return lines
+
+
+def _groups(orch) -> List[str]:
+    from mu.orchestration import vm
+    board = vm.fleet_dashboard(orch.store)
+    if not board["groups"]:
+        lines = ["No groups yet. /orch group create <name> [--selector S] [--description D]"]
+    else:
+        lines = ["Groups", ""]
+        for g in board["groups"]:
+            how = g["selector"] or "members only"
+            lines.append(f"  {_short(g['name'], 18):<18} {g['nodes']:>3} node(s) · {g['online']} online · "
+                         f"{_health_counts(g['health'])} · {how}" + (f" · {g['description']}" if g["description"] else ""))
+    lines.append(f"  {'(ungrouped)':<18} {board['ungrouped']['nodes']:>3} node(s) · {_health_counts(board['ungrouped']['health'])}")
+    lines += ["", "Commands: /orch group create|add|remove|rename|delete … · /orch dashboard <group>"]
+    return lines
+
+
+GROUP_USAGE = ("usage: /orch group create NAME [--selector S] [--description D] | add NAME NODE… [--from GROUP] | "
+               "remove NAME NODE… | rename OLD NEW | delete NAME")
+
+
+def _options(rest: List[str], names: Tuple[str, ...]) -> Tuple[List[str], Dict[str, str]]:
+    """Positional words and --name VALUE options (a missing value is an error)."""
+    words: List[str] = []
+    opts: Dict[str, str] = {}
+    i = 0
+    while i < len(rest):
+        word = rest[i]
+        if word.startswith("--"):
+            key = word[2:]
+            if key not in names:
+                raise ValueError(f"unknown option {word}; {GROUP_USAGE}")
+            if i + 1 >= len(rest):
+                raise ValueError(f"{word} needs a value")
+            opts[key] = rest[i + 1]
+            i += 2
+            continue
+        words.append(word)
+        i += 1
+    return words, opts
+
+
+def _node_ids(orch, refs: List[str]) -> List[str]:
+    """Node ids from ids or names (names are friendlier to type)."""
+    nodes = orch.store.list_nodes()
+    by_name = {n.name: n.id for n in nodes}
+    ids = {n.id for n in nodes}
+    out = []
+    for ref in refs:
+        if ref in ids:
+            out.append(ref)
+        elif ref in by_name:
+            out.append(by_name[ref])
+        else:
+            raise ValueError(f"unknown node {ref!r}; /orch nodes lists them")
+    return out
+
+
+def _group(orch, rest: List[str], confirm) -> List[str]:
+    """/orch group <action> …: every change goes through dispatch as the operator."""
+    if not rest:
+        raise ValueError(GROUP_USAGE)
+    action, words = rest[0].lower(), rest[1:]
+    words, opts = _options(words, ("selector", "description", "from"))
+    if not words:
+        raise ValueError(GROUP_USAGE)
+    name = words[0]
+    if action == "create":
+        data = _cmd(orch, "putGroup", name=name, selector=opts.get("selector", ""),
+                    description=opts.get("description", ""))
+        return [f"{GLYPH['ok']} Group {data['name']} {'created' if data.get('created') else 'updated'}."]
+    if action == "add":
+        if len(words) < 2:
+            raise ValueError("usage: /orch group add NAME NODE… [--from GROUP]")
+        args: Dict[str, Any] = {"name": name, "node_ids": _node_ids(orch, words[1:])}
+        if opts.get("from"):
+            args["from"] = opts["from"]
+        data = _cmd(orch, "addToGroup", **args)
+        moved = f", moved out of {opts['from']}" if opts.get("from") else ""
+        return [f"{GLYPH['ok']} {len(args['node_ids'])} node(s) in {data['name']}{moved}."]
+    if action == "remove":
+        if len(words) < 2:
+            raise ValueError("usage: /orch group remove NAME NODE…")
+        data = _cmd(orch, "removeFromGroup", name=name, node_ids=_node_ids(orch, words[1:]))
+        lines = [f"{GLYPH['ok']} {data['removed']} node(s) taken out of {data['name']}."]
+        for node_id in data.get("still_matched_by_selector") or []:
+            lines.append(f"  {node_id} stays in {data['name']}: its labels match the group's selector")
+        return lines
+    if action == "rename":
+        if len(words) < 2:
+            raise ValueError("usage: /orch group rename OLD NEW")
+        data = _cmd(orch, "renameGroup", name=name, new_name=words[1])
+        return [f"{GLYPH['ok']} Group {name} is now {data['name']}."]
+    if action == "delete":
+        if not confirm(f"Delete group {name}? Its nodes stay; runs targeting it will need a new target."):
+            return ["Not deleted."]
+        _cmd(orch, "deleteGroup", name=name)
+        return [f"{GLYPH['ok']} Group {name} deleted."]
+    raise ValueError(f"unknown group action {action!r}; {GROUP_USAGE}")
 
 
 def _results(orch, target: str, view: str, sort: str) -> List[str]:
@@ -264,7 +454,9 @@ def _results(orch, target: str, view: str, sort: str) -> List[str]:
     "/orchestration",
     help=(
         "Fleet orchestration: /orch shows what needs you (runs to approve, paused runs, reviews, nodes to accept); "
-        "runs [state], run <id>, nodes, results <tool|run> [view] [sort]; approve <run> [typed-id], reject <run> [reason], continue|pause-run|cancel|"
+        "runs [state], run <id>, nodes, dashboard [group|-] (node health), history [node|group|-] [1h|6h|24h|7d|30d] "
+        "(CPU, memory, disk, load, network and disk I/O over time), groups, group create|add|remove|rename|delete …, "
+        "results <tool|run> [view] [sort]; approve <run> [typed-id], reject <run> [reason], continue|pause-run|cancel|"
         "rollback <run>, accept|quarantine|release <node>, pause [reason] / resume (the kill switch), "
         "update-agents [node...]. Reviews and authoring happen on the web Orchestration page."
     ),
@@ -293,6 +485,19 @@ def orch_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
             lines = _run(orch, rest[0])
         elif sub == "nodes":
             lines = _nodes(orch)
+        elif sub in ("dashboard", "health"):
+            lines = _dashboard(orch, _scope_arg(rest[0] if rest else None))
+        elif sub == "history":
+            lines = _history(orch, rest)
+        elif sub == "groups":
+            lines = _groups(orch)
+        elif sub == "group":
+            def confirm(question: str) -> bool:
+                if not allow_prompt:
+                    return True
+                from mu.ui.choice_picker import prompt_confirm
+                return prompt_confirm(question, default=False)
+            lines = _group(orch, rest, confirm)
         elif sub == "results":
             if not rest:
                 raise ValueError("usage: /orch results <tool|run id> [view] [sort column]")
@@ -331,7 +536,7 @@ def orch_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
             if run["state"] == "proposed":
                 lines.append(f"  approve it with /orch approve {run['id']}")
         else:
-            raise ValueError(f"unknown /orch command {sub!r}; try /orch, /orch runs, /orch nodes")
+            raise ValueError(f"unknown /orch command {sub!r}; try /orch, /orch runs, /orch nodes, /orch dashboard, /orch groups")
     except Exception as exc:  # noqa: BLE001 - command errors are shown, not raised
         message = str(exc)
         _emit(session, message, allow_prompt, error=True)
@@ -425,10 +630,25 @@ def _node_menu(orch, node_id: str) -> None:
         options.append(("unquarantineNode", "Release", "Let this node receive work again"))
     elif node.status in ("pending", "active"):
         options.append(("quarantineNode", "Quarantine", "Stop this node receiving work"))
+    from mu.orchestration import runs as orch_runs
+    member_of = orch_runs.node_groups(orch.store, node)
+    groups = [g["name"] for g in orch.store.list_groups()]
+    if [g for g in groups if g not in member_of]:
+        options.append(("__group_add__", "Add to group…", "Put this node in a group"))
+    if member_of:
+        options.append(("__group_remove__", "Remove from group…", "In: " + ", ".join(member_of)))
     choice = prompt_choice(f"Node {node.name}", options + [("__back__", "Back", "Return without deciding")],
                            default=options[0][0] if options else "__back__",
                            subtitle=f"{node.id} · {node.status} · {labels} · {node.address or ''}")
     if choice == "__back__":
+        return
+    if choice in ("__group_add__", "__group_remove__"):
+        adding = choice == "__group_add__"
+        picks = [(g, g, "") for g in (groups if adding else member_of) if (g not in member_of) == adding]
+        group = prompt_choice("Add to group" if adding else "Remove from group",
+                              picks + [("__back__", "Back", "Return without changing")], default=picks[0][0])
+        if group != "__back__":
+            _group_change(orch, "addToGroup" if adding else "removeFromGroup", name=group, node_ids=[node.id])
         return
     args: Dict[str, Any] = {"node_id": node.id}
     if choice == "quarantineNode":
@@ -436,6 +656,97 @@ def _node_menu(orch, node_id: str) -> None:
         if reason:
             args["reason"] = reason
     _decide(orch, choice, **args)
+
+
+def _group_change(orch, ctype: str, **args) -> None:
+    try:
+        data = _cmd(orch, ctype, **args)
+    except Exception as exc:  # noqa: BLE001 - shown, the menu stays open
+        _print([f"{GLYPH['danger']} {exc}"])
+        return
+    _print([f"{GLYPH['ok']} {data.get('name') or ctype}: done"])
+    for node_id in data.get("still_matched_by_selector") or []:
+        _print([f"  {node_id} stays in {data.get('name')}: its labels match the group's selector"])
+
+
+def _dashboard_menu(orch) -> None:
+    from mu.ui.choice_picker import prompt_choice
+    groups = orch.store.list_groups()
+    options = [("__all__", "All nodes", "The whole fleet")]
+    options += [(f"g:{g['name']}", g["name"], g["description"] or g["selector"] or "members only") for g in groups]
+    options += [("__ungrouped__", "Ungrouped", "Nodes in no group"), ("__back__", "Back", "Return to orchestration")]
+    choice = prompt_choice("Node dashboard", options, default="__all__")
+    if choice == "__back__":
+        return
+    scope = None if choice == "__all__" else "-" if choice == "__ungrouped__" else choice[2:]
+    _print([""] + _dashboard(orch, scope))
+
+
+def _group_menu(orch, name: str) -> None:
+    from mu.ui.choice_picker import prompt_choice, prompt_confirm
+    from rich.prompt import Prompt
+    from mu.orchestration import runs as orch_runs
+    while True:
+        group = orch.store.get_group(name)
+        if group is None:
+            return
+        nodes = [n for n in orch.store.list_nodes() if n.status != "revoked"]
+        inside = [n for n in nodes if name in orch_runs.node_groups(orch.store, n)]
+        outside = [n for n in nodes if n not in inside]
+        options = [("dashboard", "Dashboard", "Health of this group's nodes")]
+        if outside:
+            options.append(("add", "Add nodes…", f"{len(outside)} node(s) not in {name}"))
+        if inside:
+            options.append(("remove", "Remove nodes…", f"{len(inside)} node(s) in {name}"))
+        options += [("rename", "Rename", ""), ("delete", "Delete", "Its nodes stay"),
+                    ("__back__", "Back", "Return to groups")]
+        choice = prompt_choice(f"Group {name}", options, default="dashboard",
+                               subtitle=f"{len(inside)} node(s) · {group['selector'] or 'members only'}")
+        if choice == "__back__":
+            return
+        if choice == "dashboard":
+            _print([""] + _dashboard(orch, name))
+        elif choice in ("add", "remove"):
+            pool = outside if choice == "add" else inside
+            node_id = prompt_choice("Add which node?" if choice == "add" else "Remove which node?",
+                                    [(n.id, n.name, f"{n.status} · {n.id}") for n in pool]
+                                    + [("__back__", "Back", "Return without changing")], default=pool[0].id)
+            if node_id != "__back__":
+                _group_change(orch, "addToGroup" if choice == "add" else "removeFromGroup", name=name, node_ids=[node_id])
+        elif choice == "rename":
+            new = Prompt.ask("New name", default=name).strip()
+            if new and new != name:
+                _group_change(orch, "renameGroup", name=name, new_name=new)
+                name = new
+        elif choice == "delete":
+            if prompt_confirm(f"Delete group {name}? Its nodes stay.", default=False):
+                _group_change(orch, "deleteGroup", name=name)
+                return
+
+
+def _groups_menu(orch) -> None:
+    from mu.ui.choice_picker import prompt_choice
+    from rich.prompt import Prompt
+    while True:
+        _print([""] + _groups(orch))
+        groups = orch.store.list_groups()
+        options = [(f"g:{g['name']}", g["name"], g["description"] or g["selector"] or "members only") for g in groups]
+        options += [("__create__", "+ Create group", "A name, then add nodes or a label selector"),
+                    ("__back__", "Back", "Return to orchestration")]
+        choice = prompt_choice("Groups", options, default=options[0][0])
+        if choice == "__back__":
+            return
+        if choice == "__create__":
+            name = Prompt.ask("Group name").strip()
+            if not name:
+                continue
+            selector = Prompt.ask("Label selector (blank = members only)", default="").strip()
+            description = Prompt.ask("Description (optional)", default="").strip()
+            _group_change(orch, "putGroup", name=name, selector=selector, description=description)
+            if orch.store.get_group(name):
+                _group_menu(orch, name)
+        else:
+            _group_menu(orch, choice[2:])
 
 
 def run_orchestration_menu() -> None:
@@ -465,6 +776,8 @@ def run_orchestration_menu() -> None:
             ("status", "Status", "Everything that needs you, with details"),
             ("runs", "Runs", "Recent runs and their state"),
             ("nodes", "Nodes", "The fleet: status, last seen, agent versions"),
+            ("dashboard", "Dashboard", "Node health for the fleet, a group or the ungrouped nodes"),
+            ("groups", "Groups", "Create groups, add or remove nodes, rename, delete"),
             ("update", "Update outdated agents", "Propose an agent update job for nodes behind the master"),
             ("resume", "Resume dispatch", "Let work go to nodes again") if att["dispatch_paused"] else
             ("pause", "Pause all dispatch", "Kill switch: no new work goes to any node"),
@@ -491,6 +804,10 @@ def run_orchestration_menu() -> None:
                                         default="__back__")
                 if node_id != "__back__":
                     _node_menu(orch, node_id)
+        elif choice == "dashboard":
+            _dashboard_menu(orch)
+        elif choice == "groups":
+            _groups_menu(orch)
         elif choice == "update":
             try:
                 run = _cmd(orch, "proposeAgentUpdate", nodes=[])["run"]

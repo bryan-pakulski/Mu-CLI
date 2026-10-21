@@ -143,7 +143,7 @@ async def events(request: Request, after: int = Query(0, ge=0), once: bool = Fal
             changes = await asyncio.to_thread(bus.wait, seq, .25)
             if not changes:
                 if time.monotonic() - heartbeat >= 15:
-                    yield ": keepalive\n\n"
+                    yield "event: ping\ndata: {}\n\n"   # a named event: the page's watchdog sees it (comments are invisible)
                     heartbeat = time.monotonic()
                 if once:
                     return

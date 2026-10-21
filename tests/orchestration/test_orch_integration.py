@@ -82,6 +82,9 @@ def test_enrol_three_nodes_and_run_a_signed_tool(master, tmp_path):
     assert outputs == [{"message": "over https"}] * 3
     for node in orch.store.list_nodes():
         assert node.facts.get("system") == "linux" and node.policy.get("sandbox") == "none"
+        # History charts: the real agent put utilisation samples on its polls.
+        samples = orch.store.list_metrics([node.id], 0, orch.store.now() + 1, 0)
+        assert samples and "mem_pct" in samples[0][2] and 0 <= samples[0][2]["mem_pct"] <= 100
 
 
 def test_pending_nodes_get_no_work_and_revoked_nodes_are_refused(master, tmp_path):

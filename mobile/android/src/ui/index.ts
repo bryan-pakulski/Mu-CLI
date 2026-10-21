@@ -33,3 +33,4 @@ export * as approvalModel from './approval';
 export { ArtifactBrowser, ArtifactViewer, EvidenceList } from './ArtifactViewer';
 export { ResultsTable, formatCell, sortRows, filterRows, nextSort, type ResultColumn, type ResultRow, type ResultTable, type ResultsData, type SortState, type ResultsTableProps, type AskContext } from './ResultsTable';
 export type { Tone, Semantic } from '../theme/tokens';
+export { LineChart, MiniChart, chartSummary, chartPaths, chartMax, formatMetric, areaPath, type LineChartProps, type MiniChartProps, type ChartPoint, type ChartSeries, type ChartUnit } from './LineChart';

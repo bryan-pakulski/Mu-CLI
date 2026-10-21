@@ -295,11 +295,7 @@ def label_index(store) -> Dict[str, Any]:
     groups = []
     from . import selectors
     for g in store.list_groups():
-        try:
-            count = sum(1 for n in nodes if selectors.matches(g["selector"], n.labels))
-        except selectors.SelectorError:
-            count = 0
-        groups.append(dict(g, count=count))
+        groups.append(dict(g, count=sum(1 for n in nodes if selectors.in_group(g, n.id, n.labels))))
     return {"labels": {k: dict(sorted(v.items())) for k, v in sorted(labels.items())}, "groups": groups,
             "nodes": [{"id": n.id, "name": n.name, "status": n.status, "online": node_online(n, now),
                        "presence": node_presence(store, n, now),
@@ -426,3 +422,159 @@ def overview(orch) -> Dict[str, Any]:
 def _reboot_summary(store) -> Dict[str, Any]:
     from .maintenance import fleet_reboot_summary
     return fleet_reboot_summary(store)
+
+
+# --------------------------------------------------------------------- the node dashboard
+#
+# Overall health of the fleet, or of one group: each node's health from its latest facts and
+# presence, the reasons in words, resource figures, live work and the last day's run outcomes.
+# The groups list beside it (web left-hand pane, phone, `mucli orch dashboard`) carries each
+# group's health counts so a problem shows before the group is opened.
+
+DISK_WARN_PCT, DISK_CRIT_PCT = 85, 95
+MEM_WARN_PCT, MEM_CRIT_PCT = 90, 95
+LOAD_WARN_PER_CPU = 1.5
+FACTS_STALE_S = 24 * 3600
+HEALTH_ORDER = ("critical", "warning", "pending", "ok")
+RECENT_WINDOW_S = 24 * 3600
+FAILED_EXEC_STATES = ("failed", "timed_out", "unreachable")
+
+
+def node_health(store, node: Node, now: float) -> Dict[str, Any]:
+    """ok | warning | critical | pending, with the reasons in words (worst first)."""
+    critical: List[str] = []
+    warning: List[str] = []
+    if node.status == "pending":
+        return {"level": "pending", "reasons": ["waiting to be accepted"], "style": table_style("orch_node_health", "pending")}
+    if node.status in ("quarantined",):
+        critical.append("quarantined")
+    where = node_presence(store, node, now)
+    if node.status == "active" and where == "offline":
+        critical.append(f"offline (last seen {_ago(node.last_seen, now)})")
+    s = facts_summary(node.facts)
+    disk, mem = s.get("max_disk_used_pct"), s.get("memory_used_pct")
+    if isinstance(disk, (int, float)):
+        if disk >= DISK_CRIT_PCT:
+            critical.append(f"disk {disk:.0f}% full")
+        elif disk >= DISK_WARN_PCT:
+            warning.append(f"disk {disk:.0f}% full")
+    if isinstance(mem, (int, float)):
+        if mem >= MEM_CRIT_PCT:
+            critical.append(f"memory {mem:.0f}% used")
+        elif mem >= MEM_WARN_PCT:
+            warning.append(f"memory {mem:.0f}% used")
+    load, cpus = s.get("load"), s.get("cpus")
+    if isinstance(load, (int, float)) and isinstance(cpus, int) and cpus > 0 and load / cpus > LOAD_WARN_PER_CPU:
+        warning.append(f"load {load:.1f} on {cpus} CPUs")
+    if s.get("reboot_required"):
+        warning.append("needs a reboot")
+    if agent_status(node).get("outdated"):
+        warning.append(f"agent {node.agent_version} is outdated")
+    if (node.policy or {}).get("errors"):
+        warning.append("local policy has errors")
+    if node.status == "active" and node.facts_at and now - node.facts_at > FACTS_STALE_S:
+        warning.append(f"facts are {_ago(node.facts_at, now)} old")
+    level = "critical" if critical else "warning" if warning else "ok"
+    return {"level": level, "reasons": critical + warning, "style": table_style("orch_node_health", level)}
+
+
+def _avg(values: List[float]) -> Optional[float]:
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def _health_counts(rows: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts = {level: 0 for level in HEALTH_ORDER}
+    for r in rows:
+        counts[r["health"]["level"]] += 1
+    return counts
+
+
+def fleet_dashboard(store, group: Optional[str] = None) -> Dict[str, Any]:
+    """The node dashboard: ``group`` None = the whole fleet, "" or "-" = ungrouped nodes,
+    otherwise one group's nodes. Raises KeyError for an unknown group."""
+    from . import selectors
+    now = store.now()
+    groups = store.list_groups()
+    every = [n for n in store.list_nodes() if n.status != "revoked"]
+    membership = {n.id: [g["name"] for g in groups if selectors.in_group(g, n.id, n.labels)] for n in every}
+    if group is None:
+        scope = every
+    elif group in ("", "-"):
+        scope = [n for n in every if not membership[n.id]]
+    else:
+        chosen = next((g for g in groups if g["name"] == group), None)
+        if chosen is None:
+            raise KeyError(group)
+        scope = [n for n in every if group in membership[n.id]]
+
+    rows = []
+    for n in scope:
+        where = node_presence(store, n, now)
+        s = facts_summary(n.facts)
+        status_key = where if n.status == "active" and where != "online" else n.status
+        rows.append({
+            "id": n.id, "name": n.name, "status": n.status, "presence": where, "canary": n.canary,
+            "style": table_style("orch_node_status", status_key), "labels": n.labels,
+            "groups": membership[n.id], "health": node_health(store, n, now), "busy": node_busy(store, n),
+            "last_seen_ago": _ago(n.last_seen, now), "agent_version": n.agent_version,
+            "memory_used_pct": s.get("memory_used_pct"), "max_disk_used_pct": s.get("max_disk_used_pct"),
+            "load": s.get("load"), "cpus": s.get("cpus"), "os": s.get("os"), "uptime_days": s.get("uptime_days"),
+        })
+    rows.sort(key=lambda r: (HEALTH_ORDER.index(r["health"]["level"]), r["name"].lower()))
+
+    ids = {n.id for n in scope}
+    recent = [e for e in store.list_executions(limit=5000) if e.node_id in ids and (e.created_at or 0) >= now - RECENT_WINDOW_S]
+    finished = [e for e in recent if e.state in ("succeeded", *FAILED_EXEC_STATES)]
+    run_ids = []
+    for e in sorted(recent, key=lambda e: e.created_at or 0, reverse=True):
+        if e.run_id not in run_ids:
+            run_ids.append(e.run_id)
+    recent_runs = []
+    for rid in run_ids[:8]:
+        run = store.get_run(rid)
+        if run is not None:
+            recent_runs.append({"id": run.id, "title": run.title, "state": run.state,
+                                "style": table_style("orch_run_state", run.state), "created_ago": _ago(run.created_at, now)})
+
+    mems = [r["memory_used_pct"] for r in rows if isinstance(r["memory_used_pct"], (int, float))]
+    disks = [r["max_disk_used_pct"] for r in rows if isinstance(r["max_disk_used_pct"], (int, float))]
+    loads = [r["load"] / r["cpus"] for r in rows if isinstance(r["load"], (int, float)) and r["cpus"]]
+    presence = {"online": 0, "connecting": 0, "offline": 0}
+    for r in rows:
+        if r["status"] == "active":
+            presence[r["presence"]] = presence.get(r["presence"], 0) + 1
+
+    def summary(group_rows):
+        return {"nodes": len(group_rows), "health": _health_counts(group_rows),
+                "online": sum(1 for r in group_rows if r["status"] == "active" and r["presence"] == "online")}
+
+    all_rows = rows if group is None else None
+    if all_rows is None:   # group summaries need every node's health, not just the scope's
+        all_rows = []
+        for n in every:
+            all_rows.append({"id": n.id, "status": n.status, "presence": node_presence(store, n, now),
+                             "health": node_health(store, n, now)})
+    by_id = {r["id"]: r for r in all_rows}
+    group_list = []
+    for g in groups:
+        members = [by_id[n.id] for n in every if g["name"] in membership[n.id]]
+        group_list.append({"name": g["name"], "description": g["description"], "selector": g["selector"],
+                           "members": g["members"], **summary(members)})
+    ungrouped = [by_id[n.id] for n in every if not membership[n.id]]
+
+    return {
+        "scope": {"group": group, "label": "All nodes" if group is None else "Ungrouped" if group in ("", "-") else group},
+        "totals": {"nodes": len(rows), "presence": presence, "health": _health_counts(rows),
+                   "busy": sum(1 for r in rows if r["busy"]), "pending": sum(1 for r in rows if r["status"] == "pending")},
+        "resources": {"memory_used_avg": _avg(mems), "memory_used_max": max(mems, default=None),
+                      "disk_used_avg": _avg(disks), "disk_used_max": max(disks, default=None),
+                      "load_per_cpu_avg": _avg(loads), "load_per_cpu_max": round(max(loads), 2) if loads else None},
+        "runs_24h": {"executions": len(recent), "succeeded": sum(1 for e in finished if e.state == "succeeded"),
+                     "failed": sum(1 for e in finished if e.state in FAILED_EXEC_STATES), "recent": recent_runs},
+        "nodes": rows,
+        "groups": group_list,
+        "fleet": {"nodes": len(every), **summary(all_rows)},
+        "ungrouped": summary(ungrouped),
+        "thresholds": {"disk_warn": DISK_WARN_PCT, "disk_crit": DISK_CRIT_PCT, "memory_warn": MEM_WARN_PCT,
+                       "memory_crit": MEM_CRIT_PCT, "load_per_cpu_warn": LOAD_WARN_PER_CPU},
+    }

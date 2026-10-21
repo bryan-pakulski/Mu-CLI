@@ -634,7 +634,17 @@
     }
   });
 
+  // Live meters only while the page is on screen (MuLive, mu_live.js): a hidden keep-alive
+  // view or a background tab doesn't keep a slow docker-stats request in flight.
+  let statsPaused = false;
+  if (window.MuLive) {
+    window.MuLive.onChange(visible => {
+      if (visible && statsPaused) { statsPaused = false; startStatsPolling(); }
+    });
+  }
+
   async function pollStats() {
+    if (window.MuLive && !window.MuLive.visible()) { statsPaused = true; state.statsTimer = null; return; }
     try {
       const response = await api('/api/containers/stats');
       state.stats = response.containers || {};

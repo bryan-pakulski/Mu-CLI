@@ -901,4 +901,113 @@
     .orch-policyedit__check:empty { display: none; }
     .orch-policyedit__changes { grid-template-columns: max-content minmax(0, 1fr); font-family: var(--wash-font-mono); font-size: var(--wash-type-caption-size); }
     [data-policy-section] .w-group__head .w-textbtn { margin-left: auto; }
+
+    /* ------------------------------------------------------------ node groups (groups.js) */
+    /* Nodes LIST: the groups above the chosen group's inventory. Entries are drop targets for
+     * node rows; while a node is dragged they show a dashed outline, the one under it a wash. */
+    .orch-grouplist { display: flex; flex-direction: column; gap: var(--wash-space-2); margin-bottom: var(--wash-space-5); }
+    .orch-grouplist__head { display: flex; align-items: center; justify-content: space-between; gap: var(--wash-space-2); }
+    .orch-grouplist__head .orch-label-text, .orch-grouplist__nodes .orch-label-text { margin: 0; }
+    .orch-grouplist__new { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-2); }
+    .orch-grouplist__new[hidden] { display: none; }
+    .orch-grouplist__new .w-input { flex: 1 1 140px; min-width: 0; }
+    .orch-grouplist__new .w-field__error { flex-basis: 100%; margin: 0; }
+    .orch-grouplist__new .w-field__error:empty { display: none; }
+    .orch-grouplist__hint { margin: 0; font-size: var(--wash-type-caption-size); }
+    .orch-grouplist__nodes { display: flex; flex-direction: column; gap: var(--wash-space-2); }
+    html[data-orch-dragging] [data-drop-group] { outline: 1px dashed var(--wash-hairline-strong); outline-offset: -2px; border-radius: var(--wash-radius-sm); }
+    [data-drop-group][data-drop-over] { background: var(--wash-accent-wash); outline: 2px solid var(--wash-accent-ink); outline-offset: -2px; border-radius: var(--wash-radius-sm); }
+    .w-row[draggable="true"] { cursor: grab; }
+    .w-row[data-dragging] { opacity: 0.5; }
+
+    /* A group's health: a status sign and a count per level (✗ 2  ? 1), ✓ when all are well. */
+    .orch-hcount { display: inline-flex; align-items: center; gap: 2px; margin-left: var(--wash-space-2); font-variant-numeric: tabular-nums; color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); }
+    .orch-hcount[data-status="failed"] { color: var(--wash-danger-ink); }
+    .orch-hcount[data-status="unverified"] { color: var(--wash-caution-ink); }
+    .orch-hcount[data-status="waiting"] { color: var(--wash-attention-ink); }
+
+    /* The dashboard (MAIN of #/nodes). */
+    .orch-dash { display: flex; flex-direction: column; gap: var(--wash-space-6); min-width: 0; }
+    .orch-dash__top { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--wash-space-4); }
+    .orch-dash__title { display: flex; flex-direction: column; gap: var(--wash-space-1); min-width: 0; }
+    .orch-dash__name { margin: 0; color: var(--wash-plum); font-size: var(--wash-type-title-3-size); line-height: var(--wash-type-title-3-line); font-weight: var(--wash-type-title-3-weight); }
+    .orch-dash__title .w-state, .orch-dash__title .orch-sub { margin: 0; }
+    .orch-dash__board .w-board__big[data-tone="attention"], .orch-dash__board .orch-board__line[data-tone="attention"] { color: var(--wash-attention-ink); }
+    .orch-dash__board .orch-board__line[data-tone="danger"] { color: var(--wash-danger-ink); }
+    .orch-dash__fleet > summary { color: var(--wash-ink-2); }
+    .orch-dash__title a, .orch-group a:not(.w-btn) { color: var(--wash-accent-ink); }
+    .orch-dash__board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    /* Groups tab: one group. */
+    .orch-group { display: flex; flex-direction: column; gap: var(--wash-space-6); min-width: 0; }
+    .orch-group > .w-state { margin: 0; }
+    .orch-members { list-style: none; margin: var(--wash-space-2) 0; padding: 0; max-height: 420px; overflow: auto; border-top: 1px solid var(--wash-hairline); }
+    .orch-members__row { padding: var(--wash-space-2) 0; border-bottom: 1px solid var(--wash-hairline); }
+    .orch-members__name { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: var(--wash-space-2); }
+    .orch-members__note { margin: 0; font-size: var(--wash-type-caption-size); }
+    .orch-groups__foot { margin: var(--wash-space-3) 0 0; font-size: var(--wash-type-caption-size); }
+
+    /* ------------------------------------------------------------ node history (history.js)
+     * Thin 2px lines on one axis per chart, a faint area under a lone series, a recessive grid,
+     * the latest value as text, a crosshair readout on hover or the arrow keys. A lone series
+     * wears the lagoon ink; two series sky and apricot ink (validated: CVD ΔE 20 on Paper) with a
+     * legend, so identity is never colour alone. */
+    .orch-hist__head { display: flex; justify-content: flex-end; }
+    .orch-hist__ranges { display: inline-flex; gap: var(--wash-space-3); }
+    .orch-hist__range { font-variant-numeric: tabular-nums; color: var(--wash-ink-3); }
+    .orch-hist__range[data-on] { color: var(--wash-ink); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 2px; text-decoration-color: var(--mu-accent, var(--wash-ink)); }
+    .orch-hist__grid-wrap { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: var(--wash-space-5) var(--wash-space-6); margin-top: var(--wash-space-3); }
+    .orch-hist__grid-wrap--compact { grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: var(--wash-space-4) var(--wash-space-5); }
+    .orch-hist__chart { margin: 0; min-width: 0; --s0: var(--wash-lagoon-ink); --s1: var(--wash-apricot-ink); }
+    .orch-hist__chart[data-chart="net"], .orch-hist__chart[data-chart="io"] { --s0: var(--wash-sky-ink); }
+    .orch-hist__cap { display: flex; align-items: baseline; justify-content: space-between; gap: var(--wash-space-3); }
+    .orch-hist__label { color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); }
+    .orch-hist__value { color: var(--wash-ink); font-size: var(--wash-type-caption-size); font-variant-numeric: tabular-nums; text-align: right; }
+    .orch-hist__legend { display: flex; flex-wrap: wrap; gap: var(--wash-space-3); margin: 2px 0 0; color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); font-variant-numeric: tabular-nums; }
+    .orch-hist__legend span { display: inline-flex; align-items: center; gap: var(--wash-space-1); }
+    .orch-hist__legend i { display: inline-block; width: 10px; height: 2px; border-radius: 1px; background: var(--s0); }
+    .orch-hist__legend [data-series="1"] i { background: var(--s1); }
+    .orch-hist__plot { position: relative; height: 88px; margin-top: var(--wash-space-2); cursor: crosshair; border-radius: var(--wash-radius-sm); }
+    .orch-hist__plot--compact { height: 56px; }
+    .orch-hist__plot:focus-visible { outline: 2px solid var(--wash-accent-ink); outline-offset: 2px; }
+    .orch-hist__plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
+    .orch-hist__scale { position: absolute; top: -2px; left: 0; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); line-height: 1; background: var(--wash-surface); padding-right: var(--wash-space-1); pointer-events: none; }
+    .orch-hist__axis { display: flex; justify-content: space-between; margin: 2px 0 0; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); font-variant-numeric: tabular-nums; }
+    .orch-hist__none { margin: 0; padding-top: var(--wash-space-5); color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); text-align: center; }
+    .orch-hist__grid { stroke: var(--wash-hairline); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+    .orch-hist__base { stroke: var(--wash-hairline); stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .orch-hist__line { fill: none; stroke: var(--s0); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+    .orch-hist__line[data-series="1"] { stroke: var(--s1); }
+    .orch-hist__dot { fill: var(--s0); }
+    .orch-hist__dot[data-series="1"] { fill: var(--s1); }
+    .orch-hist__area { fill: color-mix(in srgb, var(--s0) 12%, transparent); stroke: none; }
+    .orch-hist__cursor { stroke: var(--wash-ink-3); stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .orch-hist__cursor[hidden] { display: none; }
+    .orch-hist__empty { margin: var(--wash-space-3) 0 0; }
+
+    /* Per-node sparklines in the dashboard's Health rows: CPU and memory on 0–100, network and
+       disk I/O on the scope's shared scale. A line of their own under the row's sub line. */
+    .orch-sparks-slot:empty { display: none; }
+    .orch-sparks { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-1) var(--wash-space-4); margin-top: var(--wash-space-1); }
+    .orch-sparks--none { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); gap: var(--wash-space-3); }
+    .orch-spark { display: inline-flex; align-items: center; gap: var(--wash-space-1); --sp: var(--wash-lagoon-ink); }
+    .orch-spark[data-key="net_bps"], .orch-spark[data-key="io_bps"] { --sp: var(--wash-sky-ink); }
+    .orch-spark[data-tone="attention"] { --sp: var(--wash-attention-ink); }
+    .orch-spark[data-tone="danger"] { --sp: var(--wash-danger-ink); }
+    .orch-spark__svg { display: block; width: 64px; height: 16px; overflow: visible; }
+    .orch-spark__svg line { stroke: var(--wash-hairline); stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .orch-spark__svg path { fill: none; stroke: var(--sp); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+    .orch-spark__v { min-width: 9ch; color: var(--wash-ink-2); font-size: var(--wash-type-caption-size); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .orch-spark[data-tone="attention"] .orch-spark__v { color: var(--wash-attention-ink); }
+    .orch-spark[data-tone="danger"] .orch-spark__v { color: var(--wash-danger-ink); }
+    .orch-sort { display: inline-flex; flex-wrap: wrap; gap: var(--wash-space-3); margin-left: auto; }
+    .orch-sort__btn { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+    .orch-sort__btn[aria-pressed="true"] { color: var(--wash-ink); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 2px; text-decoration-color: var(--mu-accent, var(--wash-ink)); }
+    /* Narrow: CPU and memory only, the rest on the node page. */
+    @media (width < 600px) {
+        .orch-spark[data-key="net_bps"], .orch-spark[data-key="io_bps"] { display: none; }
+    }
+    .orch-hist__note { margin: var(--wash-space-2) 0 0; }
+    .orch-hist__note[data-tone="attention"] { color: var(--wash-attention-ink); }
+    .orch-hist .w-banner { margin-top: var(--wash-space-3); }
 }

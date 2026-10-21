@@ -226,13 +226,83 @@ export interface OrchAuditEntry { seq: number; at: number; actor: string; action
 /** Fleet agent summary on GET /api/orchestration/nodes. */
 export interface OrchAgentsSummary { current: string; auto: boolean; outdated: number; updatable: number; open_run: string }
 export interface OrchNodesResponse { nodes: OrchNode[]; groups: unknown[]; agents?: OrchAgentsSummary }
+
+/* ------------------------------------------------------------ node groups + the node dashboard */
+
+/** A node's health (vm.node_health): ok | warning | critical | pending, with the reasons. */
+export interface OrchHealth { level: 'ok' | 'warning' | 'critical' | 'pending' | string; reasons: string[]; style?: OrchStyle }
+export type OrchHealthCounts = { ok: number; warning: number; critical: number; pending: number };
+
+/** One node on the dashboard (vm.fleet_dashboard rows), worst first. */
+export interface OrchDashboardNode {
+  id: string; name: string; status: string; presence: OrchPresence | string; canary: boolean; style: OrchStyle;
+  labels: Record<string, string>; groups: string[]; health: OrchHealth; busy: OrchBusy | null;
+  last_seen_ago: string; agent_version: string; memory_used_pct: number | null; max_disk_used_pct: number | null;
+  load: number | null; cpus: number | null; os: string; uptime_days: number | null;
+}
+
+/** A group with its selector, explicit members and health counts. */
+export interface OrchGroupSummary {
+  name: string; description: string; selector: string; members: string[];
+  nodes: number; online: number; health: OrchHealthCounts;
+}
+
+/** GET /api/orchestration/dashboard (vm.fleet_dashboard). */
+export interface OrchDashboard {
+  scope: { group: string | null; label: string };
+  totals: { nodes: number; presence: Record<string, number>; health: OrchHealthCounts; busy: number; pending: number };
+  resources: { memory_used_avg: number | null; memory_used_max: number | null; disk_used_avg: number | null;
+    disk_used_max: number | null; load_per_cpu_avg: number | null; load_per_cpu_max: number | null };
+  runs_24h: { executions: number; succeeded: number; failed: number;
+    recent: Array<{ id: string; title: string; state: string; style: OrchStyle; created_ago: string }> };
+  nodes: OrchDashboardNode[];
+  groups: OrchGroupSummary[];
+  fleet: { nodes: number; online: number; health: OrchHealthCounts };
+  ungrouped: { nodes: number; online: number; health: OrchHealthCounts };
+  thresholds: Record<string, number>;
+}
+
+/** GET /api/orchestration/groups: the groups and every node (for the membership editor). */
+export interface OrchGroupsResponse {
+  groups: OrchGroupSummary[];
+  ungrouped: { nodes: number; online: number; health: OrchHealthCounts };
+  fleet: { nodes: number; online: number; health: OrchHealthCounts };
+  nodes: Array<{ id: string; name: string; groups: string[]; labels: Record<string, string>; health: OrchHealth; presence: string; status: string; style: OrchStyle }>;
+}
+
+/** Node history (mu/orchestration/metrics.py): chart points, one bucket each. */
+export type OrchMetricKey = 'cpu_pct' | 'mem_pct' | 'disk_pct' | 'load1' | 'net_rx_bps' | 'net_tx_bps' | 'disk_read_bps' | 'disk_write_bps';
+export type OrchMetricUnit = 'percent' | 'number' | 'bytes_per_s';
+export type OrchMetricsRange = '1h' | '6h' | '24h' | '7d' | '30d';
+export type OrchMetricPoint = { t: number } & Partial<Record<OrchMetricKey, number>>;
+export interface OrchMetrics {
+  range: OrchMetricsRange; ranges: OrchMetricsRange[]; bucket_s: number; since: number; until: number; nodes: number;
+  points: OrchMetricPoint[];
+  fields: Array<{ key: OrchMetricKey; label: string; unit: OrchMetricUnit; combine: 'avg' | 'max' | 'sum' }>;
+  /** Node names whose agent reports history, and those that need an agent update first. */
+  reporting: string[]; needs_update: string[];
+  scope?: { group: string | null; label: string };
+  /** With per_node: each node's small series for the health rows (net = in + out, io = read + write). */
+  per_node?: Record<string, OrchNodeSpark>;
+}
+
+export type OrchSparkKey = 'cpu_pct' | 'mem_pct' | 'net_bps' | 'io_bps';
+export interface OrchNodeSpark {
+  points: Array<{ t: number } & Partial<Record<OrchSparkKey, number>>>;
+  latest: Record<OrchSparkKey, number | null>;
+  peak: Record<OrchSparkKey, number | null>;
+}
+
+/** The dashboard's scopes: null = the whole fleet, '-' = ungrouped nodes, else a group name. */
+export type OrchScope = string | null;
 export interface OrchCommandResult { ok: boolean; command: string; data: Record<string, unknown> }
 export interface OrchChange { scope: 'node' | 'tool' | 'run'; id: string; parts: string[]; seq: number }
 
 /** Commands the phone sends (mu/orchestration/commands.py). */
 export type OrchCommand =
   | 'approveRun' | 'rejectRun' | 'continueRun' | 'pauseRun' | 'rollbackRun' | 'cancelRun' | 'retryNode'
-  | 'acceptNode' | 'quarantineNode' | 'unquarantineNode' | 'pauseDispatch' | 'resumeDispatch' | 'proposeAgentUpdate';
+  | 'acceptNode' | 'quarantineNode' | 'unquarantineNode' | 'pauseDispatch' | 'resumeDispatch' | 'proposeAgentUpdate'
+  | 'putGroup' | 'addToGroup' | 'removeFromGroup' | 'renameGroup' | 'deleteGroup' | 'previewSelector';
 
 export const ORCH_CSRF_HEADER = 'X-MuCLI-CSRF';
 
@@ -292,6 +362,23 @@ export const orchestrationApi = {
   toolResultsCsv: (toolId: string, view: string) => api.get<string>(`/api/orchestration/tools/${enc(toolId)}/results.csv`, { query: { view } }),
   runbook: (runbookId: string, version: number | string) => api.get<OrchRunbookDetail>(`/api/orchestration/runbooks/${enc(runbookId)}/${enc(String(version))}`),
   settings: () => api.get<OrchSettings>('/api/orchestration/settings'),
+  /** The node dashboard: `group` null = the fleet, '-' = ungrouped, else one group. */
+  dashboard: (group: OrchScope = null) => api.get<OrchDashboard>('/api/orchestration/dashboard', { query: { group: group ?? undefined } }),
+  groups: () => api.get<OrchGroupsResponse>('/api/orchestration/groups'),
+  /** One node's history charts (agent 1.3.0 or newer reports them). */
+  nodeMetrics: (nodeId: string, range: OrchMetricsRange = '6h') => api.get<OrchMetrics>(`/api/orchestration/nodes/${enc(nodeId)}/metrics`, { query: { range } }),
+  /** History for a dashboard scope: null = the fleet, '-' = ungrouped, else one group. */
+  dashboardMetrics: (group: OrchScope = null, range: OrchMetricsRange = '6h', perNode = false) =>
+    api.get<OrchMetrics>('/api/orchestration/dashboard/metrics', { query: { group: group ?? undefined, range, per_node: perNode ? 1 : undefined } }),
+  /** Create or update a group; `members` replaces the explicit member list when given. */
+  putGroup: (args: { name: string; selector?: string; description?: string; members?: string[] }) => command('putGroup', args),
+  /** Put nodes in a group; with `from`, they leave that group (a move). */
+  addToGroup: (name: string, nodeIds: string[], from?: string) => command('addToGroup', from ? { name, node_ids: nodeIds, from } : { name, node_ids: nodeIds }),
+  removeFromGroup: (name: string, nodeIds: string[]) => command('removeFromGroup', { name, node_ids: nodeIds }),
+  renameGroup: (name: string, newName: string) => command('renameGroup', { name, new_name: newName }),
+  deleteGroup: (name: string) => command('deleteGroup', { name }),
+  /** The nodes a label selector reaches now (read-only; validates it). */
+  previewSelector: (labels: string) => command('previewSelector', { selector: { labels } }),
   audit: (limit = 10) => api.get<{ entries: OrchAuditEntry[] }>('/api/orchestration/audit', { query: { limit } }),
   command,
   /** The fleet chat (mu/gui/routers/orchestration.py fleet_chat_session): `fresh` starts over and deletes the old one. */

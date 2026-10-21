@@ -37,10 +37,25 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p_nodes = sub.add_parser("nodes", help="list, accept, quarantine or revoke nodes")
     p_nodes.add_argument("action", nargs="?", default="list",
-                         choices=["list", "show", "accept", "quarantine", "unquarantine", "revoke", "token", "update"])
+                         choices=["list", "show", "accept", "quarantine", "unquarantine", "revoke", "token", "update", "history"])
     p_nodes.add_argument("node", nargs="?")
     p_nodes.add_argument("--labels", default="", help="for token: k=v,k=v")
     p_nodes.add_argument("--canary", action="store_true")
+    p_nodes.add_argument("--range", default="6h", help="history: 1h, 6h, 24h, 7d or 30d")
+
+    p_groups = sub.add_parser("groups", help="node groups: list, show, create, delete, add, remove, rename")
+    p_groups.add_argument("action", nargs="?", default="list",
+                          choices=["list", "show", "create", "delete", "add", "remove", "rename"])
+    p_groups.add_argument("name", nargs="?", help="group name")
+    p_groups.add_argument("nodes", nargs="*", help="add/remove: node ids; rename: the new name")
+    p_groups.add_argument("--selector", default=None, help="create: a label selector (empty = members only)")
+    p_groups.add_argument("--description", default=None)
+    p_groups.add_argument("--from", dest="from_group", default="", help="add: move the nodes out of this group")
+
+    p_dash = sub.add_parser("dashboard", help="node health: the fleet, one group (--group) or ungrouped (--group -)")
+    p_dash.add_argument("--group", default=None)
+    p_dash.add_argument("--history", action="store_true", help="also chart CPU, memory, disk, load, network and disk I/O")
+    p_dash.add_argument("--range", default="6h", help="history: 1h, 6h, 24h, 7d or 30d")
 
     p_tools = sub.add_parser("tools", help="catalog")
     p_tools.add_argument("action", nargs="?", default="list", choices=["list", "show", "publish", "deprecate", "starter"])
@@ -143,6 +158,118 @@ def main(argv: Optional[List[str]] = None) -> int:
     except (CommandError, CommandRejected, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+
+
+def _health(style: dict) -> str:
+    return f"{style.get('glyph', '')} {style.get('label', '')}".strip()
+
+
+def _groups(orch, args, as_json: bool) -> int:
+    from . import vm
+    action = args.action
+    if action == "list":
+        board = vm.fleet_dashboard(orch.store)
+        if as_json:
+            _print({"groups": board["groups"], "ungrouped": board["ungrouped"]}, True)
+            return 0
+        rows = [[g["name"], str(g["nodes"]), str(g["online"]), _counts(g["health"]), g["selector"] or "(members only)",
+                 g["description"]] for g in board["groups"]]
+        rows.append(["(ungrouped)", str(board["ungrouped"]["nodes"]), str(board["ungrouped"]["online"]),
+                     _counts(board["ungrouped"]["health"]), "", ""])
+        _table(rows, ["GROUP", "NODES", "ONLINE", "HEALTH", "SELECTOR", "DESCRIPTION"])
+        return 0
+    if not args.name:
+        print("group name required", file=sys.stderr)
+        return 2
+    if action == "show":
+        return _dashboard(orch, argparse.Namespace(group=args.name), as_json)
+    if action == "create":
+        data = _cmd(orch, "putGroup", name=args.name, selector=args.selector or "",
+                    description=args.description or "", **({"members": args.nodes} if args.nodes else {}))
+    elif action == "delete":
+        data = _cmd(orch, "deleteGroup", name=args.name)
+    elif action == "add":
+        data = _cmd(orch, "addToGroup", name=args.name, node_ids=args.nodes, **({"from": args.from_group} if args.from_group else {}))
+    elif action == "remove":
+        data = _cmd(orch, "removeFromGroup", name=args.name, node_ids=args.nodes)
+    else:  # rename
+        if not args.nodes:
+            print("rename needs the new name", file=sys.stderr)
+            return 2
+        data = _cmd(orch, "renameGroup", name=args.name, new_name=args.nodes[0])
+    if as_json:
+        _print(data, True)
+    else:
+        print(f"{action}: {data.get('name')}")
+        for n in data.get("still_matched_by_selector") or []:
+            print(f"  {n} stays in the group: its labels match the group's selector")
+    return 0
+
+
+def _history(orch, nodes, title: str, range_key: str, as_json: bool) -> int:
+    from . import metrics
+    data = {**metrics.series(orch.store, [n.id for n in nodes], range_key), **metrics.reporting(nodes)}
+    if as_json:
+        _print(data, True)
+        return 0
+    print(title)
+    lines = metrics.text_lines(data)
+    print("\n".join(lines) if lines else "  no history yet")
+    if data["needs_update"]:
+        print(f"  no history from {', '.join(data['needs_update'])}: their agent predates {metrics.METRICS_SINCE} "
+              f"(mucli orch nodes update)")
+    return 0
+
+
+def _counts(health: dict) -> str:
+    parts = [f"{health[k]} {k}" for k in ("critical", "warning", "pending") if health.get(k)]
+    return ", ".join(parts) or "all healthy"
+
+
+def _dashboard(orch, args, as_json: bool) -> int:
+    from . import vm
+    try:
+        board = vm.fleet_dashboard(orch.store, args.group)
+    except KeyError:
+        print(f"unknown group {args.group!r}", file=sys.stderr)
+        return 1
+    if as_json:
+        _print(board, True)
+        return 0
+    t, r, runs24 = board["totals"], board["resources"], board["runs_24h"]
+    p = t["presence"]
+    print(f"{board['scope']['label']}: {t['nodes']} node(s) · {p.get('online', 0)} online · "
+          f"{p.get('connecting', 0)} connecting · {p.get('offline', 0)} offline · {t['busy']} busy")
+    print(f"health: {_counts(t['health'])}")
+    pct = lambda v: "–" if v is None else f"{v:.0f}%"
+    print(f"memory avg {pct(r['memory_used_avg'])} max {pct(r['memory_used_max'])} · disk avg {pct(r['disk_used_avg'])} "
+          f"max {pct(r['disk_used_max'])} · load/cpu max {r['load_per_cpu_max'] if r['load_per_cpu_max'] is not None else '–'}")
+    print(f"last 24h: {runs24['executions']} execution(s), {runs24['succeeded']} succeeded, {runs24['failed']} failed")
+    if board["nodes"]:
+        print()
+        from . import metrics
+        spark = metrics.per_node(orch.store, [n["id"] for n in board["nodes"]], "6h")
+
+        def cpu(n):
+            h = spark.get(n["id"]) or {}
+            if not h.get("points"):
+                return "-"
+            return metrics.sparkline([p.get("cpu_pct") for p in h["points"]], 16, 100.0) + " " + pct(h["latest"].get("cpu_pct"))
+        _table([[n["name"], _health(n["health"]["style"]), _health(n["style"]), cpu(n), pct(n["memory_used_pct"]),
+                 pct(n["max_disk_used_pct"]), ",".join(n["groups"]) or "-", "; ".join(n["health"]["reasons"])]
+                for n in board["nodes"]],
+               ["NODE", "HEALTH", "STATUS", "CPU (6H)", "MEM", "DISK", "GROUPS", "WHY"])
+    if getattr(args, "history", False):
+        print()
+        ids = {n["id"] for n in board["nodes"] if n["status"] != "pending"}
+        _history(orch, [n for n in orch.store.list_nodes() if n.id in ids], f"{board['scope']['label']} · last {args.range}",
+                 args.range, False)
+    if args.group is None and board["groups"]:
+        print()
+        _table([[g["name"], str(g["nodes"]), _counts(g["health"])] for g in board["groups"]]
+               + [["(ungrouped)", str(board["ungrouped"]["nodes"]), _counts(board["ungrouped"]["health"])]],
+               ["GROUP", "NODES", "HEALTH"])
+    return 0
 
 
 def _runbook_files(path: str) -> List[str]:
@@ -289,6 +416,12 @@ def _dispatch(orch, args, rest) -> int:
         if not args.node:
             print("node id required", file=sys.stderr)
             return 2
+        if args.action == "history":
+            node = orch.store.get_node(args.node) or next((n for n in orch.store.list_nodes() if n.name == args.node), None)
+            if node is None:
+                print(f"unknown node {args.node!r}", file=sys.stderr)
+                return 1
+            return _history(orch, [node], f"{node.name} · last {args.range}", args.range, as_json)
         if args.action == "show":
             node = orch.store.get_node(args.node)
             _print(vm.node_vm(orch.store, node, detail=True) if node else {}, True)
@@ -298,6 +431,10 @@ def _dispatch(orch, args, rest) -> int:
         data = _cmd(orch, ctype, node_id=args.node)
         print(json.dumps(data, default=str) if as_json else f"{args.node}: {data['node']['status']}")
         return 0
+    if args.cmd == "groups":
+        return _groups(orch, args, as_json)
+    if args.cmd == "dashboard":
+        return _dashboard(orch, args, as_json)
     if args.cmd == "tools":
         if args.action == "starter":
             print("\n".join(_cmd(orch, "installStarterPack", force=True)["installed"]) or "already installed")

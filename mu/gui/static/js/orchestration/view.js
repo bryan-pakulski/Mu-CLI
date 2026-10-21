@@ -71,15 +71,17 @@
     const GROUPS = {
         runs: { list: 'runs', items: ['run'], title: 'Runs' },
         nodes: { list: 'nodes', items: ['node'], title: 'Nodes' },
+        groups: { list: 'groups', items: ['group'], title: 'Groups' },
         catalog: { list: 'catalog', items: ['tool', 'runbook'], title: 'Catalog' },
     };
     const groupOf = name => Object.keys(GROUPS).find(g => g === name || GROUPS[g].items.includes(name)) || null;
-    const listQuery = { runs: new URLSearchParams(), nodes: new URLSearchParams(), catalog: new URLSearchParams() };
+    const listQuery = { runs: new URLSearchParams(), nodes: new URLSearchParams(), groups: new URLSearchParams(), catalog: new URLSearchParams() };
     const narrow = () => !!window.matchMedia?.('(width < 840px)').matches;
     let listGroup = null;
     let listToken = 0;
     let listController = null;
-    const listRenderer = g => (g === 'nodes' ? Orch.nodes?.renderInventory : Orch.routes[GROUPS[g].list]?.render);
+    /* Nodes' LIST is the groups (with + Create group) above the chosen group's inventory (groups.js). */
+    const listRenderer = g => (g === 'nodes' ? Orch.groups?.renderNodesList : Orch.routes[GROUPS[g].list]?.render);
 
     function listSetQuery(g, params) {
         const q = listQuery[g];
@@ -113,12 +115,13 @@
         }
     }
     function itemKey(href) {
-        const m = /^#\/(run|node|tool|runbook)\/([^?]+)/.exec(href || '');
+        const m = /^#\/(run|node|tool|runbook|group)\/([^?]+)/.exec(href || '');
         return m ? `${m[1]}/${m[2]}` : null;
     }
     function markSelected() {
         const want = itemKey(location.hash);
-        listBody.querySelectorAll('.w-row').forEach(r => {
+        /* Group entries in the Nodes list mark themselves (groups.js): they aren't items. */
+        listBody.querySelectorAll('.w-row:not([data-group-entry])').forEach(r => {
             const a = r.querySelector('a.w-row__main[href]');
             const on = !!want && !!a && itemKey(a.getAttribute('href')) === want;
             r.toggleAttribute('data-selected', on);
@@ -131,7 +134,7 @@
         }
     }
     function firstItemHref() {
-        const a = listBody.querySelector('a.w-row__main[href^="#/run/"], a.w-row__main[href^="#/node/"], a.w-row__main[href^="#/tool/"], a.w-row__main[href^="#/runbook/"]');
+        const a = listBody.querySelector('a.w-row__main[href^="#/run/"], a.w-row__main[href^="#/node/"], a.w-row__main[href^="#/tool/"], a.w-row__main[href^="#/runbook/"], a.w-row__main[href^="#/group/"]');
         return a ? a.getAttribute('href') : null;
     }
     /* Lay the panes out for a route: which panes show, the back bar, the aside toggle. */
@@ -140,7 +143,8 @@
         panes.dataset.layout = hasList && hasAside ? 'list-main-aside' : (hasList ? 'list-main' : (hasAside ? 'main-aside' : 'main'));
         panes.dataset.route = route.name;
         panes.removeAttribute('data-aside');
-        panes.dataset.show = hasList && route.name === (g ? GROUPS[g].list : 'settings') && !(g === 'nodes' && route.query.get('fleet')) ? 'list' : 'main';
+        /* Narrow: a chosen group's dashboard (#/nodes?group=…) shows MAIN, not the list again. */
+        panes.dataset.show = hasList && route.name === (g ? GROUPS[g].list : 'settings') && !(g === 'nodes' && (route.query.get('fleet') || route.query.get('group'))) ? 'list' : 'main';
         const bar = mainPane.querySelector('[data-backbar]');
         bar.hidden = !hasList;
         bar.querySelector('[data-backbar-label]').textContent = g ? GROUPS[g].title : 'Sections';
@@ -215,7 +219,9 @@
     });
 
     /* ------------------------------------------------------------ page header (Mu §4) */
-    const TABS = [['now', 'Now', '#/'], ['runs', 'Runs', '#/runs'], ['nodes', 'Nodes', '#/nodes'], ['catalog', 'Catalog', '#/catalog']];
+    /* Groups is a primary tab by the operator's request (node groups: membership, selector,
+     * the health of each); the rest live under More. */
+    const TABS = [['now', 'Now', '#/'], ['runs', 'Runs', '#/runs'], ['nodes', 'Nodes', '#/nodes'], ['groups', 'Groups', '#/groups'], ['catalog', 'Catalog', '#/catalog']];
     const MORE = [['studio', 'Studio', '#/studio'], ['audit', 'Audit', '#/audit'], ['settings', 'Settings', '#/settings']];
     const NAV_TAB = { overview: 'now', approvals: 'now' };
     /* Top routes show "Orchestration" with tabs; anything with a parent (a run, a node, a
@@ -303,7 +309,7 @@
             const tabs = document.querySelector('#w-pagehead [data-head-tabs]');
             if (tabs && !tabs.querySelector('.orch-pop')) {
                 /* Studio, Audit and Settings live under More; when one is open, More takes its
-                 * name and is the current tab (it is never a fifth tab). */
+                 * name and is the current tab. */
                 const d = document.createElement('details');
                 d.className = 'orch-pop orch-tabs-more';
                 d.innerHTML = `<summary class="w-pagetabs__tab"${more ? ' aria-current="page"' : ''}>${esc(more ? more[1] : 'More')} <span aria-hidden="true">▾</span></summary><div class="w-menu orch-pop__menu" role="menu">${MORE.map(([k, label, href]) => `<a class="w-menu__item" role="menuitem" href="${href}"${k === navTab ? ' aria-current="page"' : ''}><span class="w-menu__label">${esc(label)}</span></a>`).join('')}</div>`;
@@ -781,7 +787,8 @@
         window.addEventListener('hashchange', () => applyRoute());
         applyRoute();
         refreshAttention();
-        api.events({ onChange, onHello: data => paintAttention(data.attention), onState: setLive });
+        api.events({ onChange, onHello: data => paintAttention(data.attention), onState: setLive,
+                     onResync: () => { refreshAttention(); Orch.refresh(); } });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();

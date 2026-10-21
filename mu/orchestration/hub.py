@@ -101,6 +101,11 @@ class Hub:
             self.store.change("node", node.id, ["state", "facts"])
         if facts_changed:
             self.orch.on_facts(node.id, body["facts"], node.facts)
+        if "metrics" in body and node.status == "active":
+            # History samples (every ~20 s per node) emit no change event: charts poll while shown,
+            # so the fleet's node views don't re-render on every sample.
+            from . import metrics
+            metrics.record(self.store, node.id, body["metrics"])
         reply: Dict[str, Any] = {"status": node.status}
         if node.status == "active":
             rotated = enroll.maybe_rotate(self.store, node, rotate_after_s=self.orch.rotate_after_s)

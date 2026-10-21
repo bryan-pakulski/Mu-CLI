@@ -1,0 +1,230 @@
+{
+ "fleet": {
+  "health": {
+   "critical": 1,
+   "ok": 1,
+   "pending": 1,
+   "warning": 0
+  },
+  "nodes": 3,
+  "online": 2
+ },
+ "groups": [
+  {
+   "description": "",
+   "health": {
+    "critical": 0,
+    "ok": 1,
+    "pending": 0,
+    "warning": 0
+   },
+   "members": [
+    "n_a9c30453f8"
+   ],
+   "name": "canaries",
+   "nodes": 1,
+   "online": 1,
+   "selector": ""
+  },
+  {
+   "description": "Front ends",
+   "health": {
+    "critical": 1,
+    "ok": 1,
+    "pending": 0,
+    "warning": 0
+   },
+   "members": [],
+   "name": "web",
+   "nodes": 2,
+   "online": 2,
+   "selector": "role=web"
+  }
+ ],
+ "nodes": [
+  {
+   "agent_version": "1.3.0",
+   "busy": null,
+   "canary": false,
+   "cpus": 2,
+   "groups": [
+    "web"
+   ],
+   "health": {
+    "level": "critical",
+    "reasons": [
+     "disk 96% full"
+    ],
+    "style": {
+     "glyph": "\u2717",
+     "label": "critical",
+     "semantic": "danger",
+     "status": "failed"
+    }
+   },
+   "id": "n_a2c603ee94",
+   "labels": {
+    "env": "prod",
+    "role": "web"
+   },
+   "last_seen_ago": "0s ago",
+   "load": 0.4,
+   "max_disk_used_pct": 96,
+   "memory_used_pct": 52,
+   "name": "web-2",
+   "os": "Debian 12",
+   "presence": "online",
+   "status": "active",
+   "style": {
+    "glyph": "\u2713",
+    "label": "active",
+    "semantic": "ok",
+    "status": "done"
+   },
+   "uptime_days": 3.0
+  },
+  {
+   "agent_version": "test",
+   "busy": null,
+   "canary": false,
+   "cpus": 2,
+   "groups": [],
+   "health": {
+    "level": "pending",
+    "reasons": [
+     "waiting to be accepted"
+    ],
+    "style": {
+     "glyph": "\u25c6",
+     "label": "awaiting acceptance",
+     "semantic": "attention",
+     "status": "waiting"
+    }
+   },
+   "id": "n_aada500c75",
+   "labels": {
+    "env": "prod",
+    "role": "db"
+   },
+   "last_seen_ago": "0s ago",
+   "load": null,
+   "max_disk_used_pct": null,
+   "memory_used_pct": null,
+   "name": "db-new",
+   "os": "Debian 12",
+   "presence": "online",
+   "status": "pending",
+   "style": {
+    "glyph": "\u25c6",
+    "label": "awaiting acceptance",
+    "semantic": "attention",
+    "status": "waiting"
+   },
+   "uptime_days": null
+  },
+  {
+   "agent_version": "1.3.0",
+   "busy": null,
+   "canary": true,
+   "cpus": 2,
+   "groups": [
+    "canaries",
+    "web"
+   ],
+   "health": {
+    "level": "ok",
+    "reasons": [],
+    "style": {
+     "glyph": "\u2713",
+     "label": "healthy",
+     "semantic": "ok",
+     "status": "done"
+    }
+   },
+   "id": "n_a9c30453f8",
+   "labels": {
+    "env": "prod",
+    "role": "web"
+   },
+   "last_seen_ago": "0s ago",
+   "load": 0.4,
+   "max_disk_used_pct": 40,
+   "memory_used_pct": 52,
+   "name": "web-1",
+   "os": "Debian 12",
+   "presence": "online",
+   "status": "active",
+   "style": {
+    "glyph": "\u2713",
+    "label": "active",
+    "semantic": "ok",
+    "status": "done"
+   },
+   "uptime_days": 3.0
+  }
+ ],
+ "resources": {
+  "disk_used_avg": 68.0,
+  "disk_used_max": 96,
+  "load_per_cpu_avg": 0.2,
+  "load_per_cpu_max": 0.2,
+  "memory_used_avg": 52.0,
+  "memory_used_max": 52
+ },
+ "runs_24h": {
+  "executions": 2,
+  "failed": 0,
+  "recent": [
+   {
+    "created_ago": "0s ago",
+    "id": "r_9f2384d1247f",
+    "state": "succeeded",
+    "style": {
+     "glyph": "\u2713",
+     "label": "succeeded",
+     "semantic": "ok",
+     "status": "done"
+    },
+    "title": "Say hello"
+   }
+  ],
+  "succeeded": 2
+ },
+ "scope": {
+  "group": null,
+  "label": "All nodes"
+ },
+ "thresholds": {
+  "disk_crit": 95,
+  "disk_warn": 85,
+  "load_per_cpu_warn": 1.5,
+  "memory_crit": 95,
+  "memory_warn": 90
+ },
+ "totals": {
+  "busy": 0,
+  "health": {
+   "critical": 1,
+   "ok": 1,
+   "pending": 1,
+   "warning": 0
+  },
+  "nodes": 3,
+  "pending": 1,
+  "presence": {
+   "connecting": 0,
+   "offline": 0,
+   "online": 2
+  }
+ },
+ "ungrouped": {
+  "health": {
+   "critical": 0,
+   "ok": 0,
+   "pending": 1,
+   "warning": 0
+  },
+  "nodes": 1,
+  "online": 0
+ }
+}

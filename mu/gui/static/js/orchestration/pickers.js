@@ -533,7 +533,9 @@
     }
 
     /* value: {labels, groups, nodes} (or a label-selector string with labelsOnly). */
-    function selectorBuilder(container, { value = {}, test = false, labelsOnly = false, label = 'Target nodes', onChange = null, idPrefix = ui.uid('sel'), allowAll = false } = {}) {
+    /* `emptyNote` (labelsOnly): what an empty selector means here, e.g. a group's (matches no
+     * node, hand-picked members only); with it, an empty selector isn't previewed as "every node". */
+    function selectorBuilder(container, { value = {}, test = false, labelsOnly = false, label = 'Target nodes', onChange = null, idPrefix = ui.uid('sel'), allowAll = false, emptyNote = '' } = {}) {
         let sel = typeof value === 'string' ? { labels: value } : { labels: value.labels || '', groups: [...(value.groups || [])], nodes: [...(value.nodes || [])], all: !!value.all };
         let rows = parseSelector(sel.labels);
         let mode = rows === null ? 'text' : 'build';
@@ -577,7 +579,7 @@
                 <div class="orch-stack-sm">
                     <div class="orch-sel__head"><div class="w-segmented" role="group" aria-label="How to choose labels"><button type="button" class="w-segmented__option" aria-pressed="${mode === 'build'}" data-mode="build">Pick labels</button><button type="button" class="w-segmented__option" aria-pressed="${mode === 'text'}" data-mode="text">Type a selector</button></div></div>
                     ${mode === 'build' ? `<ul class="orch-sel__rows" role="list">${rows.map(rowHtml).join('')}</ul>
-                        <div class="w-btn-row"><button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-row-add>${icon('plus', 'sm')}<span>Add a label condition</span></button>${rows.length ? `<code class="orch-mono orch-sub">${esc(formatSelector(rows) || '…')}</code>` : `<span class="orch-sub">${labelsOnly ? 'No condition: every node the run targets.' : 'No label condition.'}</span>`}</div>`
+                        <div class="w-btn-row"><button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-row-add>${icon('plus', 'sm')}<span>Add a label condition</span></button>${rows.length ? `<code class="orch-mono orch-sub">${esc(formatSelector(rows) || '…')}</code>` : `<span class="orch-sub">${labelsOnly ? (emptyNote ? esc(emptyNote) : 'No condition: every node the run targets.') : 'No label condition.'}</span>`}</div>`
                         : `<div class="w-field"><label class="w-field__label" for="${id}-text">Label selector</label><input class="w-input" data-mono id="${id}-text" value="${esc(sel.labels || '')}" placeholder="env=prod,role in (web,api),!legacy" autocomplete="off" spellcheck="false">
                             <p class="w-field__hint">Comma means AND: <code>k=v</code>, <code>k!=v</code>, <code>k in (a,b)</code>, <code>k notin (a,b)</code>, <code>k</code> (present), <code>!k</code> (absent)${labelsOnly ? '' : ', <code>*</code> for every node'}.</p>${errLine('')}</div>`}
                     ${!labelsOnly && (index.groups || []).length ? `<div class="orch-sel__block"><p class="orch-label-text">Groups</p><div class="orch-checks">${index.groups.map(g => `<label class="w-check"><input class="w-check__input" type="checkbox" data-group="${esc(g.name)}"${(sel.groups || []).includes(g.name) ? ' checked' : ''}><span>${esc(g.name)} <span class="orch-sub">${esc(g.count)} · <code class="orch-mono">${esc(g.selector)}</code></span></span></label>`).join('')}</div></div>` : ''}
@@ -627,6 +629,7 @@
             const box = container.querySelector('[data-count]');
             if (!box) return;
             const s = get();
+            if (labelsOnly && emptyNote && !String(s || '').trim()) { box.innerHTML = ''; return; }
             const empty = labelsOnly ? false : !Object.keys(s).length;
             if (empty) { box.innerHTML = `<p class="orch-sub">${allowAll ? 'No targets yet. A fact trigger may leave this empty (it runs on the node whose metric fired); other schedules need targets.' : 'Choose labels, groups or nodes.'}</p>`; return; }
             const seq = ++previewSeq;

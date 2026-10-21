@@ -29,9 +29,9 @@ const route = (path: string) => {
 };
 
 it('opens pairing links with the code and address', () => {
-  const r = route('pair?code=K7QM3XRT&url=http%3A%2F%2F192.168.1.20%3A30311');
+  const r = route('pair?code=K7QM3XRTAB2C&url=http%3A%2F%2F192.168.1.20%3A30311');
   expect(r.name).toBe('Pair');
-  expect(r.params).toMatchObject({ code: 'K7QM3XRT', url: 'http://192.168.1.20:30311' });
+  expect(r.params).toMatchObject({ code: 'K7QM3XRTAB2C', url: 'http://192.168.1.20:30311' });
 });
 
 it('opens jobs, runs and nodes by id', () => {

@@ -2,7 +2,7 @@
 
 mucli's tests validate the product's core requirements. They are grouped by pillar, one folder each, and every test exercises behaviour. This page lists what each pillar must prove and the files that prove it. AGENTS.md has the rules in short.
 
-**Size:** 1,535 tests in 101 files, plus 8 node tests in `tests/gui/frontend/`. A full run takes about 7 minutes: ~6.1 min is the Docker suites, the rest ~67 s.
+**Size:** 1,535 tests in 101 files, plus 15 node tests in `tests/gui/frontend/`. A full run takes about 7 minutes: ~6.1 min is the Docker suites, the rest ~67 s.
 
 ```bash
 python3 -m pytest tests/ -q                 # everything (Docker required)
@@ -241,9 +241,11 @@ Must prove:
 - Prompts wait indefinitely and Stop cancels them
 - The shell serves destinations and embeds
 - File panels serve correct data; the browser renders dialogs and restored traces (node tests)
+- Remote clients must pair: apps by bearer token, browsers on the pairing page into an HttpOnly cookie that keeps CSRF; wrong codes lock out exponentially
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
+| `test_device_pairing.py` | 26 | 3.4 s | Device pairing: the store, lockouts, the gate, browser pairing page and cookie, CSRF, revocation |
 | `test_gui_files.py` | 32 | 0.3 s | GUI Files panel — workspace explorer + editor backend |
 | `test_gui_webui_coalescing.py` | 9 | 0.0 s | GUI WebUI delta coalescing |
 | `test_web_persistent_shell.py` | 8 | 1.4 s | The persistent shell (mu/gui/shell.py; Mu revision 2): browsers get one shell document |

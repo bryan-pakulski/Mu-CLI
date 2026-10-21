@@ -79,10 +79,28 @@
             }
         }, 3000);
     }
+    /* A paired browser on another machine: it can't pair or revoke others (this computer only),
+       so it sees which device it is and can sign itself out (back to the pairing page). */
+    async function asRemote() {
+        let me = null;
+        try { me = await call('GET', '/api/devices/self'); } catch (_) { return false; }
+        if (!me || !me.device) return false;
+        box.querySelector('[data-pair-start]').hidden = true;
+        list.innerHTML = `<li class="w-row"><span class="w-row__main"><span class="w-row__title">This browser: ${esc(me.device.name)}</span>
+            <span class="w-row__sub">Paired ${esc(when(me.device.created_at))}. Pairing and revoking other devices happen on the computer running μcli.</span></span>
+            <span class="w-row__actions"><button type="button" class="w-textbtn" data-tone="danger" data-sign-out>Sign out</button></span></li>`;
+        list.querySelector('[data-sign-out]').onclick = async () => {
+            if (!window.confirm('Sign this browser out? It needs a new pairing code to come back.')) return;
+            try { await call('DELETE', '/api/devices/self'); (window.top || window).location.reload(); }   // the whole shell, not just this view
+            catch (err) { window.WashToast?.show(err.message, 'danger'); }
+        };
+        return true;
+    }
+
     box.querySelector('[data-pair-start]').onclick = start;
     box.querySelector('[data-pair-cancel]').onclick = async () => {
         pair.hidden = true; clearInterval(timer);
         try { await call('DELETE', '/api/devices/pairing'); } catch (_) { /* expired anyway */ }
     };
-    refresh();
+    asRemote().then(remote => { if (!remote) refresh(); });
 })();

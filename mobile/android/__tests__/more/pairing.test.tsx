@@ -49,10 +49,10 @@ beforeEach(() => {
 
 describe('pairing links and codes', () => {
   it('reads the QR payload the computer shows', () => {
-    expect(parsePairingLink(`mucli://pair?code=K7QM-3XRT&url=${encodeURIComponent(BASE + '/')}`)).toEqual({ code: 'K7QM3XRT', url: BASE });
+    expect(parsePairingLink(`mucli://pair?code=K7QM-3XRT-AB2C&url=${encodeURIComponent(BASE + '/')}`)).toEqual({ code: 'K7QM3XRTAB2C', url: BASE });
     expect(parsePairingLink('mucli://pair?code=SHORT')).toBeNull();
-    expect(parsePairingLink('https://example.com/?code=K7QM3XRT')).toBeNull();
-    expect(normalizeCode(' k7qm-3xrt ')).toBe('K7QM3XRT');
+    expect(parsePairingLink('https://example.com/?code=K7QM3XRTAB2C')).toBeNull();
+    expect(normalizeCode(' k7qm-3xrt-ab2c ')).toBe('K7QM3XRTAB2C');
   });
 
   it('keeps one secure-store key per server, using only allowed characters', () => {
@@ -71,11 +71,11 @@ describe('pairing links and codes', () => {
 describe('devicesApi', () => {
   it('pairs, stores the token securely and signs later requests with it', async () => {
     fetchMock.mockImplementationOnce(() => respond(200, { token: 'tok-1', device: { id: 'd1', name: 'Pixel 8', created_at: 1, last_seen: 1, address: '' } }));
-    const device = await devicesApi.pair(BASE, 'k7qm-3xrt', 'Pixel 8');
+    const device = await devicesApi.pair(BASE, 'k7qm-3xrt-ab2c', 'Pixel 8');
     expect(device.name).toBe('Pixel 8');
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`${BASE}/api/devices/pair`);
-    expect(JSON.parse(init.body)).toEqual({ code: 'K7QM3XRT', device_name: 'Pixel 8' });
+    expect(JSON.parse(init.body)).toEqual({ code: 'K7QM3XRTAB2C', device_name: 'Pixel 8' });
     expect(store.get(tokenKey(BASE))).toBe('tok-1');
     expect(authHeaders(BASE)).toEqual({ Authorization: 'Bearer tok-1' });
     expect(authHeaders('http://other:30311')).toEqual({});
@@ -94,7 +94,7 @@ describe('devicesApi', () => {
 
   it('a wrong code surfaces the server message and stores nothing', async () => {
     fetchMock.mockImplementationOnce(() => respond(403, { detail: 'That pairing code is wrong or has expired.' }));
-    await expect(devicesApi.pair(BASE, 'AAAA-BBBB', 'Phone')).rejects.toThrow('That pairing code is wrong or has expired.');
+    await expect(devicesApi.pair(BASE, 'AAAA-BBBB-CCCC', 'Phone')).rejects.toThrow('That pairing code is wrong or has expired.');
     expect(store.size).toBe(0);
   });
 
@@ -144,7 +144,7 @@ describe('PairScreen', () => {
     useConnectionStore.setState({ pairingRequired: true });
     const ui = renderScreen();
     fireEvent.changeText(ui.getByTestId('pair-url'), BASE);
-    fireEvent.changeText(ui.getByTestId('pair-code'), 'k7qm-3xrt');
+    fireEvent.changeText(ui.getByTestId('pair-code'), 'k7qm-3xrt-ab2c');
     fireEvent.changeText(ui.getByTestId('pair-name'), 'My phone');
     await act(async () => { fireEvent.press(ui.getByTestId('pair-submit')); });
     await waitFor(() => expect(mockGoBack).toHaveBeenCalled());
@@ -165,7 +165,7 @@ describe('PairScreen', () => {
   it('shows the server\'s reason when the code is wrong', async () => {
     routeFetch(403);
     const ui = renderScreen();
-    fireEvent.changeText(ui.getByTestId('pair-code'), 'AAAABBBB');
+    fireEvent.changeText(ui.getByTestId('pair-code'), 'AAAABBBBCCCC');
     await act(async () => { fireEvent.press(ui.getByTestId('pair-submit')); });
     await waitFor(() => expect(ui.getByText('That pairing code is wrong or has expired.')).toBeTruthy());
     expect(mockGoBack).not.toHaveBeenCalled();
@@ -176,16 +176,30 @@ describe('PairScreen', () => {
     const ui = renderScreen();
     await act(async () => { fireEvent.press(ui.getByTestId('pair-scan')); });
     const camera = ui.getByTestId('camera-view');
-    await act(async () => { camera.props.onBarcodeScanned({ data: `mucli://pair?code=K7QM3XRT&url=${encodeURIComponent(BASE)}` }); });
+    await act(async () => { camera.props.onBarcodeScanned({ data: `mucli://pair?code=K7QM3XRTAB2C&url=${encodeURIComponent(BASE)}` }); });
     await waitFor(() => expect(store.get(tokenKey(BASE))).toBe('tok-2'));
   });
 
   it('fills the fields from a mucli://pair deep link', async () => {
     routeFetch();
-    mockParams = { url: BASE, code: 'K7QM3XRT' };
+    mockParams = { url: BASE, code: 'K7QM3XRTAB2C' };
     const ui = renderScreen();
     expect(ui.getByTestId('pair-url').props.value).toBe(BASE);
-    expect(ui.getByTestId('pair-code').props.value).toBe('K7QM3XRT');
+    expect(ui.getByTestId('pair-code').props.value).toBe('K7QM-3XRT-AB2C');   // shown in groups of four
+    await act(async () => undefined);
+  });
+});
+
+describe('the code field', () => {
+  it('starts empty with no example code, and groups what you type in fours', async () => {
+    const fetchMock2 = jest.fn(() => respond(401, { detail: 'Pair', pairing_required: true }));
+    (global as unknown as { fetch: unknown }).fetch = fetchMock2;
+    const ui = render(<ThemeProvider statusBar={false}><PairScreen /></ThemeProvider>);
+    const field = ui.getByTestId('pair-code');
+    expect(field.props.value).toBe('');
+    expect(field.props.placeholder).toBeUndefined();
+    fireEvent.changeText(field, 'k7qm3xrtab2czz');
+    expect(ui.getByTestId('pair-code').props.value).toBe('K7QM-3XRT-AB2C');   // 12 characters, no more
     await act(async () => undefined);
   });
 });

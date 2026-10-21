@@ -1,0 +1,44 @@
+{#- Pair this browser (mu/gui/devices.py DeviceGate): served to an unpaired browser on another
+    machine instead of any page. The operator starts a pairing on the computer running μcli
+    (Settings → Devices → Pair a device, or `mucli gui pair`); the code entered here is exchanged at
+    POST /api/devices/pair-browser for an HttpOnly device cookie, then the page returns to `next`.
+    Standalone: no app scripts (they would only meet 401s before pairing). -#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <meta name="robots" content="noindex">
+    <title>Pair this browser · μcli</title>
+    <link rel="icon" href="/static/icons/favicon.png" type="image/png">
+    {% include "partials/theme_bootstrap.html" %}
+    <link rel="stylesheet" href="/static/css/wash/wash.css">
+    <script src="/static/js/route_theme.js" defer></script>
+    <script src="/static/js/pair.js" defer></script>
+</head>
+<body class="mu-pairpage" data-ambient="dawn">
+    <main class="mu-pairpage__card" aria-labelledby="pair-title">
+        <p class="mu-pairpage__mark" aria-hidden="true">μ</p>
+        <h1 class="mu-pairpage__title" id="pair-title">Pair this browser</h1>
+        <p class="mu-pairpage__lede">This μcli only answers devices its owner has paired. On the computer running μcli, open <strong>Settings → Devices → Pair a device</strong> (or run <code>mucli gui pair</code>), then enter the code it shows.</p>
+        <form class="w-form mu-pairpage__form" data-pair-form data-next="{{ next }}" data-locked-for="{{ locked_for }}" data-code-length="{{ code_length }}" novalidate>
+            <label class="w-field">
+                <span class="w-field__label">Pairing code</span>
+                <input class="w-input mu-pairpage__code" data-mono name="code" data-pair-code required
+                       autocomplete="one-time-code" autocapitalize="characters" autocorrect="off" spellcheck="false"
+                       inputmode="text" maxlength="{{ code_length + (code_length // 4) - 1 }}" aria-describedby="pair-status">
+            </label>
+            <label class="w-field">
+                <span class="w-field__label">Name for this browser</span>
+                <input class="w-input" name="device_name" data-pair-name maxlength="60" autocomplete="off">
+                <span class="w-field__hint">How it appears in Settings → Devices, where it can be revoked.</span>
+            </label>
+            <p class="mu-pairpage__status" id="pair-status" role="status" aria-live="polite" data-pair-status></p>
+            <div class="w-form__actions">
+                <button type="submit" class="w-btn" data-variant="primary" data-pair-submit>Pair</button>
+            </div>
+        </form>
+    </main>
+</body>
+</html>

@@ -1,7 +1,7 @@
 // Pair with mucli (documentation/plans/mobile_parity.md §7a): the phone signs in by pairing.
 //
 // On the computer, Settings → Devices → Pair a device (or `mucli gui pair`) shows a QR code and an
-// 8-character code. Scan the QR (it carries the GUI address and the code) or type both. The code
+// 12-character code. Scan the QR (it carries the GUI address and the code) or type both. The code
 // is exchanged for this phone's token, kept in the secure store. A `mucli://pair?...` link (the QR
 // opened from the system camera) lands here with the fields filled in.
 
@@ -10,7 +10,7 @@ import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { devicesApi, type PairedDevice } from '../api/devices';
-import { normalizeBase, normalizeCode, parsePairingLink } from '../api/auth';
+import { PAIRING_CODE_LENGTH, displayCode, normalizeBase, normalizeCode, parsePairingLink } from '../api/auth';
 import { checkHealth } from '../api/client';
 import { reconnectAllStreams } from '../api/sse';
 import { validateBaseUrl } from '../api/urlSafety';
@@ -32,7 +32,7 @@ export function PairScreen() {
   const toast = useToast();
   const store = useConnectionStore();
   const [url, setUrl] = useState<string>(route.params?.url || store.baseUrl);
-  const [code, setCode] = useState<string>(route.params?.code || '');
+  const [code, setCode] = useState<string>(displayCode(route.params?.code || ''));
   const [name, setName] = useState(defaultDeviceName());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -42,7 +42,7 @@ export function PairScreen() {
 
   useEffect(() => {
     if (route.params?.url) setUrl(route.params.url);
-    if (route.params?.code) setCode(route.params.code);
+    if (route.params?.code) setCode(displayCode(route.params.code));
   }, [route.params?.url, route.params?.code]);
 
   useEffect(() => {
@@ -56,7 +56,7 @@ export function PairScreen() {
     setError('');
     const validated = validateBaseUrl(targetUrl);
     if (!validated.ok) { setError(validated.error); return; }
-    if (normalizeCode(targetCode).length !== 8) { setError('The code has 8 letters and digits, e.g. K7QM-3XRT.'); return; }
+    if (normalizeCode(targetCode).length !== PAIRING_CODE_LENGTH) { setError(`The code has ${PAIRING_CODE_LENGTH} letters and digits, as shown on the computer.`); return; }
     setBusy(true);
     try {
       if (!(await checkHealth(validated.url, { timeoutMs: 6_000 }))) {
@@ -86,7 +86,7 @@ export function PairScreen() {
     setScanning(false);
     const target = link.url || url;
     setUrl(target);
-    setCode(link.code);
+    setCode(displayCode(link.code));
     void pair(target, link.code);
   }, [pair, url]);
 
@@ -120,7 +120,7 @@ export function PairScreen() {
           <TextField value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" testID="pair-url" />
         </Field>
         <Field label="Pairing code">
-          <TextField value={code} onChangeText={t => setCode(t.toUpperCase())} autoCapitalize="characters" autoCorrect={false} mono placeholder="K7QM-3XRT" testID="pair-code" />
+          <TextField value={code} onChangeText={t => setCode(displayCode(t))} autoCapitalize="characters" autoCorrect={false} mono maxLength={PAIRING_CODE_LENGTH + PAIRING_CODE_LENGTH / 4 - 1} testID="pair-code" />
         </Field>
         <Field label="This phone's name" hint="How it appears in Settings → Devices">
           <TextField value={name} onChangeText={setName} testID="pair-name" />

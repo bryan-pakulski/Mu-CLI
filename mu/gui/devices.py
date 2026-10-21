@@ -2,13 +2,20 @@
 
 The GUI has no accounts. Loopback clients (this machine) are trusted as before. A remote client must
 be *paired*: the operator starts a pairing on this machine (Settings → Devices, or ``mucli gui pair``),
-which shows an 8-character code (and a QR code carrying the GUI address and the code). The device sends
+which shows a 12-character code (and a QR code carrying the GUI address and the code). The device sends
 ``POST /api/devices/pair {code, device_name}`` and gets a device token. From then on it sends
 ``Authorization: Bearer <token>`` on every HTTP, SSE and WebSocket request.
 
 * Codes live in memory only, expire after 10 minutes and are single use. They are compared in constant
-  time, attempts are rate-limited per client address and overall, and a wrong code never says whether
-  a pairing is pending.
+  time and a wrong code never says whether a pairing is pending. Attempts are rate-limited per client
+  address and overall, and wrong codes lock out with exponential backoff: after ``FREE_FAILURES`` wrong
+  codes a client waits ``LOCKOUT_BASE_S`` seconds, doubling with every further wrong code up to
+  ``LOCKOUT_MAX_S``; many wrong codes across all clients lock pairing out for everyone and cancel the
+  pending codes (a distributed guess can't keep going). A correct code clears the client's record.
+* A browser on another machine pairs on the page the gate serves to unpaired browsers: the token goes
+  into an ``HttpOnly``, ``SameSite=Strict`` cookie (never readable by page scripts, never sent by other
+  sites). Cookie-authenticated requests keep the browser CSRF checks; state-changing requests and
+  WebSockets must also come from the same origin.
 * Tokens are 32 random bytes. Only their SHA-256 is stored, in ``$MUCLI_HOME/devices.json`` (0600),
   with the device's name, creation time, last-seen time and address.
 * Revoking a device takes effect on the next request; long-lived streams re-check (``still_paired``).
@@ -31,10 +38,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 CODE_TTL_S = 600.0
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # no 0/O, 1/I
-CODE_LENGTH = 8
+CODE_LENGTH = 12              # shown as XXXX-XXXX-XXXX (32^12 ≈ 1.2e18 codes)
 ATTEMPTS_PER_CLIENT = 5        # per window, per client address
 ATTEMPTS_GLOBAL = 30           # per window, all clients (slows distributed guessing)
 ATTEMPT_WINDOW_S = 60.0
+FREE_FAILURES = 5              # wrong codes from one client before lockouts start
+LOCKOUT_BASE_S = 30.0          # first lockout; doubles with each further wrong code
+LOCKOUT_MAX_S = 3600.0
+GLOBAL_FREE_FAILURES = 30      # wrong codes from all clients (within FAILURE_MEMORY_S) before a global lockout
+GLOBAL_LOCKOUT_BASE_S = 60.0
+FAILURE_MEMORY_S = 24 * 3600.0  # a client's wrong codes are forgotten after a quiet day
+COOKIE_NAME = "mucli_device"
+COOKIE_MAX_AGE_S = 400 * 24 * 3600
 LAST_SEEN_EVERY_S = 60.0
 LOOPBACK_HOSTS = {"localhost", "testclient"}
 
@@ -55,7 +70,7 @@ def normalize_code(code: str) -> str:
 
 def display_code(code: str) -> str:
     code = normalize_code(code)
-    return f"{code[:4]}-{code[4:]}" if len(code) == CODE_LENGTH else code
+    return "-".join(code[i:i + 4] for i in range(0, len(code), 4)) if len(code) == CODE_LENGTH else code
 
 
 def _hash(token: str) -> str:
@@ -88,12 +103,36 @@ class _Attempts:
     stamps: List[float] = field(default_factory=list)
 
 
+@dataclass
+class _Failures:
+    count: int = 0
+    last: float = 0.0
+    locked_until: float = 0.0
+
+
+def lockout_seconds(failures: int, *, free: int = FREE_FAILURES, base: float = LOCKOUT_BASE_S,
+                    cap: float = LOCKOUT_MAX_S) -> float:
+    """The lockout after ``failures`` wrong codes: none up to ``free``, then base, 2×base, 4×base … ≤ cap."""
+    if failures < free:
+        return 0.0
+    return min(cap, base * (2 ** min(failures - free, 32)))
+
+
+def _wait_text(seconds: float) -> str:
+    seconds = max(1, int(seconds + 0.999))
+    if seconds < 90:
+        return f"{seconds} seconds"
+    minutes = (seconds + 59) // 60
+    return f"{minutes} minutes" if minutes < 90 else f"{(minutes + 59) // 60} hours"
+
+
 class PairingError(Exception):
     """A pairing attempt failed. The message never reveals whether a code is pending."""
 
-    def __init__(self, message: str, status: int = 401):
+    def __init__(self, message: str, status: int = 401, retry_after: float = 0.0):
         super().__init__(message)
         self.status = status
+        self.retry_after = retry_after
 
 
 class DeviceStore:
@@ -104,6 +143,8 @@ class DeviceStore:
         self._pending: List[_Pending] = []
         self._attempts: Dict[str, _Attempts] = {}
         self._global: _Attempts = _Attempts()
+        self._failures: Dict[str, _Failures] = {}
+        self._global_failures: _Failures = _Failures()
         self._devices: Dict[str, Device] = {}
         self._by_hash: Dict[str, str] = {}
         self._load()
@@ -164,22 +205,67 @@ class DeviceStore:
         self._global.stamps.append(now)
         return False
 
+    def lockout_remaining(self, client: str = "") -> float:
+        """Seconds until ``client`` may try a code again: its wrong-code lockout, the global one, or
+        the per-minute attempt limits (its own and everyone's); 0 = now."""
+        now = self._clock()
+        with self._lock:
+            own = self._failures.get(client or "?")
+            waits = [0.0, (own.locked_until if own else 0.0) - now, self._global_failures.locked_until - now]
+            for bucket, limit in ((self._attempts.get(client or "?"), ATTEMPTS_PER_CLIENT), (self._global, ATTEMPTS_GLOBAL)):
+                recent = sorted(t for t in (bucket.stamps if bucket else []) if now - t < ATTEMPT_WINDOW_S)
+                if len(recent) >= limit:
+                    waits.append(recent[-limit] + ATTEMPT_WINDOW_S - now)
+            return max(waits)
+
+    def _record_failure(self, client: str, now: float) -> float:
+        """Count a wrong code; returns the lockout it starts (0 = none)."""
+        record = self._failures.setdefault(client or "?", _Failures())
+        if record.last and now - record.last > FAILURE_MEMORY_S:
+            record.count = 0
+        record.count += 1
+        record.last = now
+        wait = lockout_seconds(record.count)
+        if wait:
+            record.locked_until = now + wait
+        g = self._global_failures
+        if g.last and now - g.last > FAILURE_MEMORY_S:
+            g.count = 0
+        g.count += 1
+        g.last = now
+        global_wait = lockout_seconds(g.count, free=GLOBAL_FREE_FAILURES, base=GLOBAL_LOCKOUT_BASE_S)
+        if global_wait:
+            g.locked_until = now + global_wait
+            self._pending = []      # a distributed guess can't keep working on a live code
+        return max(wait, global_wait)
+
     def pair(self, code: str, device_name: str, *, client: str = "") -> Tuple[str, Device]:
         """Exchange a pending code for a device token; returns (token, device)."""
         now = self._clock()
         wanted = normalize_code(code).encode("utf-8")
         name = " ".join(str(device_name or "").split())[:60] or "Device"
         with self._lock:
+            own = self._failures.get(client or "?")
+            lockout = max((own.locked_until if own else 0.0), self._global_failures.locked_until) - now
+            if lockout > 0:
+                raise PairingError(f"Too many wrong codes. Try again in {_wait_text(lockout)}.", status=429,
+                                   retry_after=lockout)
             if self._throttled(client, now):
-                raise PairingError("Too many attempts. Wait a minute and try again.", status=429)
+                wait = max(1.0, self.lockout_remaining(client))
+                raise PairingError(f"Too many attempts. Try again in {_wait_text(wait)}.", status=429, retry_after=wait)
             match = None
             for pending in self._pending:      # compare against every pending code, in constant time
                 ok = hmac.compare_digest(pending.code.encode("utf-8"), wanted)
                 if ok and pending.expires_at > now:
                     match = pending
             if match is None:
+                wait = self._record_failure(client, now)
+                if wait:
+                    raise PairingError(f"That code isn't valid. Too many wrong codes: try again in {_wait_text(wait)}.",
+                                       status=429, retry_after=wait)
                 raise PairingError("That code isn't valid. Start a new pairing on the computer and try again.")
             self._pending.remove(match)                                   # single use
+            self._failures.pop(client or "?", None)
             token = secrets.token_urlsafe(32)
             device = Device(id=secrets.token_hex(6), name=name, token_hash=_hash(token), created_at=now,
                             last_seen=now, address=str(client or ""))
@@ -245,9 +331,46 @@ def client_host(scope_or_request) -> str:
 
 
 def request_device(request) -> Optional[Device]:
-    """The paired device behind this request (set by the gate), or None (loopback / browser)."""
+    """The paired device behind this request (set by the gate), or None (loopback)."""
     state = getattr(request, "state", None)
     return getattr(state, "device", None) if state is not None else None
+
+
+def request_auth(request) -> str:
+    """How the gate authenticated this request: "bearer" (an app's token), "cookie" (a paired
+    browser) or "" (loopback)."""
+    state = getattr(request, "state", None)
+    return str(getattr(state, "device_auth", "") or "") if state is not None else ""
+
+
+def cookie_token(headers) -> str:
+    """The paired browser's token from the ``mucli_device`` cookie ('' when absent)."""
+    raw = str(headers.get("cookie") or "")
+    for part in raw.split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == COOKIE_NAME:
+            return value.strip()
+    return ""
+
+
+def device_cookie(token: str, *, secure: bool = False) -> str:
+    """Set-Cookie value for a paired browser: HttpOnly (no page script reads it), SameSite=Strict
+    (no other site's request carries it)."""
+    return (f"{COOKIE_NAME}={token}; Max-Age={COOKIE_MAX_AGE_S}; Path=/; HttpOnly; SameSite=Strict"
+            + ("; Secure" if secure else ""))
+
+
+def clear_device_cookie() -> str:
+    return f"{COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict"
+
+
+def _same_origin(headers) -> bool:
+    """A browser request from this GUI's own pages (Origin absent, or its host:port is ours)."""
+    origin = str(headers.get("origin") or "")
+    if not origin or origin == "null":
+        return not origin
+    from urllib.parse import urlsplit
+    return urlsplit(origin).netloc.lower() == str(headers.get("host") or "").lower()
 
 
 def still_paired(request) -> bool:
@@ -259,13 +382,36 @@ def still_paired(request) -> bool:
     return bool(store and store.is_active(device.id))
 
 
-OPEN_PATHS = ("/healthz", "/api/devices/pair")
+OPEN_PATHS = ("/healthz", "/api/devices/pair", "/api/devices/pair-browser")
+# The pairing page's assets (public code: stylesheets, scripts, fonts, icons, art) load unpaired.
+OPEN_PREFIXES = ("/static/",)
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _pair_page(scope, path: str) -> bytes:
+    """The browser pairing page (templates/pair.html), returning to ``path`` once paired."""
+    from urllib.parse import quote
+    app = scope.get("app")
+    templates = getattr(getattr(app, "state", None), "templates", None)
+    query = (scope.get("query_string") or b"").decode("latin-1")
+    target = path + (f"?{query}" if query else "")
+    if not target.startswith("/") or target.startswith("//"):
+        target = "/"
+    if templates is None:
+        return b"<!doctype html><title>Pair this browser</title><p>Pair this browser from Settings - Devices on the computer.</p>"
+    store = getattr(app.state, "devices", None)
+    locked = store.lockout_remaining(client_host(scope)) if store is not None else 0.0
+    html = templates.get_template("pair.html").render(next=quote(target, safe="/?=&%-._~"), locked_for=int(locked + 0.999),
+                                                       code_length=CODE_LENGTH)
+    return html.encode("utf-8")
 
 
 class DeviceGate:
     """ASGI middleware: every request from a non-loopback client (HTTP, SSE and WebSocket) needs a
-    paired device's bearer token. Loopback is unchanged. ``/healthz`` and the pairing endpoint are
-    open. The authenticated device rides on ``request.state.device``."""
+    paired device — an app's bearer token or a paired browser's cookie. Loopback is unchanged.
+    ``/healthz``, the pairing endpoints and static assets are open; an unpaired browser asking for a
+    page gets the pairing page. The device rides on ``request.state.device`` (and how it signed in
+    on ``request.state.device_auth``)."""
 
     def __init__(self, app):
         self.app = app
@@ -276,19 +422,39 @@ class DeviceGate:
             return await self.app(scope, receive, send)
         host = client_host(scope)
         path = scope.get("path") or ""
-        if is_loopback(host) or path in OPEN_PATHS:
+        if is_loopback(host) or path in OPEN_PATHS or path.startswith(OPEN_PREFIXES):
             return await self.app(scope, receive, send)
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
         store = getattr(scope.get("app").state, "devices", None) if scope.get("app") is not None else None
-        device = store.authenticate(bearer_token(headers), client=host) if store is not None else None
+        auth = ""
+        device = None
+        if store is not None:
+            device = store.authenticate(bearer_token(headers), client=host)
+            auth = "bearer" if device is not None else ""
+            if device is None:
+                device = store.authenticate(cookie_token(headers), client=host)
+                auth = "cookie" if device is not None else ""
+        method = str(scope.get("method") or "GET").upper()
+        if device is not None and auth == "cookie" and (kind == "websocket" or method in UNSAFE_METHODS) \
+                and not _same_origin(headers):
+            device = None                       # another site driving the paired browser: refuse
         if device is not None:
-            scope.setdefault("state", {})["device"] = device
+            state = scope.setdefault("state", {})
+            state["device"] = device
+            state["device_auth"] = auth
             return await self.app(scope, receive, send)
         if kind == "websocket":
             await receive()                                             # websocket.connect
             await send({"type": "websocket.close", "code": 1008, "reason": "Pair this device first"})
             return
-        body = json.dumps({"detail": "This device isn't paired. Pair it from Settings → Devices on the computer.",
+        if method in ("GET", "HEAD") and "text/html" in str(headers.get("accept") or ""):
+            page = _pair_page(scope, path)
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"content-type", b"text/html; charset=utf-8"), (b"cache-control", b"no-store"),
+                                    (b"content-length", str(len(page)).encode())]})
+            await send({"type": "http.response.body", "body": page if method == "GET" else b""})
+            return
+        body = json.dumps({"detail": "This device isn't paired. Start a pairing on the computer (Settings → Devices) and enter the code on this device.",
                            "pairing_required": True}).encode("utf-8")
         await send({"type": "http.response.start", "status": 401,
                     "headers": [(b"content-type", b"application/json"), (b"www-authenticate", b"Bearer"),

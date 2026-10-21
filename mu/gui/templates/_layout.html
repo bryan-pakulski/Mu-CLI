@@ -53,6 +53,8 @@
     <link rel="icon" href="/static/icons/favicon.png" type="image/png">
     <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
     {% include "partials/theme_bootstrap.html" %}
+    {#- Before every other script: a revoked remote browser drops to the pairing page (pairing_guard.js). #}
+    <script src="/static/js/pairing_guard.js"></script>
     <link rel="preload" href="/static/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/static/css/wash/wash.css">
     {% block page_css %}{% endblock %}

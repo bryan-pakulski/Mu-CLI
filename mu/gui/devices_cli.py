@@ -70,7 +70,8 @@ def main(argv) -> int:
         if pairing.get("listening_on_loopback"):
             console.print("[wash.caution]The GUI only listens on this computer.[/] To reach it from a phone, restart it with "
                           "MUCLI_GUI_ALLOW_REMOTE=1 mucli --gui --host 0.0.0.0")
-        console.print("In the app: More → Settings → Devices, then scan the code or type the address and code.")
+        console.print("In the app: More → Settings → Devices, then scan the code or type the address and code. "
+                      "In a browser on another machine: open the GUI address and enter the code.")
         return 0
     if args.action == "revoke":
         if not args.name:

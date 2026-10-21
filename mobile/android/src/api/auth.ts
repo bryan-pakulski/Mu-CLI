@@ -61,7 +61,15 @@ export function isPairingRequired(status: number, body: unknown): boolean {
 /** Test hook. */
 export function resetAuthCache(): void { cache.clear(); }
 
-/** A pairing link (QR / deep link): `mucli://pair?code=K7QMR3XT&url=http://192.168.1.5:30311`. */
+/** Pairing codes are 12 letters and digits (mu/gui/devices.py CODE_LENGTH), shown as XXXX-XXXX-XXXX. */
+export const PAIRING_CODE_LENGTH = 12;
+
+/** Groups of four as typed: XXXX-XXXX-XXXX. */
+export function displayCode(code: string): string {
+  return (normalizeCode(code).slice(0, PAIRING_CODE_LENGTH).match(/.{1,4}/g) || []).join('-');
+}
+
+/** A pairing link (QR / deep link): `mucli://pair?code=<12 characters>&url=http://192.168.1.5:30311`. */
 export function parsePairingLink(link: string): { code: string; url: string } | null {
   const text = String(link || '').trim();
   const match = /^mucli:\/\/pair\?(.*)$/i.exec(text);
@@ -72,7 +80,7 @@ export function parsePairingLink(link: string): { code: string; url: string } | 
     if (k) { try { params[decodeURIComponent(k)] = decodeURIComponent(v); } catch { params[k] = v; } }
   }
   const code = normalizeCode(params.code || '');
-  return code.length === 8 ? { code, url: normalizeBase(params.url || '') } : null;
+  return code.length === PAIRING_CODE_LENGTH ? { code, url: normalizeBase(params.url || '') } : null;
 }
 
 export function normalizeCode(code: string): string {

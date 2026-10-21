@@ -334,16 +334,28 @@ Binding elsewhere needs `MUCLI_GUI_ALLOW_REMOTE=1` (`mu/gui/launcher.py`), and o
 reached, **every non-loopback client must be a paired device**:
 
 - **Pairing.** On the computer, Settings → Devices → Pair a device (or `mucli gui pair`) shows a
-  QR code and an 8-character code, valid for 10 minutes and for one use. The phone sends
+  QR code and an 12-character code, valid for 10 minutes and for one use. The phone sends
   `POST /api/devices/pair {code, device_name}` and receives a device token (32 random bytes). The
   server keeps only its SHA-256 hash, with the name, creation and last-seen times and address, in
-  `$MUCLI_HOME/devices.json` (mode 0600). Codes are compared in constant time, attempts are
-  rate-limited (per client and globally), and a wrong code never reveals whether a pairing is
-  pending. Starting or cancelling a pairing is local-only (loopback plus CSRF).
+  `$MUCLI_HOME/devices.json` (mode 0600). Codes are compared in constant time and a wrong code
+  never reveals whether a pairing is pending. Attempts are limited per client (5 a minute) and
+  globally (30 a minute), and wrong codes lock out with exponential backoff: after 5 wrong codes a
+  client waits 30 s, doubling with every further wrong code up to an hour (forgotten after a quiet
+  day; a correct code clears it). 30 wrong codes across all clients lock pairing out for everyone
+  with the same backoff and cancel the pending codes, so a distributed guess can't keep working on
+  a live code. Lockouts answer 429 with `Retry-After`; the pairing page counts down. Starting or cancelling a pairing is local-only (loopback plus CSRF).
 - **Every request.** `DeviceGate` (`mu/gui/devices.py`), the outermost middleware, answers 401
-  `{pairing_required: true}` to a non-loopback HTTP request without a valid
-  `Authorization: Bearer` token, and closes such a WebSocket with 1008. The only open paths are
-  `/healthz` and the pairing endpoint. Loopback clients are unaffected.
+  `{pairing_required: true}` to a non-loopback HTTP request without a paired device, and closes
+  such a WebSocket with 1008. The open paths are `/healthz`, the two pairing endpoints and
+  `/static/` (public stylesheets and scripts). Loopback clients are unaffected.
+- **Browsers on other machines.** An unpaired browser asking for any page gets the pairing page
+  (`templates/pair.html`) instead: it enters the code, `POST /api/devices/pair-browser` exchanges it,
+  and the token goes into an `HttpOnly`, `SameSite=Strict` cookie (`mucli_device`), never into the
+  response body, so page scripts can't read it and other sites' requests never carry it. A
+  cookie-authenticated request keeps every browser CSRF check, and a state-changing request or a
+  WebSocket whose `Origin` isn't the GUI's own is refused. Apps (the phone) send
+  `Authorization: Bearer` instead. Over plain HTTP on a LAN the token can be sniffed like any
+  credential: use HTTPS (a reverse proxy) on untrusted networks, where the cookie is `Secure`.
 - **CSRF.** Bearer-authenticated requests are exempt: a browser can't attach `Authorization`
   cross-site without a preflight, which the GUI never allows. Browser sessions keep CSRF.
 - **Terminal and lifecycle.** The container shell WebSocket and the container lifecycle routes

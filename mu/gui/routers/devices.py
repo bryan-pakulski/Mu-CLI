@@ -2,17 +2,22 @@
 
 Operator routes (start a pairing, list, revoke) are loopback-only and CSRF-checked for browsers: a
 paired phone can never pair other devices or see the list. The device itself may check who it is and
-sign out. ``POST /api/devices/pair`` is the one route a non-loopback client may call unpaired.
+sign out. ``POST /api/devices/pair`` (apps: the token in the body) and ``POST /api/devices/pair-browser``
+(a browser on another machine: the token in an HttpOnly cookie) are the routes a non-loopback client may
+call unpaired.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from mu.gui import csrf
-from mu.gui.devices import PairingError, client_host, display_code, is_loopback, request_device
+from mu.gui.devices import (
+    PairingError, clear_device_cookie, client_host, device_cookie, display_code, is_loopback, request_auth,
+    request_device,
+)
 
 router = APIRouter()
 
@@ -70,7 +75,7 @@ def _bound_to_loopback(request: Request) -> bool:
 
 @router.post("/api/devices/pairing", dependencies=[Depends(require_operator)])
 def start_pairing(request: Request):
-    """Start a pairing: an 8-character code (10 minutes, single use) and a QR code carrying the
+    """Start a pairing: an 12-character code (10 minutes, single use) and a QR code carrying the
     GUI address and the code."""
     pairing = _store(request).start_pairing(created_by=client_host(request))
     urls = _addresses(request)
@@ -91,30 +96,52 @@ def cancel_pairing(request: Request):
     return {"ok": True}
 
 
+def _pair(request: Request, payload: Dict[str, Any]):
+    try:
+        return _store(request).pair(str(payload.get("code") or ""), str(payload.get("device_name") or ""),
+                                    client=client_host(request))
+    except PairingError as exc:
+        headers = {"Retry-After": str(int(exc.retry_after + 0.999))} if exc.retry_after else None
+        raise HTTPException(exc.status, str(exc), headers=headers) from exc
+
+
 @router.post("/api/devices/pair")
 def pair(request: Request, payload: Dict[str, Any]):
     """A device exchanges a pairing code for its token (shown once; store it securely)."""
-    try:
-        token, device = _store(request).pair(str(payload.get("code") or ""), str(payload.get("device_name") or ""),
-                                             client=client_host(request))
-    except PairingError as exc:
-        raise HTTPException(exc.status, str(exc)) from exc
+    token, device = _pair(request, payload)
     return {"token": token, "device": device.public()}
+
+
+@router.post("/api/devices/pair-browser")
+def pair_browser(request: Request, response: Response, payload: Dict[str, Any]):
+    """A browser on another machine pairs from the pairing page: the token goes into an HttpOnly,
+    SameSite=Strict cookie and never into the body, so page scripts can't read it."""
+    if not is_loopback(client_host(request)):
+        origin = str(request.headers.get("origin") or "")
+        from urllib.parse import urlsplit
+        if origin and urlsplit(origin).netloc.lower() != str(request.headers.get("host") or "").lower():
+            raise HTTPException(403, "cross-origin request refused")
+    token, device = _pair(request, payload)
+    response.headers["set-cookie"] = device_cookie(token, secure=request.url.scheme == "https")
+    return {"device": device.public()}
 
 
 # /self before /{device_id}, or DELETE /api/devices/self would match the operator route.
 @router.get("/api/devices/self")
 def whoami(request: Request):
     device = request_device(request)
-    return {"device": device.public() if device else None, "loopback": device is None}
+    return {"device": device.public() if device else None, "loopback": device is None,
+            "auth": request_auth(request) or None}
 
 
 @router.delete("/api/devices/self")
-def sign_out(request: Request):
+def sign_out(request: Request, response: Response):
     device = request_device(request)
     if device is None:
         raise HTTPException(400, "this request isn't from a paired device")
     _store(request).revoke(device.id)
+    if request_auth(request) == "cookie":
+        response.headers["set-cookie"] = clear_device_cookie()
     return {"ok": True}
 
 

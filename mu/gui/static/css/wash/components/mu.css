@@ -899,3 +899,36 @@ kbd {
 .w-glassctl { display: inline-flex; align-items: center; gap: var(--wash-space-3); }
 .w-glassctl .w-slider { width: 160px; }
 .w-glassctl output { min-width: 3.5ch; color: var(--wash-ink-2); font-variant-numeric: tabular-nums; text-align: right; }
+
+/* Pair this browser (templates/pair.html): one card on the watercolour, served to unpaired
+   browsers on other machines. */
+.mu-pairpage { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: var(--wash-space-5); }
+.mu-pairpage__card {
+    position: relative;
+    width: min(440px, 100%);
+    padding: var(--wash-space-6);
+    border: 1px solid var(--wash-hairline);
+    border-radius: var(--wash-radius-xl);
+    background: var(--wash-surface);
+    box-shadow: var(--wash-elevation-3);
+    display: grid;
+    gap: var(--wash-space-3);
+}
+.mu-pairpage__mark {
+    width: var(--wash-size-control-lg); height: var(--wash-size-control-lg);
+    display: grid; place-items: center; margin: 0;
+    border-radius: var(--wash-radius-md);
+    background: var(--wash-ink); color: var(--wash-on-ink);
+    font-size: var(--wash-type-title-3-size); font-weight: 600;
+}
+.mu-pairpage__title {
+    margin: 0; color: var(--wash-plum);
+    font-size: var(--wash-type-title-2-size); line-height: var(--wash-type-title-2-line); font-weight: var(--wash-type-title-2-weight);
+}
+.mu-pairpage__lede { margin: 0; color: var(--wash-ink-2); font-size: var(--wash-type-body-size); line-height: var(--wash-type-body-line); }
+.mu-pairpage__lede code { font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-size); }
+.mu-pairpage__form { margin-top: var(--wash-space-2); }
+.mu-pairpage__code { letter-spacing: 0.12em; text-transform: uppercase; font-size: var(--wash-type-title-3-size); height: var(--wash-size-control-lg); }
+.mu-pairpage__status { min-height: var(--wash-type-caption-line); margin: 0; color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); line-height: var(--wash-type-caption-line); }
+.mu-pairpage__status[data-tone="danger"] { color: var(--wash-danger-ink); }
+.mu-pairpage__status[data-tone="ok"] { color: var(--wash-ok-ink); }

@@ -84,7 +84,7 @@ The phone signs in by **pairing** (see `documentation/security.md` §8).
 1. On the computer, run the GUI so the phone can reach it:
    `MUCLI_GUI_ALLOW_REMOTE=1 mucli --gui --host 0.0.0.0`.
 2. Open **Settings → Devices → Pair a device** in the browser (or run `mucli gui pair`). It shows
-   a QR code and an 8-character code, valid for 10 minutes.
+   a QR code and an 12-character code, valid for 10 minutes.
 3. In the app, open **More → Settings → Devices** (or tap **Pair** on the banner) and scan the
    code, or type the address and the code.
 4. The token is kept in the Android keystore (expo-secure-store), one per server, and signs every

@@ -262,3 +262,43 @@ def test_enrol_rate_limit(master):
         except TransportError as exc:
             codes.append(429 if "429" in str(exc) else 0)
     assert 429 in codes and codes[0] == 403
+
+
+def _python_stub(directory, name, version):
+    """A fake interpreter that answers the installer's version check and prints its version."""
+    path = directory / name
+    major, minor = version
+    path.write_text("#!/bin/sh\n"
+                    f'case "$*" in *version_info*) exit {0 if (major, minor) >= (3, 10) else 1} ;; esac\n'
+                    f'echo {major}.{minor}.0\n')
+    path.chmod(0o755)
+
+
+@pytest.mark.parametrize("stubs,expect", [
+    ([("python3", (3, 9)), ("python3.11", (3, 11))], "python3.11"),       # Amazon Linux 2023 / RHEL 9
+    ([("python3", (3, 12))], "python3"),                                  # Debian 13 / Ubuntu 24.04
+    ([("python3", (3, 9))], None),                                        # nothing new enough: refuse
+])
+def test_the_installer_picks_a_new_python_and_leaves_the_system_one_alone(master, tmp_path, stubs, expect):
+    """The agent needs 3.10+, but the system python3 on AL2023/RHEL 9 is 3.9 and dnf depends on it:
+    the installer must find a newer interpreter itself, never require python3 to be repointed."""
+    import shutil
+    import subprocess
+    orch, _endpoint, _status = master
+    from mu.orchestration import zipapp
+    bash = shutil.which("bash")
+    script = zipapp.install_script(orch, token="mjt_x", name="n1")
+    assert subprocess.run([bash, "-n"], input=script, text=True).returncode == 0       # it parses
+    start = script.index('PY=""')
+    block = script[start:script.index("exit 1; }", start) + len("exit 1; }")]     # the discovery step only
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for name, version in stubs:
+        _python_stub(bindir, name, version)
+    probe = block + '\necho "CHOSEN=$PY"\n'
+    out = subprocess.run([bash, "-c", probe], text=True, capture_output=True, env={"PATH": str(bindir)})
+    if expect:
+        assert out.returncode == 0 and out.stdout.strip() == f"CHOSEN={bindir / expect}", out
+    else:
+        assert out.returncode == 1 and "dnf install python3.11" in out.stderr
+    assert zipapp.AGENT_PYTHON in zipapp.UNIT and "/usr/bin/python3" not in script

@@ -40,6 +40,12 @@ allow_remote_policy: true         # the operator may edit this file from the mas
 """
 
 
+# The agent's own interpreter: a link the installer points at the first Python 3.10+ it finds
+# (python3.13 … python3.10, then python3). The system ``python3`` is never changed: on Amazon
+# Linux 2023 and RHEL 9 it is 3.9 and dnf, yum and needs-restarting depend on it.
+AGENT_PYTHON = "/usr/local/lib/mucli-node/python"
+PYTHON_CANDIDATES = ("python3.13", "python3.12", "python3.11", "python3.10", "python3")
+
 UNIT = """[Unit]
 Description=mucli orchestration node agent
 After=network-online.target
@@ -47,7 +53,7 @@ Wants=network-online.target
 
 [Service]
 User=mucli-node
-ExecStart=/usr/bin/python3 -I /usr/local/lib/mucli-node/mucli-node.pyz --state-dir /var/lib/mucli-node --etc-dir /etc/mucli-node run
+ExecStart=/usr/local/lib/mucli-node/python -I /usr/local/lib/mucli-node/mucli-node.pyz --state-dir /var/lib/mucli-node --etc-dir /etc/mucli-node run
 Restart=always
 RestartSec=5
 ProtectHome=read-only
@@ -118,12 +124,23 @@ done
 [ -n "$TOKEN" ] || {{ echo "--token is required" >&2; exit 2; }}
 [ "$(id -u)" = 0 ] || {{ echo "run as root" >&2; exit 1; }}
 command -v systemd-run >/dev/null || {{ echo "mucli-node needs Linux with systemd" >&2; exit 1; }}
-python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' || {{ echo "python3 >= 3.10 required" >&2; exit 1; }}
+# The agent needs Python 3.10+. Use the newest one installed and leave the system python3 alone
+# (Amazon Linux 2023 / RHEL 9 ship 3.9 as python3, and dnf depends on it).
+PY=""
+for candidate in {" ".join(PYTHON_CANDIDATES)}; do
+  path="$(command -v "$candidate" 2>/dev/null)" || continue
+  if "$path" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then PY="$path"; break; fi
+done
+[ -n "$PY" ] || {{ echo "mucli-node needs Python 3.10 or newer, installed beside the system python3." >&2
+  echo "  Amazon Linux 2023 / RHEL / Fedora: sudo dnf install python3.11" >&2
+  echo "  Debian / Ubuntu: sudo apt install python3 (22.04+ ships 3.10+)" >&2; exit 1; }}
 
 id mucli-node >/dev/null 2>&1 || useradd --system --home-dir /var/lib/mucli-node --shell /usr/sbin/nologin mucli-node
 install -d -m 0755 /usr/local/lib/mucli-node /usr/local/libexec/mucli-node /etc/mucli-node
 install -d -m 0700 -o mucli-node -g mucli-node /var/lib/mucli-node
 install -d -m 0711 -o root -g root /var/lib/mucli-node-root
+ln -sfn "$PY" {AGENT_PYTHON}
+echo "mucli-node: using $PY ($("$PY" -c 'import platform; print(platform.python_version())'))"
 
 TMP="$(mktemp)"
 LOCAL_PYZ="$(dirname "$0")/mucli-node.pyz"
@@ -134,7 +151,7 @@ rm -f "$TMP"
 
 cat > /usr/local/libexec/mucli-node/mucli-node-exec <<'EOF'
 #!/bin/sh
-exec /usr/bin/python3 -I /usr/local/lib/mucli-node/mucli-node.pyz exec-helper "$@"
+exec {AGENT_PYTHON} -I /usr/local/lib/mucli-node/mucli-node.pyz exec-helper "$@"
 EOF
 chmod 0755 /usr/local/libexec/mucli-node/mucli-node-exec
 
@@ -148,7 +165,7 @@ echo 'mucli-node ALL=(root) NOPASSWD: /usr/local/libexec/mucli-node/mucli-node-e
 chmod 0440 /etc/sudoers.d/mucli-node.tmp
 visudo -cf /etc/sudoers.d/mucli-node.tmp >/dev/null && mv /etc/sudoers.d/mucli-node.tmp /etc/sudoers.d/mucli-node
 
-python3 -I /usr/local/lib/mucli-node/mucli-node.pyz --state-dir /var/lib/mucli-node --etc-dir /etc/mucli-node \\
+{AGENT_PYTHON} -I /usr/local/lib/mucli-node/mucli-node.pyz --state-dir /var/lib/mucli-node --etc-dir /etc/mucli-node \\
   enroll --master "$MASTER" --token "$TOKEN" --fingerprint "$FINGERPRINT" --name "$NAME"
 chown -R mucli-node:mucli-node /var/lib/mucli-node
 chmod 0644 /etc/mucli-node/master.json
@@ -177,16 +194,20 @@ def manual_commands(orch, token: str, name: str = "") -> list:
                     "sudo install -d -m 0755 /usr/local/lib/mucli-node /usr/local/libexec/mucli-node /etc/mucli-node\n"
                     "sudo install -d -m 0700 -o mucli-node -g mucli-node /var/lib/mucli-node\n"
                     "sudo install -d -m 0711 -o root -g root /var/lib/mucli-node-root"},
+        {"title": "Choose its Python (3.10 or newer, beside the system python3)",
+         "command": "for c in " + " ".join(PYTHON_CANDIDATES) + "; do p=$(command -v $c) && $p -c 'import sys; sys.exit(sys.version_info < (3, 10))' "
+                    f"&& {{ sudo ln -sfn $p {AGENT_PYTHON}; echo \"using $p\"; break; }}; done\n"
+                    f"test -x {AGENT_PYTHON} || echo 'No Python 3.10+ found: sudo dnf install python3.11 (Amazon Linux / RHEL), then run this again'"},
         {"title": "Install the agent and its root helper",
          "command": f"sudo install -m 0755 -o root -g root mucli-node.pyz {pyz}\n"
-                    f"printf '#!/bin/sh\\nexec /usr/bin/python3 -I {pyz} exec-helper \"$@\"\\n' | sudo tee {helper} >/dev/null\n"
+                    f"printf '#!/bin/sh\\nexec {AGENT_PYTHON} -I {pyz} exec-helper \"$@\"\\n' | sudo tee {helper} >/dev/null\n"
                     f"sudo chmod 0755 {helper}\n"
                     f"echo 'mucli-node ALL=(root) NOPASSWD: {helper}' | sudo tee /etc/sudoers.d/mucli-node >/dev/null\n"
                     "sudo chmod 0440 /etc/sudoers.d/mucli-node && sudo visudo -cf /etc/sudoers.d/mucli-node"},
         {"title": "Local policy (read-only by default; edit it to allow more)",
          "command": "sudo tee /etc/mucli-node/policy.yaml >/dev/null <<'EOF'\n" + DEFAULT_POLICY + "EOF"},
         {"title": "Enrol with this master",
-         "command": f"sudo python3 -I {pyz} --state-dir /var/lib/mucli-node --etc-dir /etc/mucli-node enroll "
+         "command": f"sudo {AGENT_PYTHON} -I {pyz} --state-dir /var/lib/mucli-node --etc-dir /etc/mucli-node enroll "
                     f"--master {q(url)} --token {q(token)} --fingerprint {q(fingerprint)} --name {q(name or 'NODE_NAME')}\n"
                     "sudo chown -R mucli-node:mucli-node /var/lib/mucli-node && sudo chmod 0644 /etc/mucli-node/master.json"},
         {"title": "Run it as a service",

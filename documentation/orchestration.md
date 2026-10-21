@@ -81,6 +81,22 @@ only its hash.
 Requirements on a node: Linux with systemd, Python 3.10+, `curl`, `sudo`. The agent is a single
 standard-library zipapp; nothing is installed with pip.
 
+**Python 3.10+:** the installer uses the newest Python it finds (`python3.13` down to `python3.10`,
+then `python3`) and links it as `/usr/local/lib/mucli-node/python` for the service. It never
+changes the system `python3`. On Amazon Linux 2023 and RHEL 9 that is 3.9, and `dnf`, `yum` and
+`needs-restarting` depend on it. Install a newer one beside it first: `sudo dnf install python3.11`.
+
+A node installed before this, whose `/usr/bin/python3` was repointed to a newer Python, has broken
+`dnf` and a reboot check that can't run. To fix it:
+1. Point `python3` back at the system version: `sudo alternatives --set python3 /usr/bin/python3.9`.
+2. Point the agent at its own Python:
+   ```
+   sudo ln -sfn /usr/bin/python3.11 /usr/local/lib/mucli-node/python
+   sudo sed -i 's|/usr/bin/python3 |/usr/local/lib/mucli-node/python |' \
+     /etc/systemd/system/mucli-node.service /usr/local/libexec/mucli-node/mucli-node-exec
+   sudo systemctl daemon-reload && sudo systemctl restart mucli-node
+   ```
+
 ### Node policy
 
 `/etc/mucli-node/policy.yaml` is the node owner's veto; a compromised master can only run what it

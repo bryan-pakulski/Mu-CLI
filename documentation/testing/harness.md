@@ -227,8 +227,8 @@ Must prove:
 | `test_node_groups.py` | 7 | 0.3 s | Node groups (members and selectors), run targeting, the node dashboard's health, AI refused, `mucli orch groups/dashboard` |
 | `test_orch_container_nodes.py` | 1 | 7.6 s | Disposable container test nodes (plan §6.8): needs Docker (mandatory) and pulls an image |
 | `test_orch_crypto.py` | 25 | 0.2 s | Vendored Ed25519 verification and signed envelopes (orchestration plan §6.3) |
-| `test_orch_integration.py` | 10 | 14.9 s | Master and real node agents over HTTPS long-poll on loopback (plan §11 integration, P0/P1) |
-| `test_orch_maintenance.py` | 11 | 1.0 s | Node maintenance without custom tools: every node reports whether it needs a reboot (agent |
+| `test_orch_integration.py` | 13 | 15.5 s | Master and real node agents over HTTPS long-poll on loopback (plan §11 integration, P0/P1); the installer picks a Python 3.10+ without touching the system python3 |
+| `test_orch_maintenance.py` | 15 | 1.0 s | Node maintenance without custom tools: every node reports whether it needs a reboot (agent |
 | `test_orch_master.py` | 38 | 6.0 s | Master-side flows with in-process nodes: catalog, planning, approvals, runs, runbooks, |
 | `test_orch_node_policy.py` | 72 | 0.1 s | Node-local policy (plan §6.7): parsing (fail closed) and an exhaustive ``decide`` |
 | `test_orch_remote_policy.py` | 5 | 0.1 s | Editing a node's policy.yaml from the master: operator only (never the AI), audited, no |

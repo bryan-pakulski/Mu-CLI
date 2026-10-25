@@ -1043,19 +1043,60 @@ def _job_lock(job: Any):
 SYSBOX_MANAGER_SOCKET = "/run/sysbox/sysmgr.sock"
 
 
+SYSBOX_RUNC = "/usr/bin/sysbox-runc"
+
+
+def sysbox_status(docker: Optional[Docker] = None) -> Tuple[str, str]:
+    """(state, what to do): "ready"; "stopped" (installed and registered with Docker, but its
+    manager isn't running: every container would fail at create time); "unregistered" (installed,
+    Docker doesn't know the runtime); "missing" (not installed)."""
+    from mu.container.hardware import _docker_runtimes
+    try:
+        registered = "sysbox-runc" in _docker_runtimes((docker or Docker()).runner)
+    except Exception:  # noqa: BLE001 - detection is best effort
+        registered = False
+    if not registered:
+        if os.path.exists(SYSBOX_RUNC):
+            return ("unregistered", "Sysbox is installed but Docker doesn't know its runtime: add "
+                    '{"runtimes": {"sysbox-runc": {"path": "/usr/bin/sysbox-runc"}}} to /etc/docker/daemon.json, '
+                    "then sudo systemctl restart docker.")
+        return ("missing", "Sysbox isn't installed.")
+    host = os.environ.get("DOCKER_HOST", "")
+    if host and not host.startswith("unix://"):
+        return ("ready", "")  # a remote daemon: its manager socket isn't visible from here
+    if not _sysbox_manager_running():
+        return ("stopped", "Sysbox is installed but not running: sudo systemctl enable --now sysbox "
+                "(the package doesn't start it on some distributions).")
+    return ("ready", "")
+
+
+def _sysbox_manager_running() -> bool:
+    """sysbox-mgr is up. Its socket lives in /run/sysbox, which only root may read, so as an
+    ordinary user ask systemd (no privileges needed); without systemd, a /run/sysbox we may not
+    look into still means Sysbox created it."""
+    if os.path.exists(SYSBOX_MANAGER_SOCKET):
+        return True
+    try:
+        proc = subprocess.run(["systemctl", "is-active", "--quiet", "sysbox-mgr"], capture_output=True, timeout=5)
+        if proc.returncode == 0:
+            return True
+        if proc.returncode in (3, 4):          # inactive / unknown unit: systemd answered
+            return False
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        os.listdir(os.path.dirname(SYSBOX_MANAGER_SOCKET))
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def sysbox_available(docker: Optional[Docker] = None) -> bool:
     """Sysbox is registered with Docker and, for a local daemon, its manager is running (a
     registered runtime whose sysbox-mgr is stopped fails every container at create time)."""
-    from mu.container.hardware import _docker_runtimes
-    try:
-        if "sysbox-runc" not in _docker_runtimes((docker or Docker()).runner):
-            return False
-    except Exception:  # noqa: BLE001 - detection is best effort
-        return False
-    host = os.environ.get("DOCKER_HOST", "")
-    if host and not host.startswith("unix://"):
-        return True  # a remote daemon: its manager socket isn't visible from here
-    return os.path.exists(SYSBOX_MANAGER_SOCKET)
+    return sysbox_status(docker)[0] == "ready"
 
 
 SYSBOX_MESSAGE = ("This job needs Docker-in-Docker, which requires Sysbox, installed and running. Install or start it "
@@ -1078,8 +1119,9 @@ def _preflight(states: Sequence[Dict[str, Any]], docker: Docker) -> None:
         from .cli import is_podman
         if is_podman():
             raise EnvironmentBlocked(PODMAN_DIND_MESSAGE)
-        if not sysbox_available(docker):
-            raise EnvironmentBlocked(SYSBOX_MESSAGE)
+        state, detail = sysbox_status(docker)
+        if state != "ready":
+            raise EnvironmentBlocked(f"{SYSBOX_MESSAGE} {detail}".strip())
     for state in states:
         if not state.get("gpus"):
             continue

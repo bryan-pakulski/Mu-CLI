@@ -9,6 +9,9 @@ Subcommands:
     /prompts show <name>     — print the currently-effective prompt text
     /prompts validate [name] — check critical tool-surface anchors are present
     /prompts edit <name>     — open the override file in $EDITOR (or print path)
+    /prompts diff <name>     — compare an override with the bundled prompt
+    /prompts keep <name>     — keep an older override (silences its notice)
+    /prompts reset <name>    — move the override aside; the bundled prompt applies
 
 Resolution priority (highest first):
   1. runtime /set override (agentic_system_base_override / agentic_mode_prompt_<mode>)
@@ -221,11 +224,40 @@ def _edit(session: Any, name: str, allow_prompt: bool) -> CommandResult:
     return CommandResult(ok=True, message=f"Edit {path}, then /prompts reload. (dir: {prompts_dir()})")
 
 
+def _stale_action(session: Any, sub: str, name: str, allow_prompt: bool) -> CommandResult:
+    from mu.prompts import acknowledge_stale, diff_override, known_names, reset_override
+
+    if name not in known_names():
+        return CommandResult(
+            ok=False,
+            message=f"Usage: /prompts {sub} <name>. Valid: {', '.join(known_names())}",
+        )
+    if sub == "reset":
+        backup = reset_override(name)
+        if backup is None:
+            msg = f"No override for {name}; the bundled prompt already applies."
+        else:
+            msg = f"{name}: override moved to {backup}; the bundled prompt applies from the next turn."
+        _emit_ok(session, msg, allow_prompt)
+        return CommandResult(ok=True, message=msg, data={"backup": backup})
+    if sub == "keep":
+        acknowledge_stale(name)
+        msg = f"{name}: keeping your override. You'll hear again when the bundled prompt changes."
+        _emit_ok(session, msg, allow_prompt)
+        return CommandResult(ok=True, message=msg)
+    diff = diff_override(name)
+    body = diff or f"{name}: no override, or it matches the bundled prompt."
+    _emit(session, body, allow_prompt)
+    return CommandResult(ok=True, message=body, data={"diff": diff})
+
+
 @command(
     "/prompts",
+    "/prompt",
     help=(
         "Inspect / manage file-based system-prompt overrides. "
-        "Subcommands: reload, init [name|all], show <name>, validate [name], edit <name>."
+        "Subcommands: reload, init [name|all], show <name>, validate [name], edit <name>, "
+        "diff <name>, keep <name>, reset <name>."
     ),
 )
 def prompts_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
@@ -249,9 +281,12 @@ def prompts_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comman
         if not rest:
             return CommandResult(ok=False, message="Usage: /prompts edit <name>")
         return _edit(session, rest.lower(), allow_prompt)
+    if sub in ("reset", "keep", "diff"):
+        return _stale_action(session, sub, rest.lower(), allow_prompt)
     return CommandResult(
         ok=False,
         message=(
-            "Unknown /prompts subcommand. Usage: /prompts [reload|init|show|validate|edit]"
+            "Unknown /prompts subcommand. Usage: "
+            "/prompts [reload|init|show|validate|edit|diff|keep|reset]"
         ),
     )

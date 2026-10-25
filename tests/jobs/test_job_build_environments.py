@@ -329,9 +329,37 @@ def test_ensure_parks_on_missing_environment_and_sysbox(home, monkeypatch):
 
     service.store.update_runtime_fields(row.id, execution_json={**row.execution, "environments": ["image:rust:1.89:docker"]})
     monkeypatch.setattr(envs, "resolve_source", lambda b: {"image": b["ref"], "egress_allow": [], "gpus": ""})
-    monkeypatch.setattr(envs, "sysbox_available", lambda docker=None: False)
-    with pytest.raises(EnvironmentBlocked, match="requires Sysbox"):
+    monkeypatch.setattr(envs, "sysbox_status", lambda docker=None: ("stopped", "Sysbox is installed but not running: sudo systemctl enable --now sysbox."))
+    with pytest.raises(EnvironmentBlocked, match="requires Sysbox.*installed but not running: sudo systemctl enable --now sysbox"):
         envs.ensure_environments(service, service.get(row.id), docker=FakeDocker(), settings={})
+
+
+@pytest.mark.parametrize("runtimes,files,mgr,state,says", [
+    ({"runc", "sysbox-runc"}, {envs.SYSBOX_RUNC, envs.SYSBOX_MANAGER_SOCKET}, 3, "ready", ""),
+    # Running, but /run/sysbox is root-only so an ordinary user can't see the socket: systemd says.
+    ({"runc", "sysbox-runc"}, {envs.SYSBOX_RUNC}, 0, "ready", ""),
+    # Installed and registered, services stopped (the AUR package doesn't enable them): say how to start it.
+    ({"runc", "sysbox-runc"}, {envs.SYSBOX_RUNC}, 3, "stopped", "systemctl enable --now sysbox"),
+    ({"runc"}, {envs.SYSBOX_RUNC}, 3, "unregistered", "/etc/docker/daemon.json"),
+    ({"runc"}, set(), 3, "missing", "isn't installed"),
+])
+def test_sysbox_status_names_what_is_wrong(monkeypatch, runtimes, files, mgr, state, says):
+    from types import SimpleNamespace
+    from mu.jobs import setup
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.setattr("mu.container.hardware._docker_runtimes", lambda runner: runtimes)
+    monkeypatch.setattr(envs.os.path, "exists", lambda p: p in files)
+    monkeypatch.setattr(envs.subprocess, "run", lambda argv, **k: SimpleNamespace(returncode=mgr)
+                        if argv[:2] == ["systemctl", "is-active"] else pytest.fail(f"unexpected {argv}"))
+    got, detail = envs.sysbox_status(FakeDocker())
+    assert got == state and says in detail
+    assert envs.sysbox_available(FakeDocker()) is (state == "ready")
+    # The Setup checklist says the same thing.
+    monkeypatch.setattr(envs, "Docker", lambda: FakeDocker())
+    monkeypatch.setattr("mu.jobs.sandbox.cli.is_podman", lambda: False)
+    step = setup.check("dind")
+    assert step.state == ("ok" if state == "ready" else "optional")
+    assert says in step.detail
 
 
 def test_default_runtime_when_nothing_resolves(home):

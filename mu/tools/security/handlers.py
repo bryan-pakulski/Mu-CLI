@@ -1,559 +1,152 @@
-"""Security-mode `@tool` handlers.
+"""Approval-gated security tools. All decisions and persistence go through the engine."""
+from dataclasses import asdict
 
-Each `@tool` wrapper delegates to a private `_handle_<tool>` body
-defined in this module. The bodies share `_resolve_security_report`,
-`_require_report`, and `_save_active_report` helpers (also private)
-for managing the active SecurityReport on the session.
-"""
-
-import json
-import os
-from typing import Any, Dict
-
+from mu.modes.preview import register_preview
+from mu.modes.tooling import envelope, guarded
+from mu.security import engine
+from mu.security.state import security_state
 from mu.tools import tool
-from mu.tools.descriptors import ToolExecutionContext
+
+_STRING = {"type": "string"}
+_STRINGS = {"type": "array", "items": _STRING}
+_FINDING = {"finding_id": _STRING}
+_RUN = {**_FINDING, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800}}
+
+# name -> (description, argument schema, required keys, read-only)
+_SPECS = {
+    "create_security_report": ("Create and select a security scan; container execution is the default. Then set scope.",
+        {"title": _STRING, "summary": _STRING}, ["title"], False),
+    "open_security_report": ("Select an existing scan in this workspace by id.", {"scan_id": _STRING}, ["scan_id"], False),
+    "list_security_reports": ("List scans in this workspace without selecting one.", {}, [], True),
+    "get_security_state": ("Read the active scan, findings, scope, coverage and observations.", {}, [], True),
+    "set_security_scope": ("Set the scan's paths and threat model before reviewing or adding findings.",
+        {"in_scope_paths": _STRINGS, "entry_points": _STRINGS, "trust_boundaries": _STRINGS,
+         "assets": _STRINGS, "attacker": _STRING},
+        ["in_scope_paths", "entry_points", "trust_boundaries", "assets", "attacker"], False),
+    "scan_attack_surface": ("Discover entry points and known sinks within scope. Optional patterns are literal substrings.",
+        {"patterns": _STRINGS}, [], False),
+    "review_surface_item": ("Record a reviewed surface item; link a finding or record an observation.",
+        {"item_id": _STRING, "verdict": {"type": "string", "enum": ["reviewed_clean", "finding", "observation"]},
+         "note": _STRING, "finding_id": _STRING}, ["item_id", "verdict", "note"], False),
+    "add_observation": ("Record a hardening note without claiming an exploitable vulnerability.",
+        {"title": _STRING, "note": _STRING, "surface_ids": _STRINGS}, ["title", "note"], False),
+    "add_security_finding": ("Record an exploit hypothesis with CWE, path:line locations and CVSS 3.1 base vector. Duplicate CWE/sink locations reuse the finding.",
+        {"title": _STRING, "summary": _STRING, "vulnerability_class": _STRING,
+         "exploit_path": _STRING, "cwe": _STRING, "affected_paths": _STRINGS,
+         "cvss_vector": _STRING, "severity_rationale": _STRING, "references": _STRINGS, "surface_ids": _STRINGS},
+        ["title", "exploit_path", "cwe", "affected_paths", "cvss_vector", "severity_rationale"], False),
+    "attach_security_proof": ("Attach a PoC command run from the workspace root. Declare all PoC scripts/dependencies in files, literal exploit markers, and a distinct probe_marker printed even after the fix. Reattachment clears remediation.",
+        {**_FINDING, "command": _STRING, "expected_markers": _STRINGS, "probe_marker": _STRING,
+         "files": _STRINGS, "description": _STRING, "kind": _STRING, "expected_exit": {"type": "integer"}},
+        ["finding_id", "command", "expected_markers", "probe_marker", "files"], False),
+    "verify_security_proof": ("Run the frozen PoC after human review of its command and scripts. Captures immutable CheckRun evidence; markers, exit and probe must match.",
+        _RUN, ["finding_id"], False),
+    "confirm_security_severity": ("After proof verification, confirm a CVSS vector against the demonstrated impact.",
+        {**_FINDING, "cvss_vector": _STRING, "rationale": _STRING, "demonstrated_impact": _STRING},
+        ["finding_id", "cvss_vector", "rationale", "demonstrated_impact"], False),
+    "attach_remediation_patch": ("Attach a unified diff and regression commands after proof verification. Apply the patch separately before verification.",
+        {**_FINDING, "description": _STRING, "patch_diff": _STRING, "regression_checks": _STRINGS},
+        ["finding_id", "description", "patch_diff", "regression_checks"], False),
+    "verify_remediation": ("Verify patch hunks in the working tree, frozen PoC executes without any exploit markers, and regression commands pass. Requires human command review.",
+        _RUN, ["finding_id"], False),
+    "approve_security_finding": ("Finalize a finding only after proof, remediation and severity verification, rechecking file integrity.",
+        _FINDING, ["finding_id"], False),
+    "refute_security_finding": ("Refute an unapproved hypothesis with a reason. Approved findings cannot be refuted.",
+        {**_FINDING, "reason": _STRING}, ["finding_id", "reason"], False),
+    "security_report": ("Write REPORT.md and per-finding narratives, evidence links, refutations and observations.", {}, [], False),
+}
 
 
-# ----------------------------------------------------------------- helpers
+def _execute(name, args, context):
+    owner = context
+    readonly = _SPECS[name][3]
+    if not readonly:
+        engine.writable(owner)
+    state = security_state(owner)
+    with state.lock:
+        if name == "create_security_report":
+            report = engine.create_security_report(owner=owner, **args)
+            return engine.summarize_report(report)
+        if name == "list_security_reports":
+            return {"reports": engine.list_reports(owner)}
+        if name == "open_security_report":
+            return engine.summarize_report(engine.open_report(owner, **args))
+        report = engine.active_report(owner)
+        if name == "get_security_state":
+            return {**engine.summarize_report(report), "findings": [asdict(f) for f in report.findings],
+                    "surface": report.surface, "observations": report.observations,
+                    "runner": engine.runner_for(owner, report)}
+        finding_id = args.get("finding_id")
+        finding = engine.require_finding(report, finding_id) if finding_id else None
+        opts = {k: v for k, v in args.items() if k != "finding_id"}
+        try:
+            if name == "set_security_scope":
+                result = engine.set_scope(report, **args)
+            elif name == "scan_attack_surface":
+                result = engine.scan_attack_surface(report, **args)
+            elif name == "review_surface_item":
+                result = engine.review_surface_item(report, **args)
+            elif name == "add_observation":
+                result = engine.add_observation(report, **args)
+            elif name == "add_security_finding":
+                result = asdict(engine.add_finding(report, **args))
+            elif name == "attach_security_proof":
+                engine.attach_proof(finding, **opts)
+                result = asdict(finding)
+            elif name == "attach_remediation_patch":
+                engine.attach_remediation(finding, **opts)
+                result = asdict(finding)
+            elif name == "confirm_security_severity":
+                result = asdict(engine.confirm_severity(finding, **opts))
+            elif name in {"verify_security_proof", "verify_remediation"}:
+                remediation = name == "verify_remediation"
+                engine.consume_preview(owner, finding_id, remediation=remediation)
+                fn = engine.verify_remediation if remediation else engine.verify_proof
+                fn(finding, report=report, owner=owner, timeout=args.get("timeout_seconds", 60))
+                result = asdict(finding)
+            elif name == "approve_security_finding":
+                result = asdict(engine.approve_finding(finding, report=report, owner=owner))
+            elif name == "refute_security_finding":
+                result = asdict(engine.refute_finding(finding, **opts))
+            elif name == "security_report":
+                result = {"path": engine.generate_report(report)}
+            else:
+                raise ValueError("unknown security operation")
+        finally:
+            # Failed runs and invalidated verifications must persist too.
+            engine.persist(owner, report)
+        return result
 
 
-def _resolve_security_report(session):
-    """Lazy-load (or open from session) the current SecurityReport."""
-    from mu.security.engine import load_report, create_security_report  # noqa
-    if session is None:
-        return None
-    return getattr(session, "_active_security_report", None)
+def _register(name, spec):
+    description, properties, required, readonly = spec
+    human = name in {"verify_security_proof", "verify_remediation"}
+
+    @tool(name=name, description=description,
+          parameters={"type": "object", "properties": properties, "required": required},
+          requires_approval=not readonly, approval_policy="always_human" if human else "default",
+          phase="security", execution_kind="read" if readonly else "mutate",
+          preview_policy="optional" if human else "none", server_policy="session_only")
+    @guarded(name)
+    def handler(args, context):
+        data = _execute(name, args, context)
+        if human:
+            record = data.get("remediation" if name == "verify_remediation" else "proof") or {}
+            if not record.get("verified"):
+                return envelope(name, False, record.get("notes", "Verification failed"), data, "verification_failed")
+        return envelope(name, True, "Security scan updated." if not readonly else "Security scan state.", data)
+    return handler
 
 
-def _require_report(session) -> Any:
-    report = _resolve_security_report(session)
-    if report is None:
-        raise ValueError(
-            "no active security report — call `create_security_report` first"
-        )
-    return report
+for _name, _spec in _SPECS.items():
+    globals()[_name] = _register(_name, _spec)
 
 
-def _save_active_report(session) -> None:
-    from mu.security.engine import save_report
-    if session is None:
-        return
-    report = getattr(session, "_active_security_report", None)
-    if report is None:
-        return
-    sid = getattr(session, "_active_security_session_id", "") or ""
-    save_report(sid, report)
+@register_preview("verify_security_proof")
+def proof_preview(args, session):
+    return engine.prepare_preview(session, args["finding_id"])
 
 
-def _handle_create_security_report(
-    args: dict, context: ToolExecutionContext
-) -> str:
-    from mu.security.engine import create_security_report, summarize_report
-    session = getattr(context, "session", None)
-    folder_context = context.folder_context
-    session_id = ""
-    if session is not None and hasattr(session, "session_manager"):
-        session_id = getattr(session.session_manager, "current_session_name", "") or ""
-    report = create_security_report(
-        title=str(args.get("title", "") or "Security audit"),
-        summary=str(args.get("summary", "") or ""),
-        folder_context=folder_context,
-        session_id=session_id or None,
-    )
-    if session is not None:
-        session._active_security_report = report
-        session._active_security_session_id = session_id
-    return json.dumps(summarize_report(report), indent=2)
-
-
-def _handle_add_security_finding(args: dict, context: ToolExecutionContext) -> str:
-    from mu.security.engine import add_finding
-    session = getattr(context, "session", None)
-    try:
-        report = _require_report(session)
-        finding = add_finding(
-            report,
-            title=str(args.get("title", "") or ""),
-            summary=str(args.get("summary", "") or ""),
-            vulnerability_class=str(args.get("vulnerability_class", "") or ""),
-            severity=str(args.get("severity", "medium") or "medium"),
-            affected_paths=list(args.get("affected_paths", []) or []),
-            exploit_path=str(args.get("exploit_path", "") or ""),
-            references=list(args.get("references", []) or []),
-        )
-        _save_active_report(session)
-        return json.dumps(
-            {
-                "finding_id": finding.finding_id,
-                "status": finding.status,
-                "title": finding.title,
-                "severity": finding.severity,
-            },
-            indent=2,
-        )
-    except ValueError as e:
-        return json.dumps({"error": str(e)})
-
-
-def _handle_attach_security_proof(
-    args: dict, context: ToolExecutionContext
-) -> str:
-    from mu.security.engine import attach_proof
-    session = getattr(context, "session", None)
-    try:
-        report = _require_report(session)
-        finding_id = str(args.get("finding_id", "") or "")
-        finding = report.find(finding_id)
-        if finding is None:
-            return json.dumps({"error": f"no such finding: {finding_id}"})
-        attach_proof(
-            finding,
-            command=str(args.get("command", "") or ""),
-            expected_markers=list(args.get("expected_markers", []) or []),
-            description=str(args.get("description", "") or ""),
-            kind=str(args.get("kind", "command") or "command"),
-        )
-        _save_active_report(session)
-        return json.dumps(
-            {
-                "finding_id": finding.finding_id,
-                "status": finding.status,
-                "proof_command": finding.proof.command,
-                "expected_markers": finding.proof.expected_markers,
-            },
-            indent=2,
-        )
-    except ValueError as e:
-        return json.dumps({"error": str(e)})
-
-
-def _handle_verify_security_proof(
-    args: dict, context: ToolExecutionContext
-) -> str:
-    from mu.security.engine import verify_proof
-    session = getattr(context, "session", None)
-    try:
-        report = _require_report(session)
-        finding_id = str(args.get("finding_id", "") or "")
-        finding = report.find(finding_id)
-        if finding is None:
-            return json.dumps({"error": f"no such finding: {finding_id}"})
-        cwd = (
-            report.workspace_root
-            or (
-                context.folder_context.folders[0]
-                if context.folder_context and context.folder_context.folders
-                else os.getcwd()
-            )
-        )
-        timeout = float(args.get("timeout_seconds", 60) or 60)
-        verify_proof(finding, cwd=cwd, report=report, timeout=timeout)
-        _save_active_report(session)
-        return json.dumps(
-            {
-                "finding_id": finding.finding_id,
-                "status": finding.status,
-                "proof_verified": finding.proof.verified if finding.proof else False,
-                "exit_code": finding.proof.exit_code if finding.proof else None,
-                "notes": finding.proof.notes if finding.proof else "",
-                "stdout_tail": (finding.proof.captured_stdout or "")[-1500:] if finding.proof else "",
-                "stderr_tail": (finding.proof.captured_stderr or "")[-1500:] if finding.proof else "",
-                "evidence_path": finding.proof.last_run_evidence_path if finding.proof else "",
-            },
-            indent=2,
-        )
-    except ValueError as e:
-        return json.dumps({"error": str(e)})
-
-
-def _handle_attach_remediation_patch(
-    args: dict, context: ToolExecutionContext
-) -> str:
-    from mu.security.engine import attach_remediation
-    session = getattr(context, "session", None)
-    try:
-        report = _require_report(session)
-        finding_id = str(args.get("finding_id", "") or "")
-        finding = report.find(finding_id)
-        if finding is None:
-            return json.dumps({"error": f"no such finding: {finding_id}"})
-        attach_remediation(
-            finding,
-            description=str(args.get("description", "") or ""),
-            patch_diff=str(args.get("patch_diff", "") or ""),
-        )
-        _save_active_report(session)
-        return json.dumps(
-            {
-                "finding_id": finding.finding_id,
-                "status": finding.status,
-                "patch_chars": len(finding.remediation.patch_diff) if finding.remediation else 0,
-            },
-            indent=2,
-        )
-    except ValueError as e:
-        return json.dumps({"error": str(e)})
-
-
-def _handle_verify_remediation(
-    args: dict, context: ToolExecutionContext
-) -> str:
-    from mu.security.engine import verify_remediation
-    session = getattr(context, "session", None)
-    try:
-        report = _require_report(session)
-        finding_id = str(args.get("finding_id", "") or "")
-        finding = report.find(finding_id)
-        if finding is None:
-            return json.dumps({"error": f"no such finding: {finding_id}"})
-        cwd = (
-            report.workspace_root
-            or (
-                context.folder_context.folders[0]
-                if context.folder_context and context.folder_context.folders
-                else os.getcwd()
-            )
-        )
-        timeout = float(args.get("timeout_seconds", 60) or 60)
-        verify_remediation(finding, cwd=cwd, report=report, timeout=timeout)
-        _save_active_report(session)
-        return json.dumps(
-            {
-                "finding_id": finding.finding_id,
-                "status": finding.status,
-                "remediation_verified": finding.remediation.verified if finding.remediation else False,
-                "post_patch_exit_code": finding.remediation.post_patch_exit_code if finding.remediation else None,
-                "notes": finding.remediation.notes if finding.remediation else "",
-                "stdout_tail": (finding.remediation.post_patch_stdout or "")[-1500:] if finding.remediation else "",
-                "stderr_tail": (finding.remediation.post_patch_stderr or "")[-1500:] if finding.remediation else "",
-            },
-            indent=2,
-        )
-    except ValueError as e:
-        return json.dumps({"error": str(e)})
-
-
-def _handle_approve_security_finding(
-    args: dict, context: ToolExecutionContext
-) -> str:
-    from mu.security.engine import approve_finding
-    session = getattr(context, "session", None)
-    try:
-        report = _require_report(session)
-        finding_id = str(args.get("finding_id", "") or "")
-        finding = report.find(finding_id)
-        if finding is None:
-            return json.dumps({"error": f"no such finding: {finding_id}"})
-        approve_finding(finding)
-        _save_active_report(session)
-        return json.dumps(
-            {
-                "finding_id": finding.finding_id,
-                "status": finding.status,
-                "title": finding.title,
-                "severity": finding.severity,
-            },
-            indent=2,
-        )
-    except ValueError as e:
-        return json.dumps({"error": str(e)})
-
-
-def _handle_refute_security_finding(
-    args: dict, context: ToolExecutionContext
-) -> str:
-    from mu.security.engine import refute_finding
-    session = getattr(context, "session", None)
-    try:
-        report = _require_report(session)
-        finding_id = str(args.get("finding_id", "") or "")
-        finding = report.find(finding_id)
-        if finding is None:
-            return json.dumps({"error": f"no such finding: {finding_id}"})
-        refute_finding(finding, reason=str(args.get("reason", "") or ""))
-        _save_active_report(session)
-        return json.dumps(
-            {"finding_id": finding.finding_id, "status": finding.status}, indent=2
-        )
-    except ValueError as e:
-        return json.dumps({"error": str(e)})
-
-
-def _handle_get_security_state(
-    args: dict, context: ToolExecutionContext
-) -> str:
-    from mu.security.engine import summarize_report
-    session = getattr(context, "session", None)
-    try:
-        report = _require_report(session)
-    except ValueError as e:
-        return json.dumps({"error": str(e)})
-    return json.dumps(summarize_report(report), indent=2)
-
-
-
-# ----------------------------------------------------------------- @tool wrappers
-
-
-@tool(
-    name="create_security_report",
-    description=(
-        "Open a security audit. Returns a scan_id and creates the "
-        "persistence directory at documentation/security_scan_<id>/. "
-        "Call once at the start of a security-mode session."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "title": {"type": "string", "description": "Short title for the audit."},
-            "summary": {"type": "string", "description": "Optional scope / context."},
-        },
-        "required": ["title"],
-    },
-    requires_approval=False,
-    phase="security",
-    execution_kind="memory",
-    preview_policy="none",
-    server_policy="session_only",
-)
-def create_security_report(args: Dict[str, Any], context) -> str:
-    return _handle_create_security_report(args, context)
-
-
-@tool(
-    name="add_security_finding",
-    description=(
-        "Record a HYPOTHESIS that the workspace has a specific "
-        "vulnerability. The finding is provisional until its PoC is "
-        "verified. Severity is one of: info, low, medium, high, critical."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "title": {"type": "string"},
-            "summary": {"type": "string"},
-            "vulnerability_class": {
-                "type": "string",
-                "description": (
-                    "e.g. sql_injection, xss, path_traversal, "
-                    "deserialization, command_injection, weak_crypto, "
-                    "hardcoded_secret, auth_bypass."
-                ),
-            },
-            "severity": {
-                "type": "string",
-                "enum": ["info", "low", "medium", "high", "critical"],
-            },
-            "affected_paths": {"type": "array", "items": {"type": "string"}},
-            "exploit_path": {
-                "type": "string",
-                "description": (
-                    "Human-readable trace of how an attacker reaches the sink."
-                ),
-            },
-            "references": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["title", "severity"],
-    },
-    requires_approval=False,
-    phase="security",
-    execution_kind="memory",
-    preview_policy="none",
-    server_policy="session_only",
-)
-def add_security_finding(args: Dict[str, Any], context) -> str:
-    return _handle_add_security_finding(args, context)
-
-
-@tool(
-    name="attach_security_proof",
-    description=(
-        "Attach an executable PoC to a finding. Must be a shell command "
-        "run from the workspace root that, when the vulnerability is "
-        "present, produces output containing ALL of the declared "
-        "`expected_markers`. The markers are checked literally — use "
-        "unique strings ('PWNED-1234', a fabricated secret, a stack-trace "
-        "fragment) to avoid false positives."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "finding_id": {"type": "string"},
-            "command": {"type": "string"},
-            "expected_markers": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "Unique substrings that must appear in stdout+stderr "
-                    "when the exploit succeeds."
-                ),
-            },
-            "description": {"type": "string"},
-            "kind": {"type": "string", "default": "command"},
-        },
-        "required": ["finding_id", "command", "expected_markers"],
-    },
-    requires_approval=False,
-    phase="security",
-    execution_kind="memory",
-    preview_policy="none",
-    server_policy="session_only",
-)
-def attach_security_proof(args: Dict[str, Any], context) -> str:
-    return _handle_attach_security_proof(args, context)
-
-
-@tool(
-    name="verify_security_proof",
-    description=(
-        "Execute the attached PoC and decide whether the exploit "
-        "actually triggers. Engine runs the command, captures output, "
-        "and checks that every declared `expected_marker` literally "
-        "appears. Returns ok=True only if all markers match. This is "
-        "the anti-hallucination gate — claims aren't believed without "
-        "this passing."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "finding_id": {"type": "string"},
-            "timeout_seconds": {"type": "integer", "default": 60},
-        },
-        "required": ["finding_id"],
-    },
-    requires_approval=True,
-    phase="security",
-    execution_kind="mutate",
-    preview_policy="optional",
-    server_policy="session_only",
-)
-def verify_security_proof(args: Dict[str, Any], context) -> str:
-    return _handle_verify_security_proof(args, context)
-
-
-@tool(
-    name="attach_remediation_patch",
-    description=(
-        "Attach a proposed patch (unified diff) to a finding whose PoC "
-        "has already been verified. Engine refuses if proof.verified "
-        "is False."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "finding_id": {"type": "string"},
-            "description": {
-                "type": "string",
-                "description": (
-                    "Defensive principle: parameterized queries, "
-                    "context-aware escaping, etc."
-                ),
-            },
-            "patch_diff": {
-                "type": "string",
-                "description": (
-                    "Unified diff. Apply with `apply_diff` separately "
-                    "so the working tree is modified before remediation "
-                    "verification."
-                ),
-            },
-        },
-        "required": ["finding_id", "description", "patch_diff"],
-    },
-    requires_approval=False,
-    phase="security",
-    execution_kind="memory",
-    preview_policy="none",
-    server_policy="session_only",
-)
-def attach_remediation_patch(args: Dict[str, Any], context) -> str:
-    return _handle_attach_remediation_patch(args, context)
-
-
-@tool(
-    name="verify_remediation",
-    description=(
-        "Re-run the original PoC against the now-patched workspace. "
-        "The exploit must no longer trigger (the markers must be "
-        "absent). Returns ok=True only when the patch actually closes "
-        "the hole. Apply the patch (via `apply_diff`) BEFORE calling this."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "finding_id": {"type": "string"},
-            "timeout_seconds": {"type": "integer", "default": 60},
-        },
-        "required": ["finding_id"],
-    },
-    requires_approval=True,
-    phase="security",
-    execution_kind="mutate",
-    preview_policy="optional",
-    server_policy="session_only",
-)
-def verify_remediation(args: Dict[str, Any], context) -> str:
-    return _handle_verify_remediation(args, context)
-
-
-@tool(
-    name="approve_security_finding",
-    description=(
-        "Finalize a finding. HARD-GATED: refuses unless both "
-        "`proof.verified` and `remediation.verified` are True."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {"finding_id": {"type": "string"}},
-        "required": ["finding_id"],
-    },
-    requires_approval=False,
-    phase="security",
-    execution_kind="memory",
-    preview_policy="none",
-    server_policy="session_only",
-)
-def approve_security_finding(args: Dict[str, Any], context) -> str:
-    return _handle_approve_security_finding(args, context)
-
-
-@tool(
-    name="refute_security_finding",
-    description=(
-        "Abandon a finding whose PoC couldn't be made to trigger after "
-        "multiple revisions. Records the failed hypothesis in the audit "
-        "trail rather than silently dropping it."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "finding_id": {"type": "string"},
-            "reason": {"type": "string"},
-        },
-        "required": ["finding_id", "reason"],
-    },
-    requires_approval=False,
-    phase="security",
-    execution_kind="memory",
-    preview_policy="none",
-    server_policy="session_only",
-)
-def refute_security_finding(args: Dict[str, Any], context) -> str:
-    return _handle_refute_security_finding(args, context)
-
-
-@tool(
-    name="get_security_state",
-    description=(
-        "Return the current scan's summary: total findings, by-status "
-        "and by-severity counts, and the list of approved findings."
-    ),
-    parameters={"type": "object", "properties": {}},
-    requires_approval=False,
-    phase="security",
-    execution_kind="read",
-    preview_policy="none",
-    server_policy="session_only",
-)
-def get_security_state(args: Dict[str, Any], context) -> str:
-    return _handle_get_security_state(args, context)
+@register_preview("verify_remediation")
+def remediation_preview(args, session):
+    return engine.prepare_preview(session, args["finding_id"], remediation=True)

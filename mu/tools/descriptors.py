@@ -133,7 +133,7 @@ def filter_tools_by_phase(tools, active_phases) -> list:
         return list(tools)
 
 
-_KNOWN_MODE_TOOL_PHASES = frozenset({"feature", "research", "security", "teacher"})
+_KNOWN_MODE_TOOL_PHASES = frozenset({"debug", "feature", "loop", "research", "security", "teacher"})
 
 
 def _mode_tool_phase_policy(mode: str) -> tuple[set[str], set[str]]:
@@ -328,6 +328,7 @@ _COLLATED_TOOL_NAMES = {
     "get_chunk",
     "list_dir",
     "url_grounding",
+    "research_fetch",
     "web_search",
     "arxiv_search",
     "doi_resolve",
@@ -337,8 +338,6 @@ _COLLATED_TOOL_NAMES = {
     "read_document",
     "read_attachment",
     "search_attachments",
-    "get_tasks",
-    "get_current_task",
 }
 
 

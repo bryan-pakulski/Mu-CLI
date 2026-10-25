@@ -34,6 +34,8 @@ from typing import Any
 
 from mu.agent.collation import CollationBuffer
 from mu.memory.stores import MemoryEntry, ScratchpadStore, TaskMemoryStore
+from mu.modes.state import ModeStates
+from mu.research import ResearchState
 from mu.threads.model import (
     ThreadMeta,
     ensure_thread_meta,
@@ -48,7 +50,7 @@ from utils.logger import logger
 
 import utils.config as _config
 
-from .helpers import _slugify_feature_id, derive_feature_state_status
+from .helpers import _slugify_feature_id
 from .history import HistoryMixin
 from .history_search import HistorySearchMixin
 from .tool_cache import ToolResultCache
@@ -205,10 +207,12 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.teacher_state = None
         self.teacher_registry = {}
         self.active_course_id = None
-        # Structured research sources are session-owned.  The citation engine
-        # itself is process-global, so retaining this snapshot prevents an
-        # unload/reload from silently dropping a research trail.
-        self.research_sources: list[dict] = []
+        # Research sources, questions and claims are session-owned: tool
+        # dispatch binds this state per call, and it is persisted with the
+        # session (``research_sources`` key) so a reload keeps the trail.
+        self.research: ResearchState = ResearchState()
+        # Typed per-mode records (mu.modes.state), persisted under ``mode_state``.
+        self.mode_state: ModeStates = ModeStates()
         self.tool_stats = _empty_tool_stats()
         self.variables = DEFAULT_VARIABLES.copy()
         self.container_config: dict[str, Any] = {}
@@ -317,7 +321,8 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.teacher_state = None
         self.teacher_registry = {}
         self.active_course_id = None
-        self.research_sources = []
+        self.research = ResearchState()
+        self.mode_state.clear()
         self.tool_stats = _empty_tool_stats()
         self.container_config = {}
         self.thread_meta = ensure_thread_meta(name)
@@ -417,11 +422,8 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                             self.teacher_registry[self.active_course_id]
                         )
 
-                    saved_sources = data.get("research_sources", [])
-                    self.research_sources = (
-                        saved_sources if isinstance(saved_sources, list) else []
-                    )
-                    self.restore_research_sources()
+                    self.load_research_state(data.get("research_sources"))
+                    self.load_mode_state(data.get("mode_state"))
 
                     self.tool_stats = _normalize_tool_stats(data.get("tool_stats"))
 
@@ -895,11 +897,8 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             and self.active_course_id in self.teacher_registry
         ):
             self.teacher_state = deepcopy(self.teacher_registry[self.active_course_id])
-        saved_sources = data.get("research_sources", [])
-        self.research_sources = (
-            saved_sources if isinstance(saved_sources, list) else []
-        )
-        self.restore_research_sources()
+        self.load_research_state(data.get("research_sources"))
+        self.load_mode_state(data.get("mode_state"))
         self.tool_stats = _normalize_tool_stats(data.get("tool_stats"))
         # Phase-6 r22 F4 + r23 F3: mirror _load_session normalization
         # INCLUDING None-defaults. The r22 shape only assigned when the
@@ -1090,7 +1089,8 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                 "teacher_state": self.teacher_state,
                 "teacher_registry": self.teacher_registry,
                 "active_course_id": self.active_course_id,
-                "research_sources": self.research_sources,
+                "research_sources": self.research.to_dict(),
+                "mode_state": self.mode_state.to_dict(),
                 "tool_stats": self.tool_stats,
                 # Largest payload last — see the F1 note above.
                 "history": self.history,
@@ -1177,23 +1177,32 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             except OSError:
                 pass
 
-    def restore_research_sources(self) -> None:
-        """Hydrate the global citation engine from this session's snapshot."""
+    def load_research_state(self, snapshot: Any) -> None:
+        """Replace this session's research state from a persisted snapshot.
+
+        Accepts the v2 dict and the earlier list-of-sources shape; anything
+        else (or a corrupt snapshot) loads as empty rather than failing the
+        session load. The state object keeps its identity so a binding taken
+        by an in-flight tool call stays valid.
+        """
+        if not isinstance(getattr(self, "research", None), ResearchState):
+            self.research = ResearchState()
         try:
-            from utils.citation_manager import get_citation_manager
-
-            get_citation_manager().load_dict(self.research_sources)
+            self.research.load_dict(snapshot if isinstance(snapshot, (list, dict)) else None)
         except Exception:
-            logger.debug("Could not restore persisted research sources", exc_info=True)
+            logger.debug("Could not restore persisted research state", exc_info=True)
+            self.research.clear()
 
-    def snapshot_research_sources(self) -> None:
-        """Capture sources immediately after a research tool updates them."""
+    def load_mode_state(self, snapshot: Any) -> None:
+        """Replace every mode state from a persisted snapshot (straight load:
+        unknown fields are ignored, missing ones default)."""
+        if not isinstance(getattr(self, "mode_state", None), ModeStates):
+            self.mode_state = ModeStates()
         try:
-            from utils.citation_manager import get_citation_manager
-
-            self.research_sources = get_citation_manager().to_dict()
+            self.mode_state.load_dict(snapshot if isinstance(snapshot, dict) else None)
         except Exception:
-            logger.debug("Could not snapshot research sources", exc_info=True)
+            logger.debug("Could not restore persisted mode state", exc_info=True)
+            self.mode_state.clear()
 
     def get_feature_state(self):
         return (
@@ -1313,39 +1322,20 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         directory: str,
         feature_request: str = "",
     ) -> dict:
+        """An empty draft feature (its plan is proposed by the agent or filled in
+        later) — activated, with its pointer record in the registry."""
+        from mu.feature.engine import FeaturePlan, registry_record, save_feature_plan
+
         feature_id = self.allocate_feature_id(feature_name)
-        metadata_path = self.get_feature_metadata_path(feature_id)
-        os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
-        record = {
-            "type": "feature",
-            "status": "draft",
-            "feature_id": feature_id,
-            "feature_name": feature_name.strip() or feature_id,
-            "directory": directory,
-            "metadata_path": metadata_path,
-            "feature_plan": {
-                "feature_id": feature_id,
-                "feature_name": feature_name.strip() or feature_id,
-                "feature_request": feature_request.strip()
-                or feature_name.strip()
-                or feature_id,
-                "directory": directory,
-                "metadata_path": metadata_path,
-                "approved": False,
-                "review_status": "pending",
-                "review_notes": "",
-                "overall_status": "not_started",
-                "phases_completed": False,
-                "phase_count": 0,
-                "phases": [],
-                "next_phase": None,
-            },
-            "blocker": None,
-            "created_at": time.time(),
-            "updated_at": time.time(),
-        }
-        with open(metadata_path, "w", encoding="utf-8") as handle:
-            json.dump(record["feature_plan"], handle, indent=2)
+        plan = FeaturePlan(
+            feature_id=feature_id,
+            feature_name=feature_name.strip() or feature_id,
+            feature_request=feature_request.strip() or feature_name.strip() or feature_id,
+            directory=directory,
+            metadata_path=self.get_feature_metadata_path(feature_id),
+        )
+        save_feature_plan(plan)
+        record = registry_record(plan)
         self.upsert_feature(record)
         self.active_feature_id = feature_id
         self.feature_state = deepcopy(record)
@@ -1364,42 +1354,15 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             suffix += 1
 
     def set_feature_state(self, state: dict | None, folder_context_obj=None):
-        """Persist the active feature state.
-
-        A completed feature is terminal for the active workflow.  Preserve its
-        final plan in the registry, but archive it and clear the active state
-        so the next interaction starts from the feature list rather than a
-        finished board.
-        """
-        if isinstance(state, dict):
-            # Re-derive status from feature_plan when caller did not provide
-            # an explicit status override.
-            feature_plan = state.get("feature_plan")
-            explicit_status = str(state.get("status", "") or "").strip()
-            should_derive = (not explicit_status) or explicit_status == "completed"
-            if isinstance(feature_plan, dict) and should_derive:
-                derived = derive_feature_state_status(feature_plan)
-                state = {**state, "status": derived}
+        """Persist the active feature pointer (``mu.feature.engine.registry_record``).
+        A done feature is archived and unloaded."""
         self.feature_state = deepcopy(state) if isinstance(state, dict) else None
         if isinstance(self.feature_state, dict):
             record = self.upsert_feature(self.feature_state)
             if record:
                 feature_id = record["feature_id"]
-                plan = record.get("feature_plan")
-                review_done = (
-                    isinstance(plan, dict)
-                    and str(plan.get("review_status", "") or "") == "completed"
-                )
-                if record.get("status") == "completed" and review_done:
-                    # Terminal only once the review pass has been approved
-                    # (review_status == "completed"). Keep the record under
-                    # Archived, but do not leave a finished feature loaded.
-                    # A feature whose tasks are all done but still awaiting
-                    # review stays active so review_all_completed_tasks /
-                    # approve_feature_task can still resolve it.
-                    archived_record = self.feature_registry[feature_id]
-                    archived_record["archived"] = True
-                    archived_record["updated_at"] = time.time()
+                if record.get("status") == "done":
+                    self.feature_registry[feature_id]["archived"] = True
                     self.feature_state = None
                     self.active_feature_id = None
                 else:
@@ -1497,8 +1460,8 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.teacher_state = None
         self.teacher_registry = {}
         self.active_course_id = None
-        self.research_sources = []
-        self.restore_research_sources()
+        self.research = ResearchState()
+        self.mode_state.clear()
         self.conversation_summary = ""
         self.summary_anchor = 0
         self.history = []

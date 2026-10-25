@@ -239,8 +239,6 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "loop mode",
         (
-            "loop_active",
-            "loop_features",
             "loop_detection_enabled",
             "loop_detection_repeat_threshold",
         ),

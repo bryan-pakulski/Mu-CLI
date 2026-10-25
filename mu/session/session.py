@@ -17,7 +17,6 @@ from typing import Optional
 
 from mu.agent.approval import build_approval_prompt, collect_approval_plans, ApprovalPlan
 from mu.agent.collation import CollationBuffer
-from mu.feature.engine import refresh_and_persist_feature_plan, summarize_feature_plan
 from mu.memory.stores import ScratchpadStore, TaskMemoryStore
 from mu.retrieval.index import SemanticCodeIndex
 from mu.retrieval.index import RETRIEVAL_INDEX as _RETRIEVAL_INDEX
@@ -54,7 +53,6 @@ from mu.session.helpers import (
     _sanitize_for_log,
     _shorten_tool_args,
     _slugify_feature_id,
-    derive_feature_state_status,
 )
 from mu.session.history import HistoryMixin
 
@@ -444,108 +442,6 @@ class Session:
 
         return self.session_manager.get_durable_memory_service()
 
-    def _derive_feature_state_status(self, feature_plan: dict | None) -> str:
-        return derive_feature_state_status(feature_plan)
-
-    def _set_feature_state(
-        self,
-        *,
-        feature_plan: dict | None = None,
-        status: str | None = None,
-        blocker: dict | None = None,
-    ):
-        current = self.session_manager.get_feature_state() or {}
-        current_plan = current.get("feature_plan")
-        plan_summary = feature_plan if isinstance(feature_plan, dict) else current_plan
-        next_phase = (
-            plan_summary.get("next_phase")
-            if isinstance(plan_summary, dict)
-            else current.get("next_phase")
-        )
-        state = {
-            "type": "feature",
-            "status": status or derive_feature_state_status(plan_summary),
-            "feature_id": (
-                plan_summary.get("feature_id")
-                if isinstance(plan_summary, dict)
-                else current.get("feature_id")
-            ),
-            "feature_name": (
-                plan_summary.get("feature_name")
-                if isinstance(plan_summary, dict)
-                else current.get("feature_name")
-            ),
-            "directory": (
-                plan_summary.get("directory")
-                if isinstance(plan_summary, dict)
-                else current.get("directory")
-            ),
-            "metadata_path": (
-                plan_summary.get("metadata_path")
-                if isinstance(plan_summary, dict)
-                else current.get("metadata_path")
-            ),
-            "next_phase": next_phase,
-            "feature_plan": plan_summary,
-            "blocker": blocker,
-            "updated_at": time.time(),
-        }
-        previous_feature_id = str(current.get("feature_id", "") or "").strip()
-        new_feature_id = str(state.get("feature_id", "") or "").strip()
-        same_feature = previous_feature_id and previous_feature_id == new_feature_id
-        state["started_at"] = (
-            float(current.get("started_at", time.time()) or time.time())
-            if same_feature
-            else time.time()
-        )
-        state["start_tokens"] = (
-            int(
-                current.get(
-                    "start_tokens",
-                    self.session_manager.token_counts.get("total", 0),
-                )
-                or 0
-            )
-            if same_feature
-            else int(self.session_manager.token_counts.get("total", 0) or 0)
-        )
-        self.session_manager.set_feature_state(state, self.folder_context)
-        self.sync_runtime_state()
-
-    def _refresh_feature_state(
-        self, metadata_path: str, *, status: str | None = None
-    ):
-        try:
-            plan = refresh_and_persist_feature_plan(
-                self.session_manager.current_session_name,
-                metadata_path=metadata_path,
-            )
-            self._set_feature_state(
-                feature_plan=summarize_feature_plan(plan),
-                status=status,
-            )
-        except (FileNotFoundError, OSError, ValueError):
-            return
-
-    def _sync_feature_state_for_tool(
-        self,
-        tool_name: str,
-        tool_args: dict,
-        raw_result,
-        structured_result,
-    ):
-        """Feature-state writer. Body moved to
-        `mu/session/tools_glue.py:sync_feature_state_for_tool`."""
-        from mu.session.tools_glue import sync_feature_state_for_tool
-
-        return sync_feature_state_for_tool(
-            self,
-            tool_name,
-            tool_args,
-            raw_result,
-            structured_result,
-        )
-
     # Message helpers (`_build_messages_from_history`,
     # `_summarize_message_parts`,
     # `_clip_preview`, `_prepare_runtime_history`) moved to
@@ -662,38 +558,25 @@ class Session:
                 "re-anchor if drifting. /goal clear when the ask shifts."
             )
         if loop_goal is None:
-            loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
-        if loop_goal and str(self.variables.get("agent_mode", "default")).lower() == "loop":
-            sections.append(f"- loop_goal: {loop_goal}")
-            sections.append(
-                "- loop_memory_policy: persist durable findings with save_memory and in-flight steps with save_scratchpad."
-            )
-        feature_state = self.session_manager.get_feature_state() if include_feature_state else None
-        if isinstance(feature_state, dict):
-            feature_id = str(feature_state.get("feature_id", "") or "").strip()
-            status = str(feature_state.get("status", "idle") or "idle")
-            next_task = feature_state.get("next_task")
-            if isinstance(next_task, dict):
-                next_task_text = str(
-                    next_task.get("title")
-                    or next_task.get("task")
-                    or next_task.get("name")
-                    or ""
-                ).strip()
-            else:
-                next_task_text = str(next_task or "").strip()
-            phase = feature_state.get("next_phase")
-            phase_title = (
-                str((phase or {}).get("title", "")).strip()
-                if isinstance(phase, dict)
-                else ""
-            )
-            sections.append(f"- feature_id: {feature_id or 'n/a'}")
-            sections.append(f"- status: {status}")
-            if phase_title:
-                sections.append(f"- active_phase: {phase_title}")
-            if next_task_text:
-                sections.append(f"- next_task: {next_task_text}")
+            loop_goal = ""
+            if str(self.variables.get("agent_mode", "default")).lower() == "loop":
+                try:
+                    _loop = self.session_manager.mode_state.peek("loop")
+                    if _loop is not None and _loop.mission is not None and _loop.mission.status not in ("stopped", "done"):
+                        loop_goal = _loop.mission.goal
+                except Exception:
+                    loop_goal = ""
+        if loop_goal:
+            sections.append(f"- loop mission goal (set by the user): {loop_goal}")
+        if include_feature_state:
+            try:
+                from mu.feature.engine import active_plan, l3_lines
+
+                _plan = active_plan(self, cached=True)
+            except Exception:
+                _plan = None
+            if _plan is not None:
+                sections.extend(l3_lines(_plan))
 
         return "\n".join(sections).strip()
 
@@ -745,76 +628,6 @@ class Session:
             status="active",
         )
         self._active_goal_memory_id = entry.id
-
-    def _ensure_loop_goal_persistence(self) -> None:
-        if str(self.variables.get("agent_mode", "default")).lower() != "loop":
-            return
-        loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
-        if not loop_goal:
-            return
-        existing = self.task_memory.search("loop goal", limit=12)
-        if any(loop_goal in str(entry.content or "") for entry in existing):
-            return
-        self.task_memory.save(
-            f"Locked loop goal: {loop_goal}",
-            tags=["loop", "goal", "locked"],
-            source="loop_mode",
-        )
-        self.turn_scratchpad.save(
-            f"Current loop goal: {loop_goal}",
-            tags=["loop", "goal"],
-            source="loop_mode",
-        )
-
-    # ── Loop state management ────────────────────────────────────────
-
-    def get_loop_state(self) -> dict:
-        """Return the current loop mode state dict."""
-        loop_features_raw = self.variables.get("loop_features", "")
-        try:
-            loop_features = json.loads(loop_features_raw) if loop_features_raw else []
-        except (json.JSONDecodeError, TypeError):
-            loop_features = []
-        return {
-            "goal": self.variables.get("loop_goal", ""),
-            "active": self.variables.get("loop_active", False),
-            "features": loop_features,
-        }
-
-    def start_loop(self, goal: str) -> None:
-        """Activate loop mode with the given long-horizon goal."""
-        self.variables["loop_goal"] = goal
-        self.variables["loop_active"] = True
-        self.variables["loop_features"] = json.dumps([])
-        self.variables["agent_mode"] = "loop"
-        self._ensure_loop_goal_persistence()
-        self.session_manager.save_history(self.folder_context)
-
-    def stop_loop(self) -> None:
-        """Deactivate loop mode."""
-        self.variables["loop_active"] = False
-        self.session_manager.save_history(self.folder_context)
-
-    def add_loop_feature(self, feature_id: str) -> None:
-        """Record a feature created during this loop session."""
-        loop_features_raw = self.variables.get("loop_features", "")
-        try:
-            loop_features = json.loads(loop_features_raw) if loop_features_raw else []
-        except (json.JSONDecodeError, TypeError):
-            loop_features = []
-        loop_features.append({
-            "id": feature_id,
-            "timestamp": datetime.now().isoformat(),
-        })
-        self.variables["loop_features"] = json.dumps(loop_features)
-        self.save_history()
-
-    def get_loop_features(self) -> list:
-        """Return list of feature dicts created during this loop."""
-        state = self.get_loop_state()
-        return state.get("features", [])
-
-    # ── End loop state management ─────────────────────────────────────
 
     def _build_retrieved_workspace_context(self, query: str) -> str:
         if not self.folder_context or not self.folder_context.folders:
@@ -1239,85 +1052,6 @@ class Session:
         if isinstance(data, str):
             return parsed, data
         return parsed, raw_result
-
-    def _build_feature_mode_prompt(self, text: str) -> str:
-        base_instruction = (
-            "FEATURE MODE DIRECTIVE: use the feature-task engine for this request. First call create_feature to create canonical session-managed feature metadata, then create_phases, then create_task for each planned ticket. "
-            "Legacy fallback: create_feature_task is allowed only when a single-call bootstrap is explicitly requested. "
-            "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
-            "After approval, call get_current_task/get_tasks at the start of every implementation turn, work on only the next incomplete task, and keep task state synchronized via tool calls only. "
-            "Use get_execution_state to identify the next pending phase/task, use block_task when work cannot continue without user input, and use resume_task after the user provides unblock context. "
-            "Use update_task_status/approve_feature_task/get_tasks/get_current_task exclusively to read or change task status. "
-            "Every task must define explicit EXIT CRITERIA, and you may set update_task_status(..., status='completed') only after all exit criteria for that task are demonstrably met and verified in the current codebase/tests. "
-            "As each criterion is satisfied, call update_task_status with cumulative verified_exit_criteria so progress is visible in the task UI. "
-            "In review mode, use review_all_completed_tasks first, then review_completed_tasks with categorized issues (bug/risk/enhancement), propose_task_diff for proposed fixes, decide_task_diff for user approvals/denials, and archive_task once tasks become archive-ready. "
-            "Harness execution model: progress one task at a time, validate, then move to the next task. Never batch multiple tasks in one step. "
-            "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush only after a tool result reported \"Stored ... in collation buffer\" (subagent sessions deliver read-only results inline — never call flush there). "
-            "Memory discipline is mandatory: use save_memory for durable facts/decisions that must survive long loops; use save_scratchpad for short-lived hypotheses and in-flight notes each turn; query memory/scratchpad before re-reading large context. "
-            "If you become blocked because you need a user decision or missing context, call raise_blocker with a precise summary, what you tried, and the exact input you need so the harness can pause and ask the user for help. "
-            "Do not pause after progress reports. Unless blocked or waiting on explicit approval/decision, immediately continue to the next actionable implementation step in the same run without asking the user to 'continue'. "
-            "Never move to the next task until the current task's exit criteria are fully satisfied and the task is marked completed via update_task_status. "
-            "When all tasks are complete, perform a review pass over the tasks and code changes together. If review fails, move failing tasks back to in_progress and continue implementing. If review succeeds, call approve_feature_task with review_status completed before you report success. "
-            "In every turn response, clearly identify: current task, evidence gathered, changes made, verification result, and the immediate next step.\n\n"
-        )
-        return base_instruction + text
-
-    def _build_loop_mode_prompt(self, text: str) -> str:
-        loop_goal = str(
-            self.variables.get("loop_goal")
-            or text
-            or ""
-        ).strip()
-        if loop_goal and not str(self.variables.get("loop_goal", "")).strip():
-            self.variables["loop_goal"] = loop_goal
-        base_instruction = (
-            "LOOP MODE DIRECTIVE: You are executing a long-horizon loop with a locked mission. "
-            "Maintain a self-directed backlog, keep exactly one active task, and continuously run plan -> execute -> verify -> re-plan cycles. "
-            "Persist durable decisions using save_memory and short-term plans using save_scratchpad. "
-            "After each increment, provide a timeline update with: objective, actions, evidence, decision, and next step. "
-            "When blocked on user input/credentials/environment constraints, call raise_blocker with explicit unblock requirements. "
-            "Do not stop unless user explicitly asks to stop loop mode.\n\n"
-            f"LOCKED LOOP GOAL:\n{loop_goal}\n\n"
-            "INCREMENT REQUEST:\n"
-        )
-        return base_instruction + text
-
-    def _feature_doc_tool_violation(self, tool_name: str, tool_args: dict) -> str | None:
-        if str(self.variables.get("agent_mode", "default")).lower() != "feature":
-            return None
-        feature_state = self.session_manager.get_feature_state()
-        if not isinstance(feature_state, dict):
-            return None
-        feature_dir = str(feature_state.get("directory", "") or "").strip()
-        if not feature_dir:
-            return None
-        if tool_name not in {"read_file", "get_chunk", "write_file", "apply_diff"}:
-            return None
-
-        arg_key = "file" if tool_name == "get_chunk" else "filename"
-        target = str(tool_args.get(arg_key, "") or "").strip()
-        if not target:
-            return None
-
-        if os.path.isabs(target):
-            candidate = os.path.abspath(target)
-        elif self.folder_context.folders:
-            candidate = os.path.abspath(os.path.join(self.folder_context.folders[0], target))
-        else:
-            candidate = os.path.abspath(target)
-
-        feature_root = os.path.abspath(feature_dir)
-        if not candidate.startswith(feature_root + os.sep):
-            return None
-
-        filename = os.path.basename(candidate)
-        if filename == "feature_plan.json":
-            return (
-                "Feature status files are managed by the feature-task engine. "
-                f"Do not use {tool_name} on '{filename}'. "
-                "Use get_tasks/get_current_task/update_task_status/approve_feature_task instead."
-            )
-        return None
 
     def _build_structured_tool_result(
         self,
@@ -1844,6 +1578,11 @@ class Session:
         lease_thread = None
         lease_acquired = False
         turn_started = False
+        _turn_clock = time.monotonic()
+        try:
+            _turn_cost0 = float((self.session_manager.token_counts or {}).get("total_cost", 0) or 0)
+        except (TypeError, ValueError):
+            _turn_cost0 = 0.0
         try:
             if coordinator is not None:
                 if not coordinator.heartbeat(
@@ -1901,6 +1640,17 @@ class Session:
             # clobbering it after the protective window closed.
             if turn_started:
                 self._strip_session_goal_after_turn()
+                # A loop mission pays for its turns (mu.loop.engine budgets).
+                if str(self.variables.get("agent_mode", "default")).lower() == "loop":
+                    try:
+                        from mu.loop.engine import account_turn
+
+                        cost = float((self.session_manager.token_counts or {}).get("total_cost", 0) or 0)
+                        account_turn(self, cost_usd=cost - _turn_cost0,
+                                     runtime_s=time.monotonic() - _turn_clock)
+                        self.session_manager.save_history(self.folder_context)
+                    except Exception:
+                        logger.debug("loop accounting failed", exc_info=True)
             try:
                 self.session_manager.end_turn_cas()
             except Exception:

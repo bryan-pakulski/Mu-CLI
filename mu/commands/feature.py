@@ -1,702 +1,181 @@
-"""Feature-mode slash command: /feature <subcommand>.
+"""``/feature`` — feature plans (``mu.feature.engine``). You approve; the agent executes.
 
-Subcommands:
-    /feature                              — list session features (alias of /feature list)
-    /feature list                         — list session features
-    /feature new <name>                   — create a feature record
-    /feature load <id>                    — activate an existing feature
-    /feature delete <id>                  — delete a feature record
-    /feature exit | unload                — clear active feature without deleting
-    /feature status | phases [<id>]       — show one feature's markdown view
-    /feature help                         — workflow help text
-    /feature create plan <name>           — staged-engine: create the plan shell
-    /feature create phase <title> | <goal>
-    /feature create task <phase_id> | <title> | <overview> | <exit1;exit2>
-    /feature show <board|execution|reviews>
-    /feature move <task_id> <status>
-    /feature block <task_id> <reason>
-    /feature review auto | /feature review <task_id> <summary>
-    /feature archive <task_id>
-    /feature monitor [refresh_seconds] [iterations|continuous]
+    /feature                          — list session features (alias of /feature list)
+    /feature list | new <name> | load <id> | delete <id> | exit
+    /feature status | phases [<id>]   — the plan: approval, tasks, criteria and evidence
+    /feature approve                  — approve the draft plan (records you and the plan hash)
+    /feature start <task>             — start a task (one in progress at a time)
+    /feature move <task> <status> [reason]  — the same gated move as the panel
+    /feature attest <task> <criterion> <why> — mark a criterion met without a run (recorded)
+    /feature done <task> <reason>     — complete a task with unmet criteria (override, recorded)
+    /feature diff <proposal> approve|reject [reason]
+    /feature review                   — what still blocks completion
+    /feature complete                 — mark the feature complete (preconditions enforced)
 """
 
 from __future__ import annotations
 
-import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
+
+from mu.feature import engine
+from mu.modes.events import GateError
 
 from . import CommandResult, command
+from ._mode_util import reply
+
+_ACTOR = "user:cli"
 
 
-# ----------------------------------------------------------------- helpers
+def _print_markdown(session: Any, markdown: str, allow_prompt: bool) -> None:
+    ui = getattr(session, "ui", None)
+    console = getattr(ui, "console", None) if ui is not None else None
+    if not allow_prompt:
+        return
+    if console is not None:
+        try:
+            from rich.markdown import Markdown
 
-
-def _ui(session: Any):
-    return getattr(session, "ui", None)
-
-
-def _console(session: Any):
-    ui = _ui(session)
-    return getattr(ui, "console", None) if ui is not None else None
+            console.print(Markdown(markdown))
+            return
+        except Exception:
+            pass
+    if ui is not None and hasattr(ui, "show_info"):
+        ui.show_info(markdown)
 
 
 def _refresh_hud(session: Any) -> None:
     try:
         from mucli import refresh_memory_hud
 
-        refresh_memory_hud(session, _ui(session))
+        refresh_memory_hud(session, getattr(session, "ui", None))
     except ImportError:
         pass
 
 
-def _print_markdown(session: Any, markdown: str, allow_prompt: bool) -> None:
-    if not allow_prompt:
-        return
-    console = _console(session)
-    if console is None:
-        return
-    try:
-        from rich.markdown import Markdown
-        from mu.ui.theme.pygments import syntax_theme
-
-        console.print(Markdown(markdown, code_theme=syntax_theme()))
-    except Exception:
-        try:
-            console.print(markdown, markup=False)
-        except Exception:
-            pass
-
-
-def _mucli_helpers() -> Dict[str, Callable]:
-    """Lazy-import the feature helpers from mucli — they touch globals
-    (session_manager state, citation registry) so they live there."""
-    try:
-        import mucli
-
-        return {
-            "default_dir": getattr(mucli, "_default_feature_directory", lambda *a, **k: None),
-            "build_md": getattr(mucli, "build_feature_markdown", lambda *a, **k: ""),
-            "refresh": getattr(mucli, "refresh_feature_record", lambda *a, **k: None),
-            "prompt_logged": getattr(mucli, "_feature_prompt_with_logging", None),
-            "confirm_loop": getattr(mucli, "_feature_confirm_deny_edit_loop", None),
-            "execute_tool": getattr(mucli, "_execute_feature_tool", None),
-            "monitor_line": getattr(mucli, "_monitor_compact_line", lambda payload: str(payload)),
-        }
-    except ImportError:
-        return {
-            "default_dir": lambda *a, **k: None,
-            "build_md": lambda *a, **k: "",
-            "refresh": lambda *a, **k: None,
-            "prompt_logged": None,
-            "confirm_loop": None,
-            "execute_tool": None,
-            "monitor_line": lambda payload: str(payload),
-        }
-
-
-def _err(message: str, data: Optional[Dict] = None) -> CommandResult:
-    return CommandResult(ok=False, message=message, data=data or {})
-
-
-# ----------------------------------------------------------------- subcommands
-
-
-def _exit(session: Any, allow_prompt: bool) -> CommandResult:
-    if not isinstance(session.session_manager.get_feature_state(), dict):
-        return _err("No active feature to exit.")
-    session.session_manager.clear_feature_state(session.folder_context)
-    session.sync_runtime_state()
-    _refresh_hud(session)
-    return CommandResult(
-        ok=True,
-        message="Exited active feature context.",
-        data={
-            "active_feature_id": session.session_manager.active_feature_id,
-            "feature": session.session_manager.get_feature_state(),
-        },
-    )
-
-
-def _new(session: Any, name: str, allow_prompt: bool) -> CommandResult:
-    if not name:
-        return _err("Usage: /feature new <feature_name>")
-    helpers = _mucli_helpers()
-    record = session.session_manager.create_feature_record(
-        name,
-        directory=helpers["default_dir"](session, name),
-        feature_request=name,
-    )
-    session.sync_runtime_state()
-    markdown = helpers["build_md"](
-        {**record, "token_total": session.session_manager.token_counts.get("total", 0)}
-    )
-    _print_markdown(session, markdown, allow_prompt)
-    _refresh_hud(session)
-    return CommandResult(
-        ok=True,
-        message=f"Created feature: {record['feature_id']}",
-        data={
-            "feature": record,
-            "markdown": markdown,
-            "features": session.session_manager.list_features(),
-        },
-    )
-
-
 def _list(session: Any, allow_prompt: bool) -> CommandResult:
-    helpers = _mucli_helpers()
-    features = [
-        helpers["refresh"](session, feature["feature_id"]) or feature
-        for feature in session.session_manager.list_features()
-    ]
-    if allow_prompt:
-        console = _console(session)
-        if console is not None:
-            try:
-                from rich import box
-                from rich.table import Table
-
-                table = Table(title="Session Features", box=box.SIMPLE_HEAD)
-                table.add_column("ID", style="wash.accent", no_wrap=True)
-                table.add_column("Current", style="wash.caution", justify="center")
-                table.add_column("Status", style="wash.ok")
-                table.add_column("Name", style="wash.ink")
-                table.add_column("Directory", style="wash.plum")
-                if features:
-                    for f in features:
-                        table.add_row(
-                            f.get("feature_id", ""),
-                            "*" if f.get("feature_id") == session.session_manager.active_feature_id else "",
-                            f.get("status", "unknown"),
-                            f.get("feature_name", ""),
-                            f.get("directory", ""),
-                        )
-                else:
-                    table.add_row("-", "", "none", "No features saved", "")
-                console.print(table)
-            except Exception:
-                pass
-    return CommandResult(
-        ok=True,
-        message="Listed session features.",
-        data={
-            "features": features,
-            "active_feature_id": session.session_manager.active_feature_id,
-        },
-    )
+    manager = session.session_manager
+    features = manager.list_features()
+    lines = [f"{'*' if f.get('feature_id') == manager.active_feature_id else ' '} {f.get('feature_id')} "
+             f"[{f.get('status', '?')}{', archived' if f.get('archived') else ''}] {f.get('feature_name', '')} "
+             f"({f.get('completed_count', 0)}/{f.get('task_count', 0)})" for f in features] or ["No features saved."]
+    return reply(session, "\n".join(lines), allow_prompt,
+                 data={"features": features, "active_feature_id": manager.active_feature_id})
 
 
-def _load(session: Any, feature_id: str, allow_prompt: bool) -> CommandResult:
-    if not feature_id:
-        return _err("Usage: /feature load <feature_id>")
-    helpers = _mucli_helpers()
-    record = helpers["refresh"](session, feature_id)
+def _status(session: Any, feature_id: str, include_phases: bool, allow_prompt: bool) -> CommandResult:
+    from mu.cli.feature import build_feature_markdown, refresh_feature_record
+
+    record = refresh_feature_record(session, feature_id or None)
     if not isinstance(record, dict):
-        return _err(f"Feature '{feature_id}' not found.")
-    activated = session.session_manager.activate_feature(record["feature_id"])
-    session.sync_runtime_state()
-    markdown = helpers["build_md"](
-        {**activated, "token_total": session.session_manager.token_counts.get("total", 0)}
-    )
+        return reply(session, "No feature selected.", allow_prompt, ok=False)
+    markdown = build_feature_markdown(record, include_phases=include_phases)
     _print_markdown(session, markdown, allow_prompt)
-    _refresh_hud(session)
-    _queue_feature_resumption_briefing(session, activated)
-    return CommandResult(
-        ok=True,
-        message=f"Loaded feature: {record['feature_id']}",
-        data={"feature": activated, "markdown": markdown},
-    )
+    return CommandResult(ok=True, message=markdown, data={"feature": record, "markdown": markdown})
 
 
-def _queue_feature_resumption_briefing(session: Any, record: dict) -> None:
-    """Tell the next-turn agent that it just resumed a feature plan.
-
-    The model otherwise asks the user "what were we working on?" — a
-    waste when the engine already knows. Surfaces the in-flight task,
-    most recent status, and any blocker so the agent can pick up the
-    implementation loop directly.
-    """
+def _queue_briefing(session: Any) -> None:
     if not hasattr(session, "queue_resumption_briefing"):
         return
-    if not isinstance(record, dict):
+    plan = engine.active_plan(session, cached=True)
+    if plan is None:
         return
-    feature_id = str(record.get("feature_id") or "").strip()
-    feature_name = str(record.get("feature_name") or feature_id or "").strip()
-    status = str(record.get("status") or "").strip() or "unknown"
-    lines = [
-        f"You just resumed feature-mode plan **{feature_id}** "
-        f"(name: {feature_name!r}).",
-        f"Plan status: {status}.",
-    ]
-    plan = record.get("feature_plan") or {}
-    if isinstance(plan, dict):
-        tasks = plan.get("tasks") or []
-        if isinstance(tasks, list) and tasks:
-            in_progress = [
-                t for t in tasks
-                if isinstance(t, dict) and t.get("status") == "in_progress"
-            ]
-            blocked = [
-                t for t in tasks
-                if isinstance(t, dict) and t.get("status") == "blocked"
-            ]
-            completed = [
-                t for t in tasks
-                if isinstance(t, dict) and t.get("status") == "completed"
-            ]
-            lines.append(
-                f"Tasks: {len(completed)}/{len(tasks)} completed, "
-                f"{len(in_progress)} in progress, {len(blocked)} blocked."
-            )
-            if in_progress:
-                t = in_progress[0]
-                lines.append(
-                    f"Current task: `{t.get('id', '?')}` — {t.get('title', '')!r}."
-                )
-            if blocked:
-                t = blocked[0]
-                lines.append(
-                    f"Blocked task: `{t.get('id', '?')}` — reason: "
-                    f"{t.get('blocked_reason', '(none)')!r}."
-                )
-    blocker = record.get("blocker")
-    if isinstance(blocker, dict) and blocker:
-        summary = blocker.get("summary", "(no summary)")
-        lines.append(f"Outstanding blocker: {summary!r}.")
-    lines.append(
-        "ACTION: call get_current_task and continue the feature loop. Do NOT "
-        "re-plan from scratch — the plan, phases, and tasks are persisted."
-    )
-    session.queue_resumption_briefing("\n".join(lines))
-
-
-def _delete(session: Any, feature_id: str, allow_prompt: bool) -> CommandResult:
-    if not feature_id:
-        return _err("Usage: /feature delete <feature_id>")
-    deleted = session.session_manager.delete_feature(feature_id)
-    session.sync_runtime_state()
-    _refresh_hud(session)
-    if not isinstance(deleted, dict):
-        return _err(f"Feature '{feature_id}' not found.")
-    return CommandResult(
-        ok=True,
-        message=f"Deleted feature: {deleted['feature_id']}",
-        data={"deleted_feature": deleted},
-    )
-
-
-_HELP_TEXT = (
-    "Feature workflow commands:\n"
-    "- /feature create plan <name>\n"
-    "- /feature create phase <title> | <goal>\n"
-    "- /feature create task <phase_id> | <title> | <overview> | <exit1;exit2>\n"
-    "- /feature show <board|execution|reviews>\n"
-    "- /feature move <task_id> <status>\n"
-    "- /feature block <task_id> <reason>\n"
-    "- /feature review auto\n"
-    "- /feature review <task_id> <summary>\n"
-    "- /feature archive <task_id>\n"
-    "- /feature monitor [refresh_seconds] [iterations|continuous]\n"
-    "\nExamples:\n"
-    "- /feature create plan Checkout Cleanup\n"
-    "- /feature create phase API Hardening | Reduce flaky retries\n"
-    "- /feature create task 1 | Validate headers | Add strict parsing | Unit tests;Docs updated\n"
-    "- /feature move 1 in_progress\n"
-    "- /feature block 1 waiting_for_user_input\n"
-    "- /feature show board\n"
-    "- /feature monitor 1.0 10\n"
-)
-
-
-def _help(session: Any, allow_prompt: bool) -> CommandResult:
-    if allow_prompt:
-        console = _console(session)
-        if console is not None:
-            try:
-                from rich.panel import Panel
-
-                console.print(Panel(_HELP_TEXT, title="Feature Command Help", border_style="wash.border"))
-            except Exception:
-                pass
-    return CommandResult(ok=True, message="Rendered feature help.", data={"usage": _HELP_TEXT})
-
-
-def _create(session: Any, payload: str, allow_prompt: bool) -> CommandResult:
-    parts = payload.split(" ", 1) if payload else []
-    if len(parts) < 2:
-        return _err("Usage: /feature create <plan|phase|task> <args>")
-    kind = parts[0].lower().strip()
-    body = parts[1].strip()
-    helpers = _mucli_helpers()
-    exec_tool = helpers["execute_tool"]
-    prompt_logged = helpers["prompt_logged"]
-    confirm_loop = helpers["confirm_loop"]
-
-    if exec_tool is None or prompt_logged is None or confirm_loop is None:
-        return _err("Feature engine helpers unavailable (mucli not loaded).")
-
-    if kind == "plan":
-        mode_choice = prompt_logged(
-            session,
-            question="Select planning style",
-            options=[
-                ("balanced", "Balanced (Recommended): detail + speed"),
-                ("fast", "Fast: minimal planning, rapid execution"),
-                ("thorough", "Thorough: deep planning before coding"),
-            ],
-            prompt_id="plan_style",
-            allow_prompt=allow_prompt,
-            context={"feature_name": body},
-        )
-        confirm = confirm_loop(
-            session,
-            label="plan request",
-            value=body,
-            allow_prompt=allow_prompt,
-            context={"kind": "plan_create"},
-        )
-        if confirm["decision"] == "deny":
-            return _err("Plan creation cancelled. Re-run with a revised name.")
-        resp = exec_tool(
-            session,
-            "create_feature",
-            {
-                "feature_name": confirm["value"],
-                "feature_request": confirm["value"],
-                "design_plan": f"cli_planning_style={mode_choice}",
-            },
-        )
-        ok = bool(resp.get("ok"))
-        return CommandResult(
-            ok=ok,
-            message="Created feature plan shell." if ok else str(resp.get("error", resp)),
-            data=resp,
-        )
-
-    if kind == "phase":
-        phase_parts = [p.strip() for p in body.split("|", 1)]
-        if len(phase_parts) != 2:
-            return _err("Usage: /feature create phase <title> | <goal>")
-        confirm = confirm_loop(
-            session,
-            label="phase title",
-            value=phase_parts[0],
-            allow_prompt=allow_prompt,
-            context={"kind": "phase_create"},
-        )
-        if confirm["decision"] == "deny":
-            return _err("Phase creation cancelled. Re-run with updated title/goal.")
-        state = session.session_manager.get_feature_state() or {}
-        plan = (state.get("feature_plan") if isinstance(state, dict) else {}) or {}
-        existing = list(plan.get("phases_meta", []))
-        next_id = len(existing) + 1
-        existing.append({"id": next_id, "title": confirm["value"], "goal": phase_parts[1], "order": next_id})
-        resp = exec_tool(session, "create_phases", {"phases": existing, "replace_existing": True})
-        ok = bool(resp.get("ok"))
-        return CommandResult(
-            ok=ok,
-            message="Phase created." if ok else str(resp.get("error", resp)),
-            data=resp,
-        )
-
-    if kind == "task":
-        task_parts = [p.strip() for p in body.split("|")]
-        if len(task_parts) != 4:
-            return _err(
-                "Usage: /feature create task <phase_id> | <title> | <overview> | <exit1;exit2>"
-            )
-        exit_criteria = [c.strip() for c in task_parts[3].split(";") if c.strip()]
-        confirm = confirm_loop(
-            session,
-            label="task title",
-            value=task_parts[1],
-            allow_prompt=allow_prompt,
-            context={"kind": "task_create", "phase_id": task_parts[0]},
-        )
-        if confirm["decision"] == "deny":
-            return _err("Task creation cancelled. Re-run with an updated task payload.")
-        resp = exec_tool(
-            session,
-            "create_task",
-            {
-                "phase_id": int(task_parts[0]),
-                "title": confirm["value"],
-                "overview": task_parts[2],
-                "exit_criteria": exit_criteria,
-            },
-        )
-        ok = bool(resp.get("ok"))
-        return CommandResult(
-            ok=ok,
-            message="Task created." if ok else str(resp.get("error", resp)),
-            data=resp,
-        )
-
-    return _err("Unknown create target. Use plan|phase|task.")
-
-
-def _show(session: Any, view: str, allow_prompt: bool) -> CommandResult:
-    view = (view or "board").strip().lower()
-    helpers = _mucli_helpers()
-    feature = helpers["refresh"](session, None)
-    if not isinstance(feature, dict):
-        return _err("No feature selected.")
-    plan = feature.get("feature_plan", {}) if isinstance(feature.get("feature_plan"), dict) else {}
-
-    if view == "execution":
-        exec_tool = helpers["execute_tool"]
-        if exec_tool is None:
-            return _err("Feature engine helpers unavailable.")
-        payload = exec_tool(session, "get_execution_state", {})
-        return CommandResult(ok=True, message="Rendered execution view.", data=payload)
-    if view == "reviews":
-        return CommandResult(
-            ok=True,
-            message="Rendered review summaries.",
-            data={
-                "review_summaries": plan.get("review_summaries", []),
-                "review_count": plan.get("review_count", 0),
-            },
-        )
-    if view == "board":
-        return CommandResult(
-            ok=True,
-            message="Rendered board snapshot.",
-            data={
-                "active_tasks": plan.get("active_tasks", []),
-                "execution": plan.get("execution", {}),
-            },
-        )
-    return _err("Unknown show target. Use board|execution|reviews.")
-
-
-def _move(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
-    parts = rest.split(" ", 1)
-    if len(parts) != 2:
-        return _err("Usage: /feature move <task_id> <status>")
-    helpers = _mucli_helpers()
-    exec_tool = helpers["execute_tool"]
-    if exec_tool is None:
-        return _err("Feature engine helpers unavailable.")
-    task_id = int(parts[0])
-    status = parts[1].strip()
-    args = {"task_id": task_id, "status": status}
-    if status == "completed":
-        feature = helpers["refresh"](session, None) or {}
-        plan = feature.get("feature_plan", {}) if isinstance(feature, dict) else {}
-        criteria: List[str] = []
-        for task in plan.get("phases", []):
-            if int(task.get("id", -1)) == task_id:
-                criteria = list(task.get("exit_criteria", []))
-                break
-        args["verified_exit_criteria"] = criteria
-    resp = exec_tool(session, "update_task_status", args)
-    return CommandResult(
-        ok=bool(resp.get("ok")),
-        message="Task moved." if resp.get("ok") else str(resp.get("error", resp)),
-        data=resp,
-    )
-
-
-def _block(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
-    parts = rest.split(" ", 1)
-    if len(parts) != 2:
-        return _err("Usage: /feature block <task_id> <reason>")
-    helpers = _mucli_helpers()
-    exec_tool = helpers["execute_tool"]
-    if exec_tool is None:
-        return _err("Feature engine helpers unavailable.")
-    resp = exec_tool(session, "block_task", {"task_id": int(parts[0]), "reason": parts[1]})
-    return CommandResult(
-        ok=bool(resp.get("ok")),
-        message="Task blocked." if resp.get("ok") else str(resp.get("error", resp)),
-        data=resp,
-    )
-
-
-def _review(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
-    helpers = _mucli_helpers()
-    exec_tool = helpers["execute_tool"]
-    if exec_tool is None:
-        return _err("Feature engine helpers unavailable.")
-    if (rest or "").strip().lower() == "auto":
-        resp = exec_tool(session, "review_all_completed_tasks", {})
-        return CommandResult(
-            ok=bool(resp.get("ok")),
-            message="Auto-review completed tasks." if resp.get("ok") else str(resp.get("error", resp)),
-            data=resp,
-        )
-    parts = rest.split(" ", 1)
-    if len(parts) != 2:
-        return _err(
-            "Usage: /feature review <task_id> <summary> OR /feature review auto"
-        )
-    resp = exec_tool(
-        session,
-        "review_completed_tasks",
-        {"task_id": int(parts[0]), "summary": parts[1], "issues": []},
-    )
-    return CommandResult(
-        ok=bool(resp.get("ok")),
-        message="Review recorded." if resp.get("ok") else str(resp.get("error", resp)),
-        data=resp,
-    )
-
-
-def _archive(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
-    if not rest:
-        return _err("Usage: /feature archive <task_id>")
-    helpers = _mucli_helpers()
-    exec_tool = helpers["execute_tool"]
-    if exec_tool is None:
-        return _err("Feature engine helpers unavailable.")
-    resp = exec_tool(session, "archive_task", {"task_id": int(rest)})
-    return CommandResult(
-        ok=bool(resp.get("ok")),
-        message="Task archived." if resp.get("ok") else str(resp.get("error", resp)),
-        data=resp,
-    )
-
-
-def _monitor(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
-    refresh_seconds = 2.0
-    mode_arg = ""
-    if rest:
-        try:
-            refresh_seconds = max(0.5, float(rest))
-        except ValueError:
-            pieces = rest.split()
-            try:
-                refresh_seconds = max(0.5, float(pieces[0]))
-            except (ValueError, IndexError):
-                return _err(
-                    "Usage: /feature monitor [refresh_seconds] [iterations|continuous]"
-                )
-            mode_arg = pieces[1].strip().lower() if len(pieces) > 1 else ""
-
-    if not allow_prompt:
-        iterations: Optional[int] = 1
-    elif mode_arg == "continuous":
-        iterations = None
-    elif mode_arg:
-        try:
-            iterations = max(1, int(mode_arg))
-        except ValueError:
-            return _err(
-                "Usage: /feature monitor [refresh_seconds] [iterations|continuous]"
-            )
-    else:
-        iterations = 5
-
-    helpers = _mucli_helpers()
-    exec_tool = helpers["execute_tool"]
-    monitor_line = helpers["monitor_line"]
-    if exec_tool is None:
-        return _err("Feature engine helpers unavailable.")
-
-    snapshots: List[Dict[str, Any]] = []
-    last_line: Optional[str] = None
-    tick = 0
-    console = _console(session)
-    try:
-        while iterations is None or tick < iterations:
-            payload = exec_tool(session, "get_execution_state", {})
-            snapshots.append(payload)
-            if allow_prompt and console is not None:
-                line = monitor_line(payload)
-                if line != last_line:
-                    try:
-                        from utils.helpers import safe_markup as _esc
-
-                        console.print(f"[wash.accent]{_esc(line)}[/wash.accent]")
-                    except Exception:
-                        pass
-                    last_line = line
-            tick += 1
-            if allow_prompt and (iterations is None or tick < iterations):
-                time.sleep(refresh_seconds)
-    except KeyboardInterrupt:
-        if allow_prompt and console is not None:
-            try:
-                console.print("[wash.caution]Monitor stopped by user.[/wash.caution]")
-            except Exception:
-                pass
-
-    return CommandResult(
-        ok=True,
-        message="Rendered feature monitor.",
-        data={
-            "snapshots": snapshots,
-            "refresh_seconds": refresh_seconds,
-            "mode": mode_arg or "fixed",
-            "iterations": iterations if iterations is not None else "continuous",
-        },
-    )
-
-
-def _status_or_phases(session: Any, sub: str, rest: str, allow_prompt: bool) -> CommandResult:
-    helpers = _mucli_helpers()
-    feature = helpers["refresh"](session, rest or None)
-    if not isinstance(feature, dict):
-        return _err("No feature selected.")
-    markdown = helpers["build_md"](
-        {**feature, "token_total": session.session_manager.token_counts.get("total", 0)},
-        include_phases=(sub == "phases"),
-    )
-    _print_markdown(session, markdown, allow_prompt)
-    return CommandResult(
-        ok=True,
-        message=f"Rendered feature {sub}.",
-        data={"feature": feature, "markdown": markdown},
-    )
-
-
-# ----------------------------------------------------------------- dispatch
+    session.queue_resumption_briefing(
+        f"You resumed feature plan {plan.feature_id} ({plan.feature_name!r}), status {plan.status}. "
+        "The mode state below shows the current task and its criteria; call feature_status for the full "
+        "plan. Do not re-plan from scratch.")
 
 
 @command(
     "/feature",
-    help="Feature workflows: list/new/load/delete/exit, status/phases, create, show, move, block, review, archive, monitor, help.",
+    help="Feature plans: list/new/load/delete/exit, status/phases, approve, start, move, attest, done, diff, review, complete.",
 )
 def feature_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     raw = (args or "").strip()
-    if not raw:
-        return _list(session, allow_prompt)
-
     head, _, rest = raw.partition(" ")
-    sub = head.lower()
+    sub = head.lower() or "list"
     rest = rest.strip()
+    manager = session.session_manager
+    try:
+        if sub == "list":
+            return _list(session, allow_prompt)
+        if sub == "new":
+            if not rest:
+                return reply(session, "Usage: /feature new <name>", allow_prompt, ok=False)
+            from mu.cli.feature import _default_feature_directory
 
-    if sub in ("exit", "unload"):
-        return _exit(session, allow_prompt)
-    if sub == "new":
-        return _new(session, rest, allow_prompt)
-    if sub == "list":
-        return _list(session, allow_prompt)
-    if sub == "load":
-        return _load(session, rest, allow_prompt)
-    if sub == "delete":
-        return _delete(session, rest, allow_prompt)
-    if sub == "help":
-        return _help(session, allow_prompt)
-    if sub == "create":
-        return _create(session, rest, allow_prompt)
-    if sub == "show":
-        return _show(session, rest, allow_prompt)
-    if sub == "move":
-        return _move(session, rest, allow_prompt)
-    if sub == "block":
-        return _block(session, rest, allow_prompt)
-    if sub == "review":
-        return _review(session, rest, allow_prompt)
-    if sub == "archive":
-        return _archive(session, rest, allow_prompt)
-    if sub == "monitor":
-        return _monitor(session, rest, allow_prompt)
-    if sub in ("status", "phases"):
-        return _status_or_phases(session, sub, rest, allow_prompt)
-
-    return CommandResult(
-        ok=False,
-        message=f"Unknown feature command: {sub}. Use '/feature help' for guidance.",
-    )
+            record = manager.create_feature_record(rest, directory=_default_feature_directory(session, rest),
+                                                   feature_request=rest)
+            _refresh_hud(session)
+            return reply(session, f"Created draft feature {record['feature_id']}. Ask the agent to propose its plan.",
+                         allow_prompt, data={"feature": record})
+        if sub == "load":
+            record = manager.get_feature(rest)
+            if not isinstance(record, dict):
+                return reply(session, f"Feature '{rest}' not found.", allow_prompt, ok=False)
+            manager.activate_feature(record["feature_id"])
+            _queue_briefing(session)
+            _refresh_hud(session)
+            return _status(session, record["feature_id"], True, allow_prompt)
+        if sub == "delete":
+            deleted = manager.delete_feature(rest)
+            if not isinstance(deleted, dict):
+                return reply(session, f"Feature '{rest}' not found.", allow_prompt, ok=False)
+            return reply(session, f"Deleted feature {deleted['feature_id']}.", allow_prompt)
+        if sub in ("exit", "unload"):
+            if not isinstance(manager.get_feature_state(), dict):
+                return reply(session, "No active feature to exit.", allow_prompt, ok=False)
+            manager.clear_feature_state(session.folder_context)
+            _refresh_hud(session)
+            return reply(session, "Exited the active feature.", allow_prompt)
+        if sub in ("status", "phases", "show"):
+            return _status(session, rest, True, allow_prompt)
+        if sub == "approve":
+            plan = engine.approve(session, actor=_ACTOR)
+            return reply(session, f"Approved {plan.feature_id} (revision {plan.revision}, hash "
+                         f"{plan.approval['plan_hash']}).", allow_prompt)
+        if sub == "start" and rest:
+            task = engine.start_task(session, rest, actor=_ACTOR)
+            return reply(session, f"t{task.id} in progress: {task.title}", allow_prompt)
+        if sub == "move":
+            parts = rest.split(None, 2)
+            if len(parts) < 2:
+                return reply(session, "Usage: /feature move <task> <status> [reason]", allow_prompt, ok=False)
+            task = engine.transition(session, parts[0], parts[1], actor=_ACTOR,
+                                     reason=parts[2] if len(parts) > 2 else "")
+            return reply(session, f"t{task.id} is {task.status}.", allow_prompt)
+        if sub == "attest":
+            parts = rest.split(None, 2)
+            if len(parts) < 3:
+                return reply(session, "Usage: /feature attest <task> <criterion> <why>", allow_prompt, ok=False)
+            crit = engine.attest_criterion(session, parts[0], parts[1], note=parts[2], actor=_ACTOR)
+            return reply(session, f"{crit.id} marked met (attested).", allow_prompt)
+        if sub == "done":
+            parts = rest.split(None, 1)
+            if len(parts) < 2:
+                return reply(session, "Usage: /feature done <task> <override reason>", allow_prompt, ok=False)
+            task = engine.complete_task(session, parts[0], actor=_ACTOR, override_reason=parts[1])
+            return reply(session, f"t{task.id} completed" + (" (override recorded)." if task.override else "."),
+                         allow_prompt)
+        if sub == "diff":
+            parts = rest.split(None, 2)
+            if len(parts) < 2 or parts[1] not in ("approve", "reject"):
+                return reply(session, "Usage: /feature diff <proposal> approve|reject [reason]", allow_prompt, ok=False)
+            proposal = engine.decide_diff(session, parts[0], decision={"approve": "approved", "reject": "rejected"}[parts[1]],
+                                          reason=parts[2] if len(parts) > 2 else "", actor=_ACTOR)
+            return reply(session, f"Proposal {proposal.id} {proposal.status}.", allow_prompt)
+        if sub == "review":
+            plan = engine.require_plan(session)
+            gaps = engine.completion_gaps(session, plan)
+            body = ("Ready to complete: /feature complete." if not gaps
+                    else "Before completion:\n" + "\n".join(f"- {g}" for g in gaps))
+            return reply(session, body, allow_prompt, data={"gaps": gaps})
+        if sub == "complete":
+            plan = engine.complete_feature(session, actor=_ACTOR)
+            return reply(session, f"Feature {plan.feature_id} is done and archived.", allow_prompt)
+        if sub == "help":
+            return reply(session, __doc__.strip(), allow_prompt)
+    except GateError as exc:
+        return reply(session, str(exc), allow_prompt, ok=False, data={"code": exc.code})
+    except (ValueError, KeyError) as exc:
+        return reply(session, str(exc), allow_prompt, ok=False)
+    return reply(session, f"Unknown feature command: {sub}. /feature help lists them.", allow_prompt, ok=False)

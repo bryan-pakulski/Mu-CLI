@@ -2,7 +2,7 @@
 
 mucli's tests validate the product's core requirements. They are grouped by pillar, one folder each, and every test exercises behaviour. This page lists what each pillar must prove and the files that prove it. AGENTS.md has the rules in short.
 
-**Size:** 1,535 tests in 101 files, plus 27 node tests in `tests/gui/frontend/`. A full run takes about 7 minutes: ~6.1 min is the Docker suites, the rest ~67 s.
+**Size:** 1,688 tests in 124 files, plus 40 node tests in `tests/gui/frontend/`. A full run takes about 7 minutes: ~6.1 min is the Docker suites, the rest ~85 s.
 
 ```bash
 python3 -m pytest tests/ -q                 # everything (Docker required)
@@ -29,17 +29,17 @@ NODE_PATH=mobile/android/node_modules node --test tests/gui/frontend/*.cjs
 
 | Pillar | Folder | Files | Tests | Time |
 |---|---|---|---|---|
-| Agent loop & providers | `tests/agent/` | 9 | 113 | 2 s |
-| Context engineering | `tests/context/` | 13 | 141 | 11 s |
-| Sessions & memory | `tests/sessions/` | 9 | 103 | 3 s |
-| Tools & safety gates | `tests/tools/` | 11 | 171 | 1 s |
-| Modes & commands | `tests/modes/` | 9 | 178 | 1 s |
+| Agent loop & providers | `tests/agent/` | 12 | 129 | 5 s |
+| Context engineering | `tests/context/` | 13 | 144 | 11 s |
+| Sessions & memory | `tests/sessions/` | 11 | 111 | 3 s |
+| Tools & safety gates | `tests/tools/` | 16 | 202 | 8 s |
+| Modes & commands | `tests/modes/` | 13 | 195 | 19 s |
 | Containers | `tests/containers/` | 4 | 31 | 0 s |
-| Engineering jobs | `tests/jobs/` | 20 | 396 | 370 s |
-| Orchestration | `tests/orchestration/` | 12 | 199 | 37 s |
-| Web GUI | `tests/gui/` | 4 | 52 | 3 s |
-| Design system | `tests/design/` | 3 | 13 | 1 s |
-| Terminal UI | `tests/terminal/` | 5 | 79 | 6 s |
+| Engineering jobs | `tests/jobs/` | 20 | 401 | 370 s |
+| Orchestration | `tests/orchestration/` | 16 | 236 | 39 s |
+| Web GUI | `tests/gui/` | 8 | 87 | 6 s |
+| Design system | `tests/design/` | 3 | 14 | 1 s |
+| Terminal UI | `tests/terminal/` | 6 | 83 | 6 s |
 | Tracing & costs | `tests/trace/` | 3 | 62 | 1 s |
 
 ### Agent loop & providers — `tests/agent/`
@@ -50,19 +50,22 @@ Must prove:
 - Streamed output assembles once
 - Transient provider errors retry; fatal ones surface
 - Subagents spawn, report back and are bounded; parallel dispatch keeps results in order
-- Loops and stalls are detected
+- Loops and stalls are detected; the loop watchdog only continues a running mission, its counters reset each turn, and `raise_blocker` is a core tool that stands it down
+- Default mode's turn receipt records edits and checks after the last edit; the verify nudge fires once
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
 | `test_anthropic_provider.py` | 41 | 0.0 s | Anthropic (Claude) provider: request shaping, cache breakpoints and TTL, tool-id pairing, thinking |
 | `test_provider_prompt_caching.py` | 6 | 0.0 s | Cache hints from the session; OpenAI GPT-5.6+ breakpoints, retention and fallback |
 | `test_loop_detection.py` | 10 | 0.0 s |  |
+| `test_loop_watchdog.py` | 3 | 0.9 s | Loop watchdog and the core raise_blocker tool |
 | `test_mu_agent_session_integration.py` | 9 | 0.2 s | Integration tests: hooks + plan mode fire from the existing Session loop |
 | `test_mu_parallel_dispatch.py` | 8 | 0.5 s | Tests that the session agentic loop dispatches eligible tool calls in |
 | `test_mu_spawn_agent.py` | 20 | 0.8 s | Tests for the real `spawn_agent` implementation (async orchestrator) |
 | `test_ollama_routes.py` | 11 | 0.0 s | Ollama routes (cloud / daemon→cloud / local): stable num_ctx, think mapping, side calls, |
 | `test_provider_retry.py` | 6 | 0.0 s | Pin the exponential-backoff retry around provider calls |
 | `test_subagent_history_cards.py` | 5 | 0.0 s | Durable, time-anchored subagent cards for web and mobile history |
+| `test_turn_receipt.py` | 5 | 1.8 s | Default mode's turn receipt: edits, checks after the last edit, and the one-time verify nudge |
 | `test_vision_e2e.py` | 5 | 0.0 s | Pin the /file → capability-gated native-media pipeline end-to-end |
 
 ### Context engineering — `tests/context/`
@@ -103,13 +106,17 @@ Must prove:
 - Threads create, coordinate and delete safely
 - The Memory Ledger stores and recalls; two surfaces stay consistent
 - Session files (artifacts, uploads) delete at any time; concurrent registry writers lose nothing
+- Research state is session-owned: concurrent sessions never share it, and it persists with the session
+- Mode state (cases, missions, work items, blockers, checks, receipts) is typed, session-owned and persisted with the session
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
 | `test_durable_memory.py` | 12 | 0.2 s | Cross-session Memory Ledger: persistence, scope, audit and UX contracts |
 | `test_gui_session_history.py` | 6 | 0.0 s |  |
+| `test_mode_state.py` | 4 | 0.2 s | Mode state is typed, session-owned and persisted with the session |
 | `test_gui_unreadable_session.py` | 5 | 0.0 s | GUI must surface an unreadable session.json, never demote it to workspace |
 | `test_mu_tools_memory.py` | 15 | 0.0 s | Pin the migrated memory + scratchpad tools (`mu/tools/memory/`) |
+| `test_research_state.py` | 4 | 0.1 s | Research state is session-owned: concurrent searches stay apart; it persists; the earlier list shape loads |
 | `test_session_revision.py` | 32 | 0.1 s | Cross-surface continuity phase 1: session revision counter + CAS + If-Match |
 | `test_session_files.py` | 3 | 2.3 s | Artifact and upload delete during a turn; one shared lock per registry file |
 | `test_session_unreadable_doc.py` | 4 | 0.0 s | SessionManager must never clobber a session.json it cannot read |
@@ -124,6 +131,9 @@ Must prove:
 - Secret paths are refused and secrets scrubbed from results and shell output
 - Tool bounds and path resolution hold; the shell is non-interactive
 - Dispatch envelopes, batch tools and retries behave
+- Research reads are clean, bounded and recorded; search results stay candidates until read (loopback pages only)
+- Mode checks (`run_check`) refuse plan mode and secret commands, use no login shell and a scrubbed environment, time out and keep full output out of context
+- Work items keep one item in progress and need passing evidence for done in loop mode
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
@@ -132,32 +142,46 @@ Must prove:
 | `test_envelope_hints_retry.py` | 21 | 0.0 s | Tests for the hint + retryable envelope extensions and the session-level |
 | `test_gui_plan_mode.py` | 7 | 0.0 s | Plan mode is a first-class session variable for the GUI and mobile: listed, |
 | `test_harness_layers.py` | 6 | 0.0 s |  |
+| `test_research_candidates.py` | 1 | 0.5 s | Search results are candidates: never numbered or in the bibliography until read |
+| `test_research_extract.py` | 7 | 3.8 s | Reading: main content, metadata, query-ranked passages within max_chars, full text kept, mirrors merged, batch fetch |
+| `test_research_urls.py` | 9 | 0.0 s | URL canonicalisation and origin grouping for research sources |
 | `test_mu_agent_plan_mode.py` | 5 | 0.0 s | Tests for `mu.agent.plan_mode` — read-only enforcement |
 | `test_mu_tools_registry.py` | 6 | 0.0 s | Tests for the tool registry in `mu.tools` |
+| `test_run_check.py` | 9 | 1.6 s | run_check runs commands under the bash controls and records evidence |
 | `test_secret_paths.py` | 59 | 0.1 s | Unit tests for the always-on path denylist |
 | `test_secret_scrubber.py` | 20 | 0.0 s | Unit tests for the secret-output scrubber |
 | `test_shell_noninteractive.py` | 6 | 1.1 s | Unattended shell commands must fail prompts fast and clean up descendants |
 | `test_tool_path_resolution.py` | 6 | 0.0 s | Relative tool paths resolve against the session workspace, not process cwd |
+| `test_work_items.py` | 5 | 0.4 s | Work items replace scratchpad todos |
 
 ### Modes & commands — `tests/modes/`
 
 Must prove:
 
 - Commands are registered, discoverable and listed in help
-- The feature/plan engine transitions correctly
-- Teacher, security and skills work; citations resolve
+- Debug cases accept only a failing repro, need evidence to confirm a hypothesis, verify fixes with the repro and suite, and survive a reload; runs are refused in plan mode
+- Feature plans need user approval (with a plan hash; revisions need re-approval), one task at a time, evidence for each criterion and a passing suite before completion; every surface goes through the engine
+- Loop missions are user-owned; increments persist, a paused mission does not continue, an exhausted budget pauses and passing done-when criteria finish it
+- Teacher gates (diagnostic, user-only curriculum approval, lesson order, lecture before assignment, verifier pre-check, finish) refuse and record user overrides; rubrics are weighted and reviews are dated
+- Security scans persist per session; PoCs require reviewed commands and explicit host consent or Docker isolation; frozen proof bundles, real patch hunks, executing probes, regression checks and CVSS confirmation gate approval. Scope, coverage and observations remain distinct from verified findings. Skills work
+- The research ledger refuses unread or misquoted evidence, grades confidence by independent origins, and its report, bibliography and exports come only from recorded claims
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
-| `test_citation_manager.py` | 25 | 0.0 s | Tests for the CitationManager module |
 | `test_command_surface.py` | 5 | 0.0 s | Pin the slash-command surface so cleanup decisions don't drift |
-| `test_feature_mode_phase_one.py` | 4 | 0.0 s |  |
+| `test_debug_case.py` | 10 | 6.4 s | Debug cases: typed, engine-checked, persisted; edit gate, plan mode and bisect |
+| `test_feature_gates.py` | 10 | 1.3 s | Feature plans: draft → user approval → evidence-backed tasks → review → user completion, every surface through the engine |
+| `test_loop_mission.py` | 9 | 0.7 s | Loop missions: user-owned goal, increments with evidence, real pause, budgets, done-when |
 | `test_mode_workspace.py` | 9 | 0.0 s | Mode workspace contracts expose evidence without inventing certainty |
 | `test_mu_commands_registry.py` | 23 | 0.0 s | Tests for the new slash-command registry in `mu.commands` |
-| `test_security_mode.py` | 23 | 0.1 s | Tests for the security audit engine |
+| `test_research_ledger.py` | 8 | 0.0 s | Evidence ledger: claims quote sources that were read; confidence counts origins; subtree status |
+| `test_research_report.py` | 3 | 0.1 s | Report skeleton, bibliography numbering and exports come from the ledger |
+| `test_security_mode.py` | 13 | — | Scope, dedup, CVSS, coverage, report generation, persistence and full verified lifecycle |
+| `test_security_runs.py` | 16 | — | Host opt-in, secret/script guard, immutable bundles, stale approvals, false fixes, plan mode and YOLO human approval |
 | `test_skills.py` | 42 | 0.1 s | Pin the skills discovery + injection system |
 | `test_teacher_engine.py` | 35 | 0.1 s | Tests for the teacher-mode engine |
 | `test_teacher_grading.py` | 12 | 1.0 s | Tests for teacher-mode assignment grading |
+| `test_teacher_tools.py` | 12 | 8.9 s | Teacher mode through its tool handlers: lifecycle, lecture tracking, gates with user overrides, verifier integrity, weighted rubrics, mastery and dated reviews |
 
 ### Containers — `tests/containers/`
 
@@ -218,6 +242,7 @@ Must prove:
 - Remote policy edits are operator-only; CSRF on every mutating route
 - The web schema mirrors node/schema.py
 - Groups (members or selector) target runs; the node dashboard reports health with reasons; group changes are operator-only
+- An orchestration chat resumes exactly once when a run it proposed finishes
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
@@ -226,6 +251,8 @@ Must prove:
 | `test_node_history.py` | 6 | 1.0 s | Node history: the agent's sampler (CPU/network/disk-I/O rates from /proc deltas), clean samples on the master clock, node/group series, rollups and retention, the API, terminal sparklines |
 | `test_node_groups.py` | 7 | 0.3 s | Node groups (members and selectors), run targeting, the node dashboard's health, AI refused, `mucli orch groups/dashboard` |
 | `test_orch_container_nodes.py` | 1 | 7.6 s | Disposable container test nodes (plan §6.8): needs Docker (mandatory) and pulls an image |
+| `test_alert_e2e.py` | 2 | 3.9 s | A real agent over HTTPS watches an allowed log, the alert reaches a webhook; monitors and their settings travel in bundles |
+| `test_orch_continuation.py` | 7 | 2.0 s | Automatic continuation: a finished AI-proposed run resumes its orchestration chat once (never operator runs, already-read runs, busy retries, the `orch_auto_continue` switch) |
 | `test_orch_crypto.py` | 25 | 0.2 s | Vendored Ed25519 verification and signed envelopes (orchestration plan §6.3) |
 | `test_orch_integration.py` | 13 | 15.5 s | Master and real node agents over HTTPS long-poll on loopback (plan §11 integration, P0/P1); the installer picks a Python 3.10+ without touching the system python3 |
 | `test_orch_maintenance.py` | 15 | 1.0 s | Node maintenance without custom tools: every node reports whether it needs a reboot (agent |
@@ -245,6 +272,8 @@ Must prove:
 - Prompts wait indefinitely and Stop cancels them
 - The shell serves destinations and embeds
 - File panels serve correct data; the browser renders dialogs and restored traces (node tests)
+- The research panel serves the named session's ledger; its tree, matrix and claim sheet build correctly (node tests)
+- Mode routers serve the requested session's own records; user actions go through the engines with the surface as the actor; the shared mode shell's models (state sentence, Now order, marks, receipt, plan rows) build correctly (node tests)
 - Remote clients must pair: apps by bearer token, browsers on the pairing page into an HttpOnly cookie that keeps CSRF; wrong codes lock out exponentially
 
 | File | Tests | Time | What it covers |
@@ -252,6 +281,9 @@ Must prove:
 | `test_device_pairing.py` | 26 | 3.4 s | Device pairing: the store, lockouts, the gate, browser pairing page and cookie, CSRF, revocation |
 | `test_gui_files.py` | 32 | 0.3 s | GUI Files panel — workspace explorer + editor backend |
 | `test_gui_webui_coalescing.py` | 9 | 0.0 s | GUI WebUI delta coalescing |
+| `test_mode_state_api.py` | 6 | 1.2 s | Mode routers on the shared shell: session-scoped records, user actions through the engines |
+| `test_research_state_api.py` | 1 | 0.1 s | GET /api/research/state serves the named session's questions, claims, sources and matrix |
+| `test_session_list_awaiting.py` | 2 | 0.5 s | The session list marks every session with a pending prompt |
 | `test_web_persistent_shell.py` | 8 | 1.4 s | The persistent shell (mu/gui/shell.py; Mu revision 2): browsers get one shell document |
 | `test_web_prompts_wait.py` | 3 | 0.7 s | Agent questions never time out (user decision, 2026-10-20): when the model hands the turn to |
 
@@ -274,13 +306,14 @@ Must prove:
 Must prove:
 
 - Rich markup escapes dynamic values
-- The session picker, editor bridge and jobs TUI work
+- The session picker, editor bridge, jobs TUI and /research subcommands work
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
 | `test_editor.py` | 19 | 0.4 s | Editor integration contracts: context safety, provider isolation, and transport |
 | `test_jobs_tui.py` | 37 | 2.1 s | Terminal job dashboard (/jobs): render snapshots, breakpoints, key → command mapping |
 | `test_markup_safety.py` | 11 | 0.0 s | Rich markup is only interpreted where our own code wrote it |
+| `test_research_command.py` | 4 | 0.1 s | /research questions, claims, gaps, sources --state, export and topic |
 | `test_startup_session_picker.py` | 9 | 0.0 s | Startup control-centre flow for terminal users |
 | `test_wash_markup_lint.py` | 3 | 3.3 s | Lint: dynamic values must be escaped before they go into Rich markup |
 
@@ -305,3 +338,14 @@ Must prove:
 ## How the harness got here (2026-10-20)
 
 An audit of the previous suite (5,001 tests, 379 files) classified every file against these pillars. About 700 tests asserted text in source files, 13 Python files duplicated the Android Jest suite, job tests were organised by milestone, and some tests guarded removed features or old-store migrations. The decision was to keep only the files that prove each pillar's requirements, organise them by pillar, drop text assertions, make Docker mandatory and stop supporting old job stores. Running the formerly opt-in Docker suites found two real issues, both fixed: the secret scan flagged the `/etc/ssh/ssh_config.d` directory as key material, and Sysbox detection didn't notice a stopped Sysbox service. It also found two tests that still described superseded behaviour; those were updated to match the current product.
+
+
+Security v2 cross-surface checks (2026-10-23): `tests/gui/test_security_state_api.py`
+proves session isolation, web/mobile gates, desktop run review and nonblocking state reads;
+`tests/containers/test_security_sandbox_docker.py` proves network and host-filesystem isolation
+with the real runtime image (mandatory Docker); `tests/terminal/test_security_command.py`
+proves operator runner selection and reopen. `tests/gui/frontend/mode-shell.test.cjs` and
+`history-traces.test.cjs` cover security models, escaping and human-only approvals under YOLO.
+Android's `workspace-panels.test.tsx` and `prompts-inline.test.tsx` cover decisions and desktop
+PoC review. The retired marker-only/fake-patch security tests were replaced by these behavioural
+contracts, not retained as compatibility pins.

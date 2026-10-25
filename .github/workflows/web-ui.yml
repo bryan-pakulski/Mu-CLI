@@ -33,4 +33,4 @@ jobs:
       - name: Check dialog and restored trace rendering
         env:
           NODE_PATH: ${{ github.workspace }}/mobile/android/node_modules
-        run: node --test tests/gui/frontend/dialogs.test.cjs tests/gui/frontend/history-traces.test.cjs tests/gui/frontend/appearance.test.cjs tests/gui/frontend/pairing-guard.test.cjs tests/gui/frontend/mu-live.test.cjs tests/gui/frontend/node-history.test.cjs tests/gui/frontend/node-groups.test.cjs
+        run: node --test tests/gui/frontend/dialogs.test.cjs tests/gui/frontend/history-traces.test.cjs tests/gui/frontend/appearance.test.cjs tests/gui/frontend/pairing-guard.test.cjs tests/gui/frontend/mu-live.test.cjs tests/gui/frontend/node-history.test.cjs tests/gui/frontend/node-groups.test.cjs tests/gui/frontend/research-ledger.test.cjs tests/gui/frontend/mode-shell.test.cjs

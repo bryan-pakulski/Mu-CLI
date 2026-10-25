@@ -1,201 +1,66 @@
-<aside class="mode-panel"
-       data-mode="security"
-       x-show="$store.mode.active === 'security'"
-       x-transition.opacity.duration.200ms>
-
-    {% include "fragments/mode_workspace_header.html" %}
-
-    <!-- empty state -->
-    <div class="panel-empty w-empty" data-size="sm" data-tone="danger" x-show="!$store.security.report">
-        <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-shield"></use></svg></div>
-        <h3 class="w-empty__title">No scan active</h3>
-        <p class="w-empty__body">In chat: <code>/security scan &lt;title&gt;</code> to start an audit.</p>
+<aside class="mode-panel" data-mode="security" x-show="$store.mode.active === 'security'" x-transition.opacity.duration.200ms>
+    {% with shell_mode="security" %}{% include "fragments/mode_shell.html" %}{% endwith %}
+    <div class="panel-empty w-empty" data-size="sm" x-show="$store.security.loaded && !$store.security.state.report">
+        <h3 class="w-empty__title">Start an audit</h3>
+        <p class="w-empty__body">Describe the authorised scope in chat, or use <code>/security scan &lt;title&gt;</code>.</p>
     </div>
-
-    <!-- header: scan id, title, severity distribution -->
-    <div class="panel-head" x-show="$store.security.report">
-        <div class="panel-subject"
-             x-text="$store.security.report && $store.security.report.title"></div>
-        <div class="panel-meta">
-            <span class="mono" x-text="$store.security.report && $store.security.report.scan_id"></span>
-            <span class="tag w-chip" data-variant="meta" x-text="$store.security.report && $store.security.report.status"></span>
-            <span x-text="($store.security.report && $store.security.report.findings_total || 0) + ' findings'"></span>
-        </div>
-        <!-- severity distribution bar -->
-        <template x-if="$store.security.summary && $store.security.summary.by_severity">
-            <div class="severity-bar" role="img"
-                 :aria-label="'Severity distribution: ' + ['critical','high','medium','low','info'].filter(s => $store.security.summary.by_severity[s]).map(s => s + ' ' + $store.security.summary.by_severity[s]).join(', ')">
-                <template x-for="sev in ['critical','high','medium','low','info']" :key="sev">
-                    <div class="severity-segment"
-                         x-show="$store.security.summary.by_severity[sev]"
-                         :data-severity="sev"
-                         :style="'flex: ' + ($store.security.summary.by_severity[sev] || 0)"
-                         :title="sev + ': ' + ($store.security.summary.by_severity[sev] || 0)"></div>
-                </template>
-            </div>
-        </template>
-    </div>
-
-    <!-- findings list -->
-    <section class="panel-section w-panel__section"
-             x-show="$store.security.findings.length && $store.modeWorkspace.shows('findings', 'evidence', 'remediation')"
-             :class="{ open: $store.security.openSections.findings }">
-        <button class="panel-section-head w-panel__section-head"
-                @click="$store.security.toggleSection('findings')"
-                :aria-expanded="$store.security.openSections.findings">
-            <span class="caret w-panel__caret" aria-hidden="true">›</span>
-            <span class="panel-section-name w-panel__section-title">Findings</span>
-            <span class="panel-section-count w-count"
-                  x-text="$store.security.filteredFindings().length"></span>
-        </button>
-        <div class="panel-section-body w-panel__section-body" x-show="$store.security.openSections.findings"
-             x-transition.opacity.duration.120ms>
-            <!-- severity filter chips -->
-            <div class="source-filters"
-                 x-show="$store.security.severities().length > 1">
-                <template x-for="sev in $store.security.severities()" :key="sev">
-                    <button type="button" class="severity-chip w-chip" data-variant="filter"
-                            :data-severity="sev"
-                            :class="{ active: $store.security.isSeverityActive(sev) }"
-                            :aria-pressed="$store.security.isSeverityActive(sev) ? 'true' : 'false'"
-                            @click="$store.security.toggleSeverity(sev)"
-                            x-text="sev"></button>
-                </template>
-            </div>
-
-            <!-- finding rows -->
-            <ul class="finding-list">
-                <template x-for="f in $store.security.filteredFindings()" :key="f.finding_id">
-                    <li class="finding-item"
-                        :class="{ expanded: $store.security.isFindingExpanded(f.finding_id) }">
-                        <div class="finding-row" role="button" tabindex="0"
-                             :aria-expanded="$store.security.isFindingExpanded(f.finding_id)"
-                             @click="$store.security.toggleFinding(f.finding_id)"
-                             @keydown.enter.prevent="$store.security.toggleFinding(f.finding_id)"
-                             @keydown.space.prevent="$store.security.toggleFinding(f.finding_id)">
-                            <span class="severity-dot" :data-severity="(f.severity || '').toLowerCase()"
-                                  :title="'Severity: ' + f.severity"></span>
-                            <span class="status-glyph" aria-hidden="true"
-                                  x-text="$store.security.statusGlyph(f.status)"></span>
-                            <span class="finding-title" x-text="f.title"></span>
-                            <span class="finding-badges">
-                                <span class="w-chip" x-show="f.has_proof"
-                                      :data-tone="f.proof_verified ? 'ok' : 'neutral'"
-                                      x-text="f.proof_verified ? 'PoC ✓' : 'PoC'"></span>
-                                <span class="w-chip" x-show="f.has_remediation"
-                                      :data-tone="f.remediation_verified ? 'ok' : 'neutral'"
-                                      x-text="f.remediation_verified ? 'Fix ✓' : 'Fix'"></span>
-                            </span>
-                        </div>
-
-                        <!-- drill-down detail -->
-                        <div class="finding-detail"
-                             x-show="$store.security.isFindingExpanded(f.finding_id)"
-                             x-transition.opacity.duration.120ms>
-                            <div class="finding-meta-grid">
-                                <div class="finding-meta-row">
-                                    <span class="finding-meta-key">Id</span>
-                                    <span class="mono" x-text="f.finding_id"></span>
-                                </div>
-                                <div class="finding-meta-row">
-                                    <span class="finding-meta-key">Severity</span>
-                                    <span class="severity-label" :data-severity="(f.severity || '').toLowerCase()"
-                                          x-text="f.severity"></span>
-                                </div>
-                                <div class="finding-meta-row">
-                                    <span class="finding-meta-key">Class</span>
-                                    <span x-text="f.vulnerability_class || '—'"></span>
-                                </div>
-                                <div class="finding-meta-row">
-                                    <span class="finding-meta-key">Status</span>
-                                    <span x-text="f.status"></span>
-                                </div>
-                            </div>
-
-                            <p class="finding-summary"
-                               x-show="f.summary"
-                               x-text="f.summary"></p>
-
-                            <div class="finding-paths"
-                                 x-show="(f.affected_paths || []).length">
-                                <h5>Affected</h5>
-                                <template x-for="(p, pi) in (f.affected_paths || [])" :key="pi">
-                                    <div class="finding-path mono" x-text="p"></div>
-                                </template>
-                            </div>
-
-                            <!-- proof section -->
-                            <div class="finding-proof" x-show="f.has_proof && $store.modeWorkspace.shows('findings', 'evidence')">
-                                <h5>Proof of concept</h5>
-                                <pre class="proof-cmd" x-show="f.proof_command"><code x-text="f.proof_command"></code></pre>
-                                <p class="muted" x-show="f.proof_description" x-text="f.proof_description"></p>
-                                <span class="mono muted" x-show="f.proof_verified_at"
-                                      x-text="'verified ' + $store.security.formatTimestamp(f.proof_verified_at)"></span>
-                            </div>
-
-                            <!-- remediation section -->
-                            <div class="finding-remediation" x-show="f.has_remediation && $store.modeWorkspace.shows('findings', 'remediation')">
-                                <h5>Remediation</h5>
-                                <p class="muted" x-show="f.remediation_description" x-text="f.remediation_description"></p>
-                                <pre class="patch-diff" x-show="f.patch_diff"><code x-text="f.patch_diff"></code></pre>
-                                <span class="mono muted" x-show="f.remediation_verified_at"
-                                      x-text="'verified ' + $store.security.formatTimestamp(f.remediation_verified_at)"></span>
-                            </div>
-
-                            <!-- actions: approve / refute -->
-                            <div class="finding-actions"
-                                 x-show="f.status !== 'approved' && f.status !== 'refuted'">
-                                <button type="button" class="finding-action-btn approve w-btn" data-variant="primary" data-size="sm"
-                                        x-show="f.proof_verified && f.remediation_verified"
-                                        @click.stop="$store.confirm.ask(
-                                            'Approve finding ' + f.finding_id + '?',
-                                            $event,
-                                            () => $store.security.approveFinding(f.finding_id)
-                                        )">Approve</button>
-                                <button type="button" class="finding-action-btn refute w-btn" data-variant="secondary" data-size="sm"
-                                        @click.stop="$store.confirm.ask(
-                                            'Refute finding ' + f.finding_id + '?',
-                                            $event,
-                                            () => $store.security.refuteFinding(f.finding_id, 'refuted via GUI')
-                                        )">Refute</button>
-                            </div>
-                        </div>
-                    </li>
-                </template>
-            </ul>
-        </div>
-    </section>
-
-    <!-- scan stats -->
-    <section class="panel-section w-panel__section"
-             x-show="$store.security.summary && $store.modeWorkspace.shows('findings')"
-             :class="{ open: $store.security.openSections.stats }">
-        <button class="panel-section-head w-panel__section-head"
-                @click="$store.security.toggleSection('stats')"
-                :aria-expanded="$store.security.openSections.stats">
-            <span class="caret w-panel__caret" aria-hidden="true">›</span>
-            <span class="panel-section-name w-panel__section-title">Stats</span>
-        </button>
-        <div class="panel-section-body w-panel__section-body" x-show="$store.security.openSections.stats"
-             x-transition.opacity.duration.120ms>
-            <template x-if="$store.security.summary && $store.security.summary.by_status">
-                <div class="scan-stats">
-                    <template x-for="[status, count] in Object.entries($store.security.summary.by_status)" :key="status">
-                        <div class="scan-stat-row">
-                            <span class="status-glyph" aria-hidden="true" x-text="$store.security.statusGlyph(status)"></span>
-                            <span x-text="status"></span>
-                            <span class="mono muted" x-text="count"></span>
-                        </div>
+    <template x-if="$store.security.state.report">
+        <div class="mode-body" role="tabpanel">
+            <section class="w-group" x-show="$store.security.tab === 'Risk'">
+                <h3 class="w-group__title" x-text="$store.security.state.report.title"></h3>
+                <dl class="w-facts">
+                    <template x-for="[key, value] in Object.entries($store.security.state.report.scope || {})" :key="key">
+                        <div><dt x-text="key.replaceAll('_', ' ')"></dt><dd x-text="Array.isArray(value) ? value.join(', ') : value"></dd></div>
                     </template>
-                </div>
-            </template>
+                    <dt>Runner</dt><dd x-text="$store.security.state.runner === 'host' ? 'Host · real workspace' : 'Container'"></dd>
+                </dl>
+                <details class="w-disclose" x-show="!$store.security.state.plan_mode">
+                    <summary>Execution settings</summary>
+                    <p>Docker uses a disposable workspace with network off. Host runs use the real workspace.</p>
+                    <button type="button" class="w-textbtn" @click="$store.security.chooseRunner('docker')">Use Docker</button>
+                    <button type="button" class="w-textbtn" @click="$store.security.chooseRunner('host')">Enable host for this scan…</button>
+                </details>
+                <h3 class="w-group__title" x-show="($store.security.state.observations || []).length">Observations</h3>
+                <ul class="w-rows">
+                    <template x-for="o in ($store.security.state.observations || [])" :key="o.id">
+                        <li class="w-row"><div class="w-row__main"><span class="w-row__title" x-text="o.title"></span><span class="w-row__sub" x-text="o.note"></span></div></li>
+                    </template>
+                </ul>
+            </section>
+            <section class="w-group" x-show="$store.security.tab === 'Findings'">
+                <p class="w-group__empty" x-show="!$store.security.findings().length">No hypotheses recorded.</p>
+                <ul class="w-rows">
+                    <template x-for="r in $store.security.findings()" :key="r.id">
+                        <li class="w-row">
+                            <span class="w-sign" :data-status="r.status" aria-hidden="true" x-text="r.glyph"></span>
+                            <button type="button" class="w-row__main" @click="$store.security.openFinding(r.raw)"><span class="w-row__title" x-text="r.title"></span><span class="w-row__sub" x-text="r.sub"></span></button>
+                            <button type="button" class="w-textbtn" x-show="r.raw.patch_diff" @click="$store.security.openDiff(r.raw)">Diff</button>
+                            <button type="button" class="w-textbtn" x-show="!$store.security.state.plan_mode && !['approved', 'refuted'].includes(r.raw.status)" @click="$store.security.handle('refute', { ref: r.id })">Refute…</button>
+                        </li>
+                    </template>
+                </ul>
+                <details class="w-disclose" x-show="($store.security.state.runs || []).length">
+                    <summary>Run history</summary>
+                    <ul class="w-rows">
+                        <template x-for="run in ($store.security.state.runs || [])" :key="run.id">
+                            <li class="w-row"><button type="button" class="w-row__main" @click="$store.security.openRun(run)"><span class="w-row__title" x-text="$store.security.runRow(run).title"></span><span class="w-row__sub" x-text="run.command"></span></button></li>
+                        </template>
+                    </ul>
+                </details>
+            </section>
+            <section class="w-group" x-show="$store.security.tab === 'Coverage'">
+                <progress class="w-bar" :max="Math.max(1, $store.security.state.report.coverage.total)" :value="$store.security.state.report.coverage.reviewed" aria-label="Surface items reviewed"></progress>
+                <p class="w-group__empty">Pattern discovery is a review aid, not exhaustive coverage.</p>
+                <ul class="w-rows">
+                    <template x-for="item in ($store.security.state.surface || [])" :key="item.id">
+                        <li class="w-row"><span class="w-sign" :data-status="window.MuModes.vstyle('security_surface', item.status).status" x-text="window.MuModes.vstyle('security_surface', item.status).glyph"></span><div class="w-row__main"><span class="w-row__title mono" x-text="item.path + ':' + item.line"></span><span class="w-row__sub" x-text="item.note || item.snippet"></span></div></li>
+                    </template>
+                </ul>
+            </section>
+            <section class="w-group" x-show="$store.security.tab === 'Report'">
+                <p class="w-group__empty" x-show="!$store.security.state.report_markdown">Generate a report to capture findings, coverage, refutations and observations.</p>
+                <button type="button" class="w-textbtn" x-show="$store.security.state.report_markdown" @click="$store.security.openReport()">Read report →</button>
+            </section>
         </div>
-    </section>
-
-    <!-- footnote -->
-    <div class="panel-footnote"
-         x-show="$store.security.report && $store.security.report.metadata_path"
-         :title="'Report read from ' + ($store.security.report && $store.security.report.metadata_path)"
-         x-text="'↳ ' + ($store.security.report && $store.security.report.metadata_path)"></div>
-
+    </template>
 </aside>

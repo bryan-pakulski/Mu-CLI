@@ -1,206 +1,152 @@
-"""Security-mode introspection.
-
-Surfaces the active SecurityReport so the GUI can render findings with
-their proof/remediation workflow state. Reports live on disk under
-``documentation/security_scan_<scan_id>/report.json`` (workspace) or
-``~/.mucli/sessions/<id>/security/`` (session fallback).
-
-Discovery: the in-memory session may hold ``_active_security_report``
-(set by the security tool handlers). When nothing is in memory we fall
-back to scanning the workspace's ``documentation/`` tree for the most
-recently modified report.json.
-
-Read-only by default. The two mutation endpoints (approve / refute)
-take the per-session lock to serialize with concurrent chat turns.
-"""
-
-from __future__ import annotations
-
-import glob
-import json
-import logging
-import os
+"""Session-scoped security state and operator decisions. PoCs stay in tool approvals."""
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..mode_workspace import security_workspace
+from mu.modes.evidence import CheckRefused
+from mu.security import engine
+from mu.security.state import security_state
 from ..mode_session import mode_session, mode_session_lock
-
-from mu.security.engine import (
-    SEVERITY_LEVELS,
-    SecurityReport,
-    approve_finding,
-    load_report,
-    refute_finding,
-    save_report,
-    summarize_report,
-)
+from ..mode_workspace import security_workspace
+from .mode_state import save, states_for, surface_actor
 
 router = APIRouter()
-_logger = logging.getLogger(__name__)
 
 
-def _discover_report(session) -> Optional[SecurityReport]:
-    """Try to find an active SecurityReport for the given session.
-
-    1. In-memory (set by the security tool handlers during a turn).
-    2. Workspace glob: most recently modified report.json under
-       ``documentation/security_scan_*/``.
-    """
-    report = getattr(session, "_active_security_report", None)
-    if isinstance(report, SecurityReport):
-        return report
-
-    sm = session.session_manager
-    folders = getattr(sm.folder_context, "folders", []) or []
-    workspace = folders[0] if folders else None
-    if not workspace:
-        return None
-
-    pattern = os.path.join(workspace, "documentation", "security_scan_*", "report.json")
-    candidates = glob.glob(pattern)
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
-    for path in candidates:
-        report = load_report(path)
-        if report is not None:
-            return report
-    return None
+def _run_payload(run):
+    from mu.modes.evidence import describe_predicate
+    data = dict(run)
+    data.pop("log_path", None)
+    data["security_output_path"] = str(run.get("evidence_path", "")) + "/output.txt"
+    data["predicate_text"] = describe_predicate(run.get("predicate") or {})
+    return data
 
 
-def _finding_payload(f) -> Dict[str, Any]:
-    """Compact finding dict for the panel — avoids shipping raw stdout."""
-    proof = f.proof
-    remediation = f.remediation
-    return {
-        "finding_id": f.finding_id,
-        "title": f.title,
-        "summary": f.summary,
-        "vulnerability_class": f.vulnerability_class,
-        "severity": f.severity,
-        "affected_paths": list(f.affected_paths or []),
-        "exploit_path": f.exploit_path,
-        "references": list(f.references or []),
-        "status": f.status,
-        "created_at": f.created_at,
-        "updated_at": f.updated_at,
-        "has_proof": proof is not None,
-        "proof_verified": bool(proof and proof.verified),
-        "proof_command": (proof.command if proof else ""),
-        "proof_description": (proof.description if proof else ""),
-        "proof_verified_at": (proof.verified_at if proof else None),
-        "has_remediation": remediation is not None,
-        "remediation_verified": bool(remediation and remediation.verified),
-        "remediation_description": (remediation.description if remediation else ""),
-        "remediation_verified_at": (remediation.verified_at if remediation else None),
-        "patch_diff": (remediation.patch_diff if remediation else ""),
-    }
+def _finding_payload(f):
+    data = asdict(f)
+    data["runs"] = [_run_payload(r) for r in f.runs]
+    proof, rem = f.proof, f.remediation
+    data.update(has_proof=proof is not None, proof_verified=bool(proof and proof.verified),
+                proof_command=proof.command if proof else "", proof_description=proof.description if proof else "",
+                proof_verified_at=proof.verified_at if proof else None, proof_notes=proof.notes if proof else "",
+                has_remediation=rem is not None, remediation_verified=bool(rem and rem.verified),
+                remediation_description=rem.description if rem else "",
+                remediation_verified_at=rem.verified_at if rem else None, remediation_notes=rem.notes if rem else "", patch_diff=rem.patch_diff if rem else "")
+    data.pop("proof")
+    data.pop("remediation")
+    return data
+
+
+def security_payload(session):
+    active = bool(session and session.variables.get("agent_mode") == "security")
+    data = {"active": active, "report": None, "findings": [], "summary": None, "surface": [],
+            "observations": [], "runs": [], "report_markdown": "", "runner": "docker", "host_allowed": False,
+            "plan_mode": bool(session and session.variables.get("plan_mode")), "blockers": []}
+    report = engine.active_report(session, required=False) if session else None
+    if report:
+        summary = engine.summarize_report(report)
+        data.update(report={**summary, "summary": report.summary, "created_at": report.created_at, "updated_at": report.updated_at},
+                    summary=summary, findings=[_finding_payload(f) for f in report.findings],
+                    surface=report.surface, observations=report.observations,
+                    runs=[_run_payload(r) for f in report.findings for r in f.runs], runner=engine.runner_for(session, report),
+                    host_allowed=security_state(session).execution.get(report.scan_id, {}).get("host_allowed", False))
+        path = engine.safe_path(report.workspace_root, str(Path(report.directory, "REPORT.md")), exists=False)
+        if Path(path).is_file():
+            data["report_markdown"] = Path(path).read_text()
+    data["workspace"] = security_workspace(data["report"], data["findings"], active=active)
+    return data
 
 
 @router.get("/state")
-async def get_security_state(request: Request) -> Dict[str, Any]:
+async def get_security_state(request: Request) -> dict[str, Any]:
     session = mode_session(request)
-    if session is None:
-        return {
-            "active": False,
-            "report": None,
-            "findings": [],
-            "summary": None,
-            "workspace": security_workspace(None, [], active=False),
-        }
-
-    report = _discover_report(session)
-    mode_active = session.variables.get("agent_mode", "default") == "security"
-    if report is None:
-        return {
-            "active": True,
-            "report": None,
-            "findings": [],
-            "summary": None,
-            "workspace": security_workspace(None, [], active=mode_active),
-        }
-
-    findings = [_finding_payload(f) for f in report.findings]
-    summary = summarize_report(report)
-
-    report_payload = {
-        "scan_id": report.scan_id,
-        "title": report.title,
-        "summary": report.summary,
-        "status": report.status,
-        "directory": report.directory,
-        "metadata_path": report.metadata_path,
-        "findings_total": len(report.findings),
-        "created_at": report.created_at,
-        "updated_at": report.updated_at,
-    }
-    return {
-        "active": True,
-        "report": report_payload,
-        "findings": findings,
-        "summary": summary,
-        "workspace": security_workspace(
-            report_payload, findings, active=mode_active
-        ),
-    }
+    # A chat turn holds the session lock while waiting for approval. Reads must
+    # remain available so the panel can show the very decision it is waiting on.
+    return security_payload(session)
 
 
-class ApproveBody(BaseModel):
-    pass
+def _mutate(request, action):
+    session, _ = states_for(request)
+    with mode_session_lock(request, session):
+        try:
+            engine.writable(session)
+            report = engine.active_report(session)
+            action(session, report)
+            engine.persist(session, report)
+            save(session)
+        except (ValueError, CheckRefused) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return security_payload(session)
 
 
 class RefuteBody(BaseModel):
-    reason: str = ""
+    reason: str
 
 
 @router.post("/findings/{finding_id}/approve")
-async def approve(request: Request, finding_id: str) -> Dict[str, Any]:
-    session = mode_session(request)
-    if session is None:
-        raise HTTPException(status_code=412, detail="no session active")
-
-    report = _discover_report(session)
-    if report is None:
-        raise HTTPException(status_code=404, detail="no active security report")
-
-    lock = mode_session_lock(request, session)
-    with lock:
-        finding = report.find(finding_id)
-        if finding is None:
-            raise HTTPException(status_code=404, detail=f"finding {finding_id} not found")
-        try:
-            approve_finding(finding)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
-        save_report("", report)
-
-    return {"ok": True, "finding_id": finding_id, "status": finding.status}
+async def approve(request: Request, finding_id: str):
+    def action(session, report):
+        engine.approve_finding(engine.require_finding(report, finding_id), report=report, owner=session)
+        report.events.append({"action": "approve", "finding_id": finding_id, "actor": surface_actor(request)})
+    data = _mutate(request, action)
+    return {**data, "ok": True, "finding_id": finding_id, "status": "approved"}
 
 
 @router.post("/findings/{finding_id}/refute")
-async def refute(request: Request, finding_id: str, body: RefuteBody) -> Dict[str, Any]:
-    session = mode_session(request)
-    if session is None:
-        raise HTTPException(status_code=412, detail="no session active")
+async def refute(request: Request, finding_id: str, body: RefuteBody):
+    def action(session, report):
+        engine.refute_finding(engine.require_finding(report, finding_id), reason=body.reason)
+        report.events.append({"action": "refute", "finding_id": finding_id, "actor": surface_actor(request)})
+    data = _mutate(request, action)
+    return {**data, "ok": True, "finding_id": finding_id, "status": "refuted"}
 
-    report = _discover_report(session)
-    if report is None:
-        raise HTTPException(status_code=404, detail="no active security report")
 
-    lock = mode_session_lock(request, session)
-    with lock:
-        finding = report.find(finding_id)
-        if finding is None:
-            raise HTTPException(status_code=404, detail=f"finding {finding_id} not found")
+class RunnerBody(BaseModel):
+    runner: str
+
+
+@router.post("/runner")
+async def runner(request: Request, body: RunnerBody):
+    return _mutate(request, lambda session, report: engine.configure_runner(session, body.runner, actor=surface_actor(request)))
+
+
+@router.post("/report")
+async def report(request: Request):
+    return _mutate(request, lambda session, report: engine.generate_report(report))
+
+
+class OpenBody(BaseModel):
+    scan_id: str
+
+
+@router.post("/open")
+async def open_scan(request: Request, body: OpenBody):
+    session, _ = states_for(request)
+    with mode_session_lock(request, session):
         try:
-            refute_finding(finding, reason=body.reason)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
-        save_report("", report)
+            engine.open_report(session, body.scan_id)
+            save(session)
+        except (ValueError, CheckRefused) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return security_payload(session)
 
-    return {"ok": True, "finding_id": finding_id, "status": finding.status}
+
+@router.get("/artifacts/{artifact_path:path}")
+async def artifact(request: Request, artifact_path: str):
+    """Read only generated evidence inside the selected session's active scan."""
+    import re
+    session, _ = states_for(request)
+    try:
+        report = engine.active_report(session)
+        allowed = (artifact_path == "REPORT.md" or
+                   re.fullmatch(r"findings/f[0-9]+\.md|patches/f[0-9]+\.diff|proofs/f[0-9]+/r[0-9]+-[a-f0-9]+/(?:output\.txt|run\.json|bundle\.json)", artifact_path))
+        if not allowed:
+            raise ValueError("unknown security artifact")
+        path = engine.safe_path(report.directory, artifact_path)
+        return {"path": artifact_path, "text": Path(path).read_text(),
+                "format": "markdown" if path.endswith(".md") else "text"}
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=404, detail="security artifact not found") from exc

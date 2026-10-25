@@ -128,8 +128,8 @@ def _queue_session_resumption_briefing(session: Any) -> None:
         status = feature_state.get("status") or ""
         fragments.append(
             f"ACTIVE FEATURE: `{feature_id}` (name: {feature_name!r}, "
-            f"status: {status}). Call get_current_task to see the next "
-            "actionable item; do NOT re-plan from scratch."
+            f"status: {status}). Call feature_status to see the plan and the "
+            "next task; do NOT re-plan from scratch."
         )
 
     if len(fragments) <= 1:

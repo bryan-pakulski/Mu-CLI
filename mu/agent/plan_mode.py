@@ -32,22 +32,34 @@ WRITE_TOOLS: Set[str] = {
     "bash_kill",
     # Sub-agents inherit YOLO and can write freely — block at the spawn site.
     "spawn_agent",
-    # Feature-mode mutators
-    "create_feature",
-    "create_phases",
-    "create_task",
-    "update_task_status",
+    # Feature-mode mutators (plan files, task state, command runs).
+    "propose_feature_plan",
+    "revise_feature_plan",
+    "start_task",
+    "check_criterion",
+    "cite_evidence",
+    "complete_task",
     "block_task",
-    "resume_task",
-    "archive_task",
+    "review_task",
+    "run_feature_suite",
     "propose_task_diff",
-    "decide_task_diff",
-    "create_feature_task",
-    "update_feature_task",
-    "approve_feature_task",
+    "request_feature_completion",
     # Security-mode mutators (the PoC verifications execute shell commands
     # against the workspace; in plan mode that's a write-side effect even
     # if the verification itself is read-only-ish).
+    "create_security_report",
+    "open_security_report",
+    "set_security_scope",
+    "scan_attack_surface",
+    "review_surface_item",
+    "add_observation",
+    "add_security_finding",
+    "attach_security_proof",
+    "attach_remediation_patch",
+    "confirm_security_severity",
+    "approve_security_finding",
+    "refute_security_finding",
+    "security_report",
     "verify_security_proof",
     "verify_remediation",
     # Teacher-mode mutators (course state, file-system artifact writes,
@@ -56,7 +68,6 @@ WRITE_TOOLS: Set[str] = {
     "record_diagnostic",
     "update_learner_profile",
     "propose_curriculum",
-    "approve_curriculum",
     "start_lesson",
     "assign_exercise",
     "submit_assignment",
@@ -66,8 +77,11 @@ WRITE_TOOLS: Set[str] = {
     "close_dialog",
     "complete_module",
     "finalize_course",
-    "schedule_review",
     "complete_review",
+    "teach_check",
+    "assess_response",
+    "skip_lecture",
+    "teach_sources",
     # Dual-presentation write tools (author lecture.md + exercise files
     # to disk; blocked in plan mode like other teacher mutators).
     "write_lecture_transcript",
@@ -79,6 +93,15 @@ WRITE_TOOLS: Set[str] = {
     "retire_memory",
     "reactivate_memory",
     "archive_memory",
+    # Research export writes the ledger's supporting files to disk.
+    "research_export",
+    # Debug-mode runs execute commands (run_check refuses them too); the case,
+    # hypotheses and suspects stay editable in plan mode.
+    "record_repro",
+    "verify_fix",
+    "record_regression_test",
+    "bisect_repro",
+    "loop_check_done",
 }
 
 

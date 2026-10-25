@@ -61,7 +61,7 @@ export function PromptsScreen() {
           <Row key={item.id} testID={`pending-${item.id}`} status="waiting" title={promptText(item)} sub={item.id}
             actions={(
               <View style={styles.actions}>
-                <Button label="Answer" variant="primary" onPress={() => { setAnswering(item); setAnswerText(''); }} testID={`pending-${item.id}-answer`} />
+                {item.requires_desktop ? <Text variant="caption" tone="ink3">Review on desktop</Text> : <Button label="Answer" variant="primary" onPress={() => { setAnswering(item); setAnswerText(''); }} testID={`pending-${item.id}-answer`} />}
                 <Button label="Cancel" variant="ghost" onPress={() => void cancelPrompt(item.id)} testID={`pending-${item.id}-cancel`} />
               </View>
             )} />

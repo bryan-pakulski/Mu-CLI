@@ -188,16 +188,18 @@ html[data-embed] .w-shell > .mu-viewside {
  * Settings → Appearance → Glass (route_theme.js MuGlass: localStorage `mucli-glass`,
  * 0–100) sets --mu-glass (0–1) and html[data-glass]; Blur (MuGlassBlur: `mucli-glass-blur`,
  * 0–100) sets --mu-blur, the backdrop blur (up to 40px on the leaf, 22px on bars). With the Wash theme the leaf turns
- * to frosted glass over the full painting: opacity eases from 100% down to a floor of 80%
+ * to frosted glass over the full painting: opacity eases from 100% down to a floor of 78%
  * (blurred) to 88% (no blur) (scripts/design/check_contrast.py verifies every text colour over
  * every painting at both ends) and the blur grows with the strength. Views go transparent so the leaf
  * shows through; their sticky bars frost what scrolls under them. Other themes, reduced
  * decoration and reduced transparency stay flat. */
 :root { --mu-glass: 0; }
 :root[data-glass]:not([data-palette], [data-decoration="reduced"]) {
-    /* Opacity floor by blur: 80% once the painting is blurred (≥ 60% blur), rising to 88% with no
-     * blur, where the painting behind text is sharp (check_contrast verifies both ends). */
-    --mu-clear: calc(12% - 8% * min(1, var(--mu-blur, 0.6) / 0.6));
+    /* How much of the painting Glass 100% lets through: 22% once the painting is blurred (≥ 60%
+     * blur), 12% with no blur, where the painting behind text is sharp; so the leaf's opacity floor
+     * is 78% … 88% (check_contrast verifies both ends: the lowest that keeps every text colour at
+     * 4.5:1 over every painting). */
+    --mu-clear: calc(12% + 10% * min(1, var(--mu-blur, 0.6) / 0.6));
     --w-leaf-fill: color-mix(in srgb, var(--wash-surface) calc(100% - var(--mu-clear) * var(--mu-glass)), transparent);
     --w-glass-filter-leaf: blur(calc(40px * var(--mu-blur, 0.6))) saturate(calc(1 + 0.6 * var(--mu-glass)));
     --w-glass-filter-bar: blur(calc(22px * var(--mu-blur, 0.6))) saturate(calc(1 + 0.4 * var(--mu-glass)));

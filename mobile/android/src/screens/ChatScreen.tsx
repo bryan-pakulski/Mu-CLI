@@ -32,6 +32,8 @@ import { VisualizationCard } from '../components/VisualizationCard';
 import { NeedsYouBanner } from '../components/PromptHost';
 import { InlinePrompt, ResolvedLine } from '../components/chat/InlinePrompt';
 import { useAutoApprove } from '../components/chat/useAutoApprove';
+import { TurnReceiptRow } from '../components/modes/TurnReceipt';
+import { placeReceipts } from '../components/modes/modeModel';
 import { useContextFill } from '../components/chat/useContextFill';
 import { Composer } from '../ui/Composer';
 import { ToolList } from '../ui/ToolList';
@@ -81,9 +83,11 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
   const activeModel = useConnectionStore(s => s.activeModel);
   const isConnected = useConnectionStore(s => s.isConnected);
   const {
-    messages, setMessages, streaming, waitingForFirstToken, historyLoading, activityLabel, sseConnected, error,
+    messages, setMessages, receipts, streaming, waitingForFirstToken, historyLoading, activityLabel, sseConnected, error,
     artifactRevision, hasMore, loadingOlder, sendMessage, stop, retry, loadOlderHistory,
   } = useChatSession(activeSessionName);
+  // Default-mode turn receipts, each under the last assistant message of its turn.
+  const receiptsById = useMemo(() => placeReceipts(messages, receipts || []), [messages, receipts]);
   const plan = usePlanMode();
   const auto = useAutoApprove();
   const fill = useContextFill(activeSessionName, isConnected);
@@ -328,6 +332,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
                 {item.attachments.map(a => <Chip key={a.attachment_id} variant="meta" label={a.name} />)}
               </View>
             ) : null}
+            {!isUser && receiptsById[item.id] ? <TurnReceiptRow receipt={receiptsById[item.id]} testID={`turn-receipt-${item.id}`} /> : null}
             {!isUser && item.text.length > 0 ? (
               <View style={styles.meta}>
                 {workedMs ? <Text variant="caption" tone="ink3" numeric>{formatWorked(workedMs)}</Text> : <View />}
@@ -339,7 +344,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
         {after}
       </MessageHandoff>
     );
-  }, [activeSessionName, colors, onVisualizationInteractionChange, renderAssistantBody, resolvedAfter, setMessages, workedById]);
+  }, [activeSessionName, colors, onVisualizationInteractionChange, receiptsById, renderAssistantBody, resolvedAfter, setMessages, workedById]);
 
   const onScroll = useCallback((event: any) => {
     const native = event?.nativeEvent;

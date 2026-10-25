@@ -48,3 +48,15 @@ def test_provisioning_is_preparing():
     vocab = load_vocabulary()
     assert vocab["job_state"]["provisioning"]["label"] == "preparing"
     assert vocab["job_status"]["preparing"]["label"] == "preparing"
+
+
+def test_research_ledger_words_are_described():
+    from mu.research.ledger import CONFIDENCE_LEVELS, QUESTION_STATUSES, STANCES
+    from mu.research.sources import SOURCE_STATES
+
+    vocab = load_vocabulary()
+    statuses = set(vocab["status"])
+    for table, keys in (("research_question", QUESTION_STATUSES), ("research_confidence", CONFIDENCE_LEVELS),
+                        ("research_stance", STANCES), ("research_source_state", SOURCE_STATES)):
+        assert set(vocab[table]) == set(keys), table
+        assert all(row["status"] in statuses and row["label"] for row in vocab[table].values()), table

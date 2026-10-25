@@ -274,47 +274,36 @@ def _memory_lines(session: Any) -> List[str]:
 
 
 def _todo_lines(session: Any) -> List[str]:
-    scratch = getattr(getattr(session, "session_manager", None), "turn_scratchpad", None)
-    if scratch is None:
+    try:
+        from mu.modes.work import OPEN_STATUSES, work_state
+
+        items = [i for i in work_state(session).list() if i.status in OPEN_STATUSES]
+    except Exception:  # noqa: BLE001
         return []
-    values = []
-    for entry in getattr(scratch, "entries", []) or []:
-        tags = {str(tag).lower() for tag in getattr(entry, "tags", []) or []}
-        if "todo" not in tags:
-            continue
-        status = str(getattr(entry, "status", "active") or "active")
-        values.append(f"- [{status}] {_short(getattr(entry, 'content', ''), 240)}")
-        if len(values) >= _MAX_TODOS:
-            break
-    return values
+    return [f"- [{item.status}] {_short(item.title, 240)}" for item in items[:_MAX_TODOS]]
 
 
 def _feature_lines(session: Any) -> List[str]:
-    sm = getattr(session, "session_manager", None)
-    if sm is None:
-        return []
     try:
-        state = sm.get_feature_state()
+        from mu.feature.engine import active_plan
+
+        plan = active_plan(session, cached=True)
     except Exception:
-        state = getattr(sm, "feature_state", None)
-    if not isinstance(state, dict) or not state:
         return []
+    if plan is None:
+        return []
+    lines = [f"- feature: {_short(plan.feature_name, 220)}", f"- status: {plan.status}"]
+    current = plan.current_task() or plan.next_task()
+    if current is not None:
+        unmet = ", ".join(c.id for c in current.unmet) or "none"
+        lines.append(f"- task: t{current.id} {_short(current.title, 200)} [{current.status}; unmet {unmet}]")
+    try:
+        from mu.modes.blockers import blocker_state
 
-    lines = []
-    for label, key in (("feature", "feature_name"), ("status", "status"), ("next_phase", "next_phase")):
-        value = state.get(key)
-        if value not in (None, "", [], {}):
-            lines.append(f"- {label}: {_short(value, 220)}")
-    blocker = state.get("blocker")
-    if blocker:
-        lines.append(f"- blocker: {_short(blocker, 320)}")
-
-    plan = state.get("feature_plan")
-    if isinstance(plan, dict):
-        for key in ("current_task", "next_task", "active_task"):
-            value = plan.get(key)
-            if value:
-                lines.append(f"- {key}: {_short(value, 300)}")
+        for blocker in blocker_state(session).open_blockers(mode="feature")[:2]:
+            lines.append(f"- blocker: {_short(blocker.summary, 300)}")
+    except Exception:
+        pass
     return lines[:8]
 
 

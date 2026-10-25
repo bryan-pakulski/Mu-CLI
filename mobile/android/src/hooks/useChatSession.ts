@@ -13,6 +13,7 @@ import { isPlanModeBlocked, refreshPlanMode } from '../api/planMode';
 import type { ArtifactDescriptor } from '../api/artifacts';
 import type { AttachmentDescriptor } from '../api/attachments';
 import type { ToolCallView } from '../ui/ToolCard';
+import type { TurnReceipt } from '../api/modeState';
 
 const SESSION_POLL_MS = 5000;
 // Initial window size — the latest N turns to load on session open.
@@ -21,6 +22,8 @@ const SESSION_POLL_MS = 5000;
 const MOBILE_HISTORY_TURN_LIMIT = 80;
 const MOBILE_HISTORY_CHECKPOINT_BATCH = 5;
 const MOBILE_HISTORY_CHECKPOINT_SCAN_PAGES = 6;
+// Default-mode turn receipts kept for the open session (the server keeps 60).
+const MAX_TURN_RECEIPTS = 60;
 
 export interface ChatMessage {
   id: string;
@@ -729,6 +732,8 @@ export function useChatSession(activeSessionName: string | null) {
   // triggers loadOlderHistory when the user scrolls near the top.
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // Default-mode turn receipts (modes_v2.md §4.1) from `turn_receipt` events, for this session.
+  const [receipts, setReceipts] = useState<TurnReceipt[]>([]);
 
   const subscriptionRef = useRef<SSESubscription | null>(null);
   const messageIdRef = useRef(0);
@@ -1218,6 +1223,12 @@ export function useChatSession(activeSessionName: string | null) {
       return;
     }
 
+    if (kind === 'turn_receipt') {
+      const receipt = event.receipt && typeof event.receipt === 'object' ? event.receipt as TurnReceipt : null;
+      if (receipt) setReceipts(current => [...current.filter(r => r.turn == null || r.turn !== receipt.turn), receipt].slice(-MAX_TURN_RECEIPTS));
+      return;
+    }
+
     if (kind === 'plan_mode_changed') {
       useConnectionStore.getState().setPlanMode(Boolean(event.plan_mode));
       return;
@@ -1635,9 +1646,13 @@ export function useChatSession(activeSessionName: string | null) {
     void syncSessionState();
   }, [loadHistory, syncSessionState]);
 
+  // Receipts belong to the session they arrived for.
+  useEffect(() => { setReceipts([]); }, [activeSessionName]);
+
   return {
     messages,
     setMessages,
+    receipts,
     streaming,
     waitingForFirstToken,
     historyLoading,

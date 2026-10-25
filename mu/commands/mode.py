@@ -97,6 +97,16 @@ def mode_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
             f"{meta.get('description', '')} "
             f"({meta.get('documentation', '')})"
         ).strip()
+        if chosen == "loop":
+            try:
+                from mu.loop.state import loop_state
+
+                mission = loop_state(session).mission
+                if mission is None or mission.status in ("stopped", "done"):
+                    message += ("\nNo mission yet — start one with /loop start <goal> "
+                                "[--done \"criterion\" --check \"cmd\"] [--max-cost USD] [--max-hours H].")
+            except Exception:
+                pass
         return CommandResult(
             ok=True,
             message=message,

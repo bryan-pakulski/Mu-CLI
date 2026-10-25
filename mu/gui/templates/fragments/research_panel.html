@@ -3,202 +3,120 @@
        x-show="$store.mode.active === 'research'"
        x-transition.opacity.duration.200ms>
 
-    {% include "fragments/mode_workspace_header.html" %}
+    {% with shell_mode="research" %}{% include "fragments/mode_shell.html" %}{% endwith %}
 
     <!-- empty state -->
-    <div class="panel-empty w-empty" data-size="sm" data-tone="plan" x-show="!$store.research.sourceCount && !$store.research.findingCount">
+    <div class="panel-empty w-empty" data-size="sm" data-tone="plan" x-show="$store.research.loaded && $store.research.isEmpty()">
         <div class="w-empty__art" aria-hidden="true"><svg class="w-icon" focusable="false"><use href="/static/icons/wash.svg#i-book-open"></use></svg></div>
-        <h3 class="w-empty__title">No sources yet</h3>
-        <p class="w-empty__body">Sources accumulate as the agent cites material during
-        research conversations. Switch to research mode and ask a question.</p>
+        <h3 class="w-empty__title">Ask a research question</h3>
+        <p class="w-empty__body">Questions, sources and claims appear here as the agent researches.
+        Every claim quotes a source it has read.</p>
     </div>
 
-    <!-- sources section -->
-    <section class="panel-section w-panel__section"
-             x-show="$store.research.sourceCount && $store.modeWorkspace.shows('sources')"
-             :class="{ open: $store.research.openSections.sources }">
-        <button class="panel-section-head w-panel__section-head"
-                @click="$store.research.toggleSection('sources')"
-                :aria-expanded="$store.research.openSections.sources">
-            <span class="caret w-panel__caret" aria-hidden="true">›</span>
-            <span class="panel-section-name w-panel__section-title">Sources</span>
-            <span class="panel-section-count w-count"
-                  x-text="$store.research.filteredSources().length
-                           + ($store.research.filteredSources().length !== $store.research.sourceCount
-                              ? ' / ' + $store.research.sourceCount : '')"></span>
-        </button>
-        <div class="panel-section-body w-panel__section-body" x-show="$store.research.openSections.sources"
-             x-transition.opacity.duration.120ms>
-            <!-- topic filter -->
-            <div class="source-topic-filter"
-                 x-show="$store.research.topics.length > 1">
-                <input type="text"
-                       class="topic-filter-input w-input"
-                       aria-label="Filter sources by topic"
-                       placeholder="Filter by topic…"
-                       x-model="$store.research.topicFilter">
-                <span class="mono muted small"
-                      x-text="$store.research.currentTopic
-                              ? 'active: ' + $store.research.currentTopic
-                              : ''"></span>
-            </div>
-
-            <!-- type filter chips -->
-            <div class="source-filters"
-                 x-show="$store.research.sourceTypes().length > 1">
-                <template x-for="type in $store.research.sourceTypes()" :key="type">
-                    <button type="button" class="source-type-chip w-chip" data-variant="filter"
-                            :class="{ active: $store.research.isTypeActive(type) }"
-                            :aria-pressed="$store.research.isTypeActive(type) ? 'true' : 'false'"
-                            @click="$store.research.toggleType(type)"
-                            x-text="type"></button>
+    <div class="mode-body" role="tabpanel" x-show="!$store.research.isEmpty()">
+        <!-- Questions: the tree, with status and claim counts; picking one shows its claims -->
+        <section class="w-group" x-show="$store.research.tab === 'Questions'">
+            <ul class="w-rows rs-questions" role="listbox" aria-label="Research questions">
+                <template x-for="q in $store.research.questionRows()" :key="q.id">
+                    <li class="w-row rs-question" role="option"
+                        :style="'--rs-depth:' + q.depth"
+                        :aria-selected="$store.research.focusQuestion() === q.id ? 'true' : 'false'">
+                        <span class="w-sign" aria-hidden="true"
+                              :data-status="$store.research.vstyle('research_question', q.status).status"
+                              x-text="$store.research.vstyle('research_question', q.status).glyph"></span>
+                        <button type="button" class="w-row__main" @click="$store.research.selectQuestion(q.id); $store.research.setTab('Claims')">
+                            <span class="w-row__title" x-text="q.text"></span>
+                            <span class="w-row__sub">
+                                <span x-text="$store.research.vstyle('research_question', q.status).label"></span>
+                                <span x-show="q.claims" x-text="' · ' + q.claims + (q.claims === 1 ? ' claim' : ' claims')"></span>
+                                <span x-show="q.origins" x-text="' · ' + q.origins + (q.origins === 1 ? ' origin' : ' origins')"></span>
+                                <span x-show="q.id === $store.research.currentQuestion"> · current</span>
+                            </span>
+                        </button>
+                        <span class="w-row__when mono" x-text="q.id"></span>
+                    </li>
                 </template>
-            </div>
+            </ul>
+        </section>
 
-            <!-- source list grouped by topic -->
-            <div class="source-groups">
-                <template x-for="group in $store.research.groupedSources()" :key="group.topic">
-                    <div class="source-group">
-                        <div class="source-group-head">
-                            <span class="source-group-topic" x-text="group.topic"></span>
-                            <span class="source-group-count mono muted"
-                                  x-text="group.sources.length"></span>
-                        </div>
-                        <ul class="source-list">
-                            <template x-for="s in group.sources" :key="s.id">
-                                <li class="source-item"
-                                    :class="{ expanded: $store.research.isSourceExpanded(s.id) }">
-                                    <div class="source-row" role="button" tabindex="0"
-                                         :aria-expanded="$store.research.isSourceExpanded(s.id)"
-                                         @click="$store.research.toggleSource(s.id)"
-                                         @keydown.enter.prevent="$store.research.toggleSource(s.id)"
-                                         @keydown.space.prevent="$store.research.toggleSource(s.id)">
-                                        <span class="source-type-dot" aria-hidden="true"
-                                              :data-type="s.source_type"></span>
-                                        <span class="source-title" x-text="s.title"></span>
-                                        <span class="source-cred mono muted"
-                                              x-text="$store.research.credibilityPct(s.credibility_score) + '%'"></span>
-                                    </div>
-                                    <!-- credibility bar -->
-                                    <div class="source-cred-bar" role="progressbar" aria-label="Credibility"
-                                         aria-valuemin="0" aria-valuemax="100"
-                                         :aria-valuenow="$store.research.credibilityPct(s.credibility_score)">
-                                        <div class="source-cred-fill"
-                                             :style="'width: ' + $store.research.credibilityPct(s.credibility_score) + '%;'"></div>
-                                    </div>
-                                    <!-- detail drill-down -->
-                                    <div class="source-detail"
-                                         x-show="$store.research.isSourceExpanded(s.id)"
-                                         x-transition.opacity.duration.120ms>
-                                        <div class="source-url">
-                                            <a :href="s.url" target="_blank" rel="noopener"
-                                               x-text="s.url"
-                                               @click.stop></a>
-                                        </div>
-                                        <div class="source-meta-grid">
-                                            <template x-if="(s.authors || []).length">
-                                                <div class="source-meta-row">
-                                                    <span class="source-meta-key">Authors</span>
-                                                    <span x-text="s.authors.join(', ')"></span>
-                                                </div>
-                                            </template>
-                                            <template x-if="s.date">
-                                                <div class="source-meta-row">
-                                                    <span class="source-meta-key">Date</span>
-                                                    <span x-text="s.date"></span>
-                                                </div>
-                                            </template>
-                                            <div class="source-meta-row">
-                                                <span class="source-meta-key">Type</span>
-                                                <span class="tag w-chip" data-variant="meta" x-text="s.source_type"></span>
-                                            </div>
-                                            <div class="source-meta-row">
-                                                <span class="source-meta-key">Topic</span>
-                                                <span class="tag w-chip" data-variant="meta" x-text="s.topic || 'general'"></span>
-                                            </div>
-                                            <div class="source-meta-row">
-                                                <span class="source-meta-key">Accessed</span>
-                                                <span x-text="s.accessed_date || '?'"></span>
-                                            </div>
-                                            <div class="source-meta-row">
-                                                <span class="source-meta-key">Credibility</span>
-                                                <span x-text="s.credibility_score.toFixed(2)"></span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </li>
-                            </template>
-                        </ul>
-                    </div>
+        <!-- Claims of the selected (or current) question -->
+        <section class="w-group" x-show="$store.research.tab === 'Claims'">
+            <p class="mode-goal" x-text="$store.research.claimsHeading()"></p>
+            <p class="w-group__empty" x-show="!$store.research.visibleClaims().length">No claims recorded for this question yet.</p>
+            <ul class="w-rows rs-claims">
+                <template x-for="c in $store.research.visibleClaims()" :key="c.id">
+                    <li class="w-row rs-claim">
+                        <span class="w-sign" aria-hidden="true"
+                              :data-status="$store.research.vstyle('research_confidence', c.confidence).status"
+                              x-text="$store.research.vstyle('research_confidence', c.confidence).glyph"></span>
+                        <button type="button" class="w-row__main" @click="$store.research.openClaim(c, $event)">
+                            <span class="w-row__title rs-claim__text" x-text="c.text"></span>
+                            <span class="w-row__sub">
+                                <span x-text="$store.research.vstyle('research_confidence', c.confidence).label"></span>
+                                <span x-show="c.kind !== 'observed'" x-text="' · ' + c.kind"></span>
+                                <span x-show="c.contested" data-tone="attention"> · contested</span>
+                                <span class="mono" x-text="' · ' + $store.research.claimSources(c)"></span>
+                            </span>
+                        </button>
+                        <span class="w-row__when mono" x-text="c.id"></span>
+                    </li>
                 </template>
-            </div>
-        </div>
-    </section>
+            </ul>
+            <button type="button" class="w-textbtn" x-show="$store.research.matrix().origins.length"
+                    @click="$store.modeExpand.open('research', 'matrix')">Expand matrix</button>
+        </section>
 
-    <!-- bibliography preview -->
-    <section class="panel-section w-panel__section"
-             x-show="$store.research.bibliography && $store.modeWorkspace.shows('bibliography')"
-             :class="{ open: $store.research.openSections.bibliography }">
-        <button class="panel-section-head w-panel__section-head"
-                @click="$store.research.toggleSection('bibliography')"
-                :aria-expanded="$store.research.openSections.bibliography">
-            <span class="caret w-panel__caret" aria-hidden="true">›</span>
-            <span class="panel-section-name w-panel__section-title">Bibliography</span>
-            <span class="panel-section-count w-count"
-                  x-text="$store.research.sourceCount + ' sources'"></span>
-        </button>
-        <div class="panel-section-body w-panel__section-body" x-show="$store.research.openSections.bibliography"
-             x-transition.opacity.duration.120ms>
-            <pre class="bibliography-block"><code x-text="$store.research.bibliography"></code></pre>
-            <button type="button" class="bib-copy-btn w-btn" data-variant="ghost" data-size="sm"
-                    @click="$store.research.copyBibliography()"
-                    title="Copy bibliography to clipboard"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-copy"></use></svg><span>Copy</span></button>
-        </div>
-    </section>
-
-    <!-- saved findings (task_memory) -->
-    <section class="panel-section w-panel__section"
-             x-show="$store.research.findingCount && $store.modeWorkspace.shows('claims')"
-             :class="{ open: $store.research.openSections.findings }">
-        <button class="panel-section-head w-panel__section-head"
-                @click="$store.research.toggleSection('findings')"
-                :aria-expanded="$store.research.openSections.findings">
-            <span class="caret w-panel__caret" aria-hidden="true">›</span>
-            <span class="panel-section-name w-panel__section-title">Findings</span>
-            <span class="panel-section-count w-count"
-                  x-text="$store.research.findingCount"></span>
-        </button>
-        <div class="panel-section-body w-panel__section-body" x-show="$store.research.openSections.findings"
-             x-transition.opacity.duration.120ms>
-            <template x-for="f in $store.research.filteredFindings()" :key="f.id">
-                <div class="finding-entry">
-                    <div class="finding-head">
-                        <span class="mono muted" x-text="'#' + f.id"></span>
-                        <span class="tag w-chip" data-variant="meta"
-                              :class="{ 'typed-claim': f.record_type === 'claim' }"
-                              x-text="f.record_type === 'claim' ? 'research claim' : 'legacy note'"></span>
-                        <span class="tag w-chip" data-variant="meta"
-                              :class="{ 'evidence-linked': f.evidence_state === 'source_linked' }"
-                              x-text="f.evidence_state === 'source_linked' ? 'source linked' : 'evidence gap'"></span>
-                        <template x-for="(tag, ti) in (f.tags || [])" :key="ti">
-                            <span class="tag w-chip" data-variant="meta" x-text="tag"></span>
+        <!-- Sources: state as text tabs, type in a quiet Show menu; a row opens the source sheet -->
+        <section class="w-group" x-show="$store.research.tab === 'Sources'">
+            <nav class="w-tabs rs-source-states" role="tablist" aria-label="Source state">
+                <template x-for="st in ['', 'cited', 'read', 'candidate']" :key="st || 'all'">
+                    <button type="button" class="w-tabs__tab" role="tab"
+                            x-show="!st || $store.research.stateCount(st)"
+                            :class="{ active: $store.research.sourceState === st }"
+                            :aria-selected="$store.research.sourceState === st ? 'true' : 'false'"
+                            @click="$store.research.sourceState = st"
+                            x-text="st ? $store.research.vstyle('research_source_state', st).label : 'read'"></button>
+                </template>
+            </nav>
+            <label class="rs-show" x-show="$store.research.sourceTypes().length > 1">
+                <span>Show</span>
+                <select class="w-input" @change="$store.research.typeFilter = $event.target.value ? [$event.target.value] : []">
+                    <option value="">every type</option>
+                    <template x-for="type in $store.research.sourceTypes()" :key="type">
+                        <option :value="type" x-text="type"></option>
+                    </template>
+                </select>
+            </label>
+            <template x-for="group in $store.research.groupedSources()" :key="group.topic">
+                <div class="w-group">
+                    <h3 class="w-group__title" x-text="group.topic"></h3>
+                    <ul class="w-rows">
+                        <template x-for="s in group.sources" :key="s.source_id">
+                            <li class="w-row">
+                                <span class="w-sign" aria-hidden="true"
+                                      :data-status="$store.research.vstyle('research_source_state', s.state).status"
+                                      x-text="$store.research.vstyle('research_source_state', s.state).glyph"></span>
+                                <button type="button" class="w-row__main" @click="$store.research.openSource(s, $event)">
+                                    <span class="w-row__title" x-text="s.title"></span>
+                                    <span class="w-row__sub"
+                                          x-text="$store.research.vstyle('research_source_state', s.state).label + ' · ' + s.origin + (s.state !== 'candidate' ? ' · ' + $store.research.credibilityPct(s.credibility_score) + '% credible' : '')"></span>
+                                </button>
+                                <span class="w-row__when mono" x-text="$store.research.sourceKey(s)"></span>
+                            </li>
                         </template>
-                        <span class="mono muted small"
-                              x-show="f.source"
-                              x-text="f.source"></span>
-                    </div>
-                    <div class="finding-body" x-text="f.content"></div>
+                    </ul>
                 </div>
             </template>
-        </div>
-    </section>
+        </section>
 
-    <!-- footnote -->
-    <div class="panel-footnote"
-         x-show="$store.research.loaded && ($store.research.sourceCount || $store.research.findingCount)">
-        <span x-text="$store.research.sourceCount + ' sources (in-memory)'"></span>
-        <span x-show="$store.research.findingCount"
-              x-text="' · ' + $store.research.findingCount + ' findings'"></span>
+        <!-- Citations: the bibliography; the report skeleton reads in the expanded view -->
+        <section class="w-group" x-show="$store.research.tab === 'Citations'">
+            <p class="w-group__empty" x-show="!$store.research.bibliography">Nothing read yet.</p>
+            <pre class="bibliography-block" x-show="$store.research.bibliography"><code x-text="$store.research.bibliography"></code></pre>
+            <div class="w-btn-row">
+                <button type="button" class="w-textbtn" x-show="$store.research.bibliography" @click="$store.research.copyBibliography()">Copy bibliography</button>
+                <button type="button" class="w-textbtn" x-show="$store.research.claims.length" @click="$store.research.openReport()">Read the report</button>
+            </div>
+        </section>
     </div>
-
 </aside>

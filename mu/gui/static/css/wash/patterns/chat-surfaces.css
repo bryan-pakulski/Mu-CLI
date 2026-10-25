@@ -257,3 +257,102 @@
 }
 .chat-body .w-composer__bar .composer-settings-btn { max-width: 100%; min-width: 0; overflow: hidden; }
 .chat-body .w-composer__bar .w-composer__effort { min-width: 0; }
+
+/* ------------------------------------------------------------ the mode shell (modes v2 §5.2)
+ * fragments/mode_shell.html: one header bar (title, state sentence, text tabs, one primary
+ * action), then Now; rows with marks below; sheets for one record. No boxes. */
+.mode-panel .mode-shell { margin: 0 0 var(--wash-space-4); }
+.mode-shell .mode-shell__bar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--wash-space-3);
+}
+.mode-shell .mode-shell__title {
+    margin: 0;
+    color: var(--wash-ink);
+    font-size: var(--wash-type-title-3-size);
+    line-height: var(--wash-type-title-3-line);
+    font-weight: var(--wash-type-title-3-weight);
+}
+.mode-shell .mode-shell__state { margin: var(--wash-space-1) 0 0; }
+.mode-shell .mode-shell__tabs { margin-top: var(--wash-space-3); }
+.mode-panel .mode-now { margin: 0 0 var(--wash-space-5); }
+.mode-panel .mode-body > .w-stepper { margin: 0 0 var(--wash-space-4); }
+.mode-panel .mode-goal {
+    margin: 0 0 var(--wash-space-3);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+}
+.mode-panel .mode-meter { display: flex; align-items: center; gap: var(--wash-space-2); margin: 0 0 var(--wash-space-4); }
+.mode-panel .mode-meter .w-bar { --w-bar-w: 120px; }
+.mode-panel .w-btn-row { margin-top: var(--wash-space-3); }
+
+/* default mode: the turn receipt under the assistant message, and the plan above the composer */
+.chat-body .mode-receipt {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wash-space-2);
+    margin: var(--wash-space-2) 0 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--wash-ink-3);
+    font: inherit;
+    font-size: var(--wash-type-caption-size);
+    cursor: pointer;
+}
+.chat-body .mode-receipt:hover,
+.chat-body .mode-receipt:focus-visible { color: var(--wash-ink-2); }
+.chat-body .mode-plan { margin: 0 0 var(--wash-space-2); color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+.chat-body .mode-plan .mode-plan__current { color: var(--wash-ink-2); }
+.chat-body .mode-plan .w-rows { max-height: 180px; overflow-y: auto; }
+
+/* the expanded view: a mode's heavy surface over the conversation (Mu §11b panes) */
+.chat-body .w-chat__column { position: relative; }
+.chat-body .mode-expand {
+    position: absolute;
+    inset: 0;
+    z-index: 110;  /* above the chat head (.w-chathead) */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--wash-surface);
+}
+.mode-expand .mode-expand__bar {
+    display: flex;
+    align-items: baseline;
+    gap: var(--wash-space-4);
+    padding: var(--wash-space-4) var(--wash-space-5);
+    border-bottom: 1px solid var(--wash-hairline);
+}
+.mode-expand .mode-expand__title { margin: 0; font-size: var(--wash-type-title-3-size); font-weight: var(--wash-type-title-3-weight); }
+.mode-expand .mode-expand__board { flex: 1; min-height: 0; overflow-x: auto; }
+.mode-expand .mode-expand__column { min-width: 260px; padding: var(--wash-space-4); overflow-y: auto; }
+.mode-expand .mode-expand__column + .mode-expand__column { border-left: 1px solid var(--wash-hairline); }
+.mode-expand .mode-expand__reading {
+    flex: 1;
+    overflow-y: auto;
+    max-width: 72ch;
+    margin: 0 auto;
+    padding: var(--wash-space-6) var(--wash-space-5);
+}
+/* Rows in the narrow stage panel (and the expanded columns): a smaller gutter, no bleed past
+ * the panel padding — the research ledger's rule, for every mode on the shell. */
+.mode-panel .w-row,
+.mode-expand .w-row,
+.chat-body .mode-plan .w-row {
+    --w-row-gutter: calc(var(--wash-space-3) + 18px);
+    margin: 0;
+    padding: var(--wash-space-2) var(--wash-space-2) var(--wash-space-2) var(--w-row-gutter);
+    column-gap: var(--wash-space-3);
+}
+.mode-panel .w-row > .w-sign,
+.mode-expand .w-row > .w-sign,
+.chat-body .mode-plan .w-row > .w-sign { left: var(--wash-space-2); top: calc(var(--wash-space-2) + 1px); }
+.mode-panel .mode-body .w-row__title { white-space: normal; overflow-wrap: anywhere; }
+.mode-panel .w-group__title { margin: var(--wash-space-4) 0 var(--wash-space-1); font-size: var(--wash-type-label-size); color: var(--wash-ink-2); }
+.mode-panel .rs-source-states { margin: 0 0 var(--wash-space-2); }
+.mode-panel .rs-show { display: inline-flex; align-items: center; gap: var(--wash-space-2); color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+.mode-panel .rs-show .w-input { width: auto; padding: 0 var(--wash-space-2); border-color: transparent; background: transparent; color: var(--wash-ink-2); }

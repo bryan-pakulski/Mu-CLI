@@ -310,6 +310,15 @@ You review the manifest, the diff against the previous version, lint and test re
 publish or request changes. The AI cannot publish, approve, change policy, read secrets or
 dispatch without you.
 
+**The chat picks up where it left off.** When a run the chat proposed (a test or a published
+tool or runbook) finishes, the chat resumes on its own. It gets a short automatic message
+naming the run and its outcome, reads the results and carries on, so you don't type "done" after
+approving. This covers every terminal state, including rejected, cancelled and expired runs.
+Each run wakes the chat at most once. A run the AI already read through `orch_run_status` or
+`orch_run_results` wakes nothing, and runs that finish while the chat is busy are handed over
+when its turn ends. The browser GUI does this (the terminal CLI does not). Turn it off for a
+session with `/set orch_auto_continue false`.
+
 ### Runbooks
 
 **Studio → New runbook** (or **Edit draft** / **New version** on a runbook's catalog page) opens

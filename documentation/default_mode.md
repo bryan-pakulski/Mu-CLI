@@ -9,48 +9,87 @@ making a focused change. For long-horizon work use [loop](loop_mode.md);
 for staged plans use [feature](feature_plan_engine.md); for "explain
 this, don't change it" use [research](research_mode.md).
 
-## Core behavior
+## The loop
 
-1. **Recall before research**
-   - `search_memory` for the topic, file paths, or error patterns
-     before re-deriving anything that may have been seen before.
+The prompt (`mu/prompts/templates/default.md`) describes one loop; the
+harness makes the "verify" step checkable with the turn receipt below.
 
-2. **Orient with semantic retrieval**
-   - For non-trivial requests, start with `retrieve_relevant_context`
-     (ranks by lexical + symbol + recency + git-diff). Faster than
-     blind `read_file` chains.
-   - Use `search_for_string` / `search_references` for exact-text
-     follow-ups.
+1. **Clarify** real ambiguity (which file, scope, destructive?) with
+   `ask_user_choice` before acting.
+2. **Recall** with `search_memory` when the request may repeat earlier
+   work.
+3. **Orient** with `retrieve_relevant_context` when the location is
+   unknown; `read_file` / `search_for_string` / `search_references`
+   when it is known. Independent reads issued in one turn run in
+   parallel.
+4. **Plan** work of 3+ steps with `todo_write`; one item `in_progress`
+   at a time (`todo_set_status`).
+5. **Act** with `apply_diff` or `search_and_replace_file`; `write_file`
+   for new files.
+6. **Verify** with a test, linter or smoke command through `bash`
+   (`purpose="verify"`).
+7. **Summarise** what changed, what was verified and what is open; save
+   non-obvious findings with `save_memory`.
 
-3. **Plan when scope warrants**
-   - 3+ tool calls or multi-file changes → publish a `todo_write` plan
-     so the user can see the roadmap.
-   - Exactly one task `in_progress` at a time via `todo_set_status`.
+If the model needs something only the user can give, it calls
+`raise_blocker` (see [Blockers](#blockers)).
 
-4. **Parallel context collection**
-   - Issue independent reads in a single turn — `read_file`,
-     `list_dir`, `search_*`, `retrieve_relevant_context` execute
-     concurrently and buffer to the collation queue.
-   - `flush` when there's enough to decide.
+## Turn receipt
 
-5. **Surgical edits**
-   - `apply_diff` for anchored multi-hunk changes.
-   - `search_and_replace_file` for unique-string substitutions.
-   - `write_file` only for new files or full rewrites.
+The harness records what each default-mode turn did
+(`mu/modes/receipt.py`):
 
-6. **Verify with evidence**
-   - Don't claim done from inspection — run tests (`pytest`,
-     `npm test`, `cargo test`), a linter, or a smoke command via
-     `bash`.
-   - Re-read the modified file to confirm the change landed.
+- **Files changed**, from the edit tracker (`mu/modes/edits.py`), which
+  notes every successful write-side edit.
+- **Checks run.** `bash` takes an optional `purpose`
+  (`verify` | `repro` | `explore`). A run with purpose `verify` or
+  `repro`, or one the harness recognises as a check (`pytest`,
+  `npm test`, `cargo test`, `go test`, `ruff`, `mypy`, `tsc`, `eslint`,
+  … and the suite commands in the project's `.mucli/jobs.toml`
+  `[checks]`), is recorded as a `CheckRun` with its exit code.
+  `purpose="explore"` is never recorded.
+- **Work items touched** and **open blockers**.
 
-7. **Save what's reusable**
-   - Persist non-obvious findings (root causes, architectural
-     invariants, "X actually lives in Y") with `save_memory`.
+The receipt's status is `verified` when a passing check ran after the
+last edit, `unverified` when files changed without one, and
+`no_changes` otherwise. A check that ran before the last edit does not
+count.
 
-8. **Final summary**
-   - What changed, what was verified, what's still open. Tight — no
-     narration of every tool call.
+Receipts are stored with the session (last 60). The terminal prints one
+line after the turn (`Receipt · 2 files changed · checks passed`); the
+GUI shows a quiet row under the assistant message that opens a sheet
+with the files and check runs; Android shows the same row. When the
+last turn ended unverified, the next turn's mode capsule says so.
+
+## Verify nudge
+
+At the end of a turn that changed files without a passing check after
+the last edit, the harness gives the model one more iteration with a
+short nudge: run a check, or say plainly why it can't be checked. It is
+never a block, and fires at most once per turn; if the model still
+doesn't verify, the receipt says *unverified*. Turn it off with
+`/set verify_nudge false`.
+
+## Work items and the Plan disclosure
+
+`todo_write` / `todo_set_status` / `todo_list` / `todo_delete` /
+`todo_clear` are thin wrappers over the session's typed work items
+(`mu/modes/work.py`). Items are saved with the session and never
+evicted. The engine keeps exactly one item `in_progress`: starting one
+puts the previous back to `pending`. `done` can cite passing check runs
+(`evidence=["r3"]`); a failing run is refused as evidence.
+
+When work items exist, the GUI chat shows a **Plan** disclosure above
+the composer listing them with the current one marked. The mode capsule
+in the request-only TURN CONTEXT carries the open count and the current
+item.
+
+## Blockers
+
+`raise_blocker(summary, needs, …)` is a core tool in every mode. It
+records a blocker in session state and ends autonomous continuation.
+The user resolves it by sending their next message, with the panel's
+Resolve action, or with `/blocker resolve <id> [answer]`.
 
 ## Delegation
 
@@ -60,10 +99,19 @@ research, large multi-file refactors), fire
 `parallel_tool_concurrency`). Children inherit folder context but have
 isolated history; they return a focused summary the parent can fold in.
 
+## Prompt overrides
+
+The bundled template is the single source of the default prompt. A
+user override in `~/.mucli/prompts/default.md` still wins; when its
+`version` is older than the bundled template, the terminal and GUI show
+a one-time notice. `/prompts diff default` compares them,
+`/prompts keep default` silences the notice, and
+`/prompts reset default` moves the override aside.
+
 ## When NOT to use default mode
 
 - Long-running goals you want the assistant to keep working on
-  unattended → `/mode loop`.
+  across turns → `/mode loop`.
 - Multi-phase work that benefits from explicit user approval gates
   before implementation → `/mode feature`.
 - "Help me understand X" / write-up tasks → `/mode research`.

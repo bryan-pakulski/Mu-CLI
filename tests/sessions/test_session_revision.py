@@ -436,7 +436,7 @@ def test_winner_reload_normalizes_like_load(isolated_sessions):
 
     assert sm.feature_state == {"status": "ok"}  # registry fallback
     assert sm.feature_registry == {"f1": {"status": "ok"}}  # filtered
-    assert sm.research_sources == []  # type-validated
+    assert sm.research.is_empty()  # type-validated
     assert isinstance(sm.tool_stats, dict) and sm.tool_stats  # normalized
 
 

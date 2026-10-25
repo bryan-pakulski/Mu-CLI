@@ -9,9 +9,10 @@ const mockSend = jest.fn(async () => true);
 const mockStop = jest.fn();
 let mockMessages: unknown[] = [];
 let mockStreaming = false;
+let mockReceipts: unknown[] = [];
 jest.mock('../../src/hooks/useChatSession', () => ({
   useChatSession: () => ({
-    messages: mockMessages, setMessages: (fn: (m: unknown[]) => unknown[]) => { mockMessages = fn(mockMessages); }, streaming: mockStreaming,
+    messages: mockMessages, receipts: mockReceipts, setMessages: (fn: (m: unknown[]) => unknown[]) => { mockMessages = fn(mockMessages); }, streaming: mockStreaming,
     waitingForFirstToken: false, historyLoading: false, activityLabel: 'Thinking', sseConnected: true, error: null, artifactRevision: 0,
     hasMore: false, loadingOlder: false, sendMessage: mockSend, stop: mockStop, retry: jest.fn(), loadOlderHistory: jest.fn(async () => 0),
   }),
@@ -38,6 +39,7 @@ const tool = (id: string, name: string, args: unknown, status = 'done', result =
 beforeEach(() => {
   jest.clearAllMocks();
   mockStreaming = false;
+  mockReceipts = [];
   mockMessages = [
     { id: 'u1', role: 'user', text: 'Fix the failing test' },
     { id: 'c1', role: 'collapse', text: '', collapseCount: 3, collapseElapsed: '12s', collapseOpen: false, childTurns: [
@@ -103,4 +105,14 @@ it('stops a running turn and copies a reply', async () => {
   expect(mockStop).toHaveBeenCalled();
   fireEvent.press(ui.getAllByLabelText('Copy message')[0]);
   expect(Clipboard.setStringAsync).toHaveBeenCalledWith('Fixed: the fixture was stale.');
+});
+
+it('shows the default-mode turn receipt as one quiet line under the turn\'s last assistant message', () => {
+  mockReceipts = [{ status: 'unverified', files: ['a.py', 'b.py'], checks: [], work_items: [], blockers: [], turn: null, at: 1 }];
+  const ui = renderChat();
+  expect(ui.getByTestId('turn-receipt-a1')).toBeTruthy();
+  expect(ui.getByText('2 files changed · unverified')).toBeTruthy();
+  expect(ui.queryByTestId('turn-receipt-a0')).toBeNull();
+  fireEvent.press(ui.getByTestId('turn-receipt-a1'));
+  expect(ui.getByText('a.py')).toBeTruthy();
 });

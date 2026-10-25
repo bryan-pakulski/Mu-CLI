@@ -31,6 +31,7 @@ from .routers import (
     chat,
     containers as containers_router,
     debug as debug_router,
+    mode_state as mode_state_router,
     design as design_router,
     devices as devices_router,
     feature as feature_router,
@@ -60,6 +61,7 @@ from mu.container import ContainerSupervisor
 from mu.design import load_vocabulary, state_style
 from mu.jobs import get_default_job_service
 from mu.jobs.controller import JobController
+from mu.orchestration.continuation import RunContinuation, wake_text
 from mu.threads.scheduler import ThreadWakeScheduler
 
 
@@ -226,6 +228,7 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     app.include_router(security_router.router, prefix="/api/security", tags=["security"])
     app.include_router(loop_router.router, prefix="/api/loop", tags=["loop"])
     app.include_router(debug_router.router, prefix="/api/debug", tags=["debug"])
+    app.include_router(mode_state_router.router, prefix="/api/mode-state", tags=["mode-state"])
     app.include_router(memory_router.router, prefix="/api/memory", tags=["memory"])
     app.include_router(memories_router.router, prefix="/api/v1", tags=["memory-ledger"])
     app.include_router(files_router.router, prefix="/api/files", tags=["files"])
@@ -311,6 +314,11 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
             lambda coordinator, wake: _run_thread_wake(app, coordinator, wake)
         )
         app.state.thread_wake_scheduler.start()
+        app.state.orch_continuation = RunContinuation(
+            lambda: getattr(app.state, "orchestrator", None),
+            lambda name, runs: _run_orch_continuation(app, name, runs),
+        )
+        app.state.orch_continuation.start()
         app.state.job_controller.start()
         app.state.watcher.start()
         try:
@@ -323,6 +331,9 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
         scheduler = getattr(app.state, "thread_wake_scheduler", None)
         if scheduler is not None:
             scheduler.stop(wait=False)
+        continuation = getattr(app.state, "orch_continuation", None)
+        if continuation is not None:
+            continuation.stop(wait=False)
         app.state.watcher.stop()
         orchestration_router.stop_services(app)
         # Active worker processes are intentionally not killed here. Their own
@@ -468,3 +479,41 @@ def _run_thread_wake(app: FastAPI, coordinator, wake: dict) -> bool:
             payload={"error": str(exc)[:1000]},
         )
         return False
+
+
+def _run_orch_continuation(app: FastAPI, name: str, runs: list) -> bool:
+    """Resume an orchestration chat whose proposed runs finished (no GUI focus change).
+
+    ``True`` means delivered or deliberately dropped (session gone, not an orchestration
+    session, ``orch_auto_continue`` off); ``False`` retries later (the session is busy).
+    """
+    import utils.config as _cfg
+
+    saved = os.path.join(_cfg.HISTORY_DIR, "sessions", name, "session.json")
+    if name not in app.state.sessions and not os.path.isfile(saved):
+        return True
+    session = _load_session(app, name=name, focus=False)
+    variables = session.variables
+    if str(variables.get("session_type", "") or "").lower() != "orchestration":
+        return True
+    if not variables.get("orch_auto_continue", True):
+        return True
+    busy = app.state.session_busy_for(name)
+    if busy.is_set():
+        return False
+    app.state.bus.publish_threadsafe({
+        "kind": "orch_continuation_started", "session_name": name,
+        "run_ids": [run.id for run in runs],
+    })
+    try:
+        chat._run_send(
+            session,
+            wake_text(runs),
+            lock=app.state.session_lock_for(name),
+            busy=busy,
+            session_name=name,
+            origin="orch_run_finished",
+        )
+    finally:
+        app.state.bus.publish_threadsafe({"kind": "orch_continuation_finished", "session_name": name})
+    return True

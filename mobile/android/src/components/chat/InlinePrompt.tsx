@@ -56,6 +56,12 @@ export function ToolApprovalBody(props: PromptBodyProps) {
   const diff = previewDiff(prompt);
   const command = commandPreview(prompt);
   const args = prompt.shape === 'diff' ? '' : formatArgs(prompt.tool_args);
+  if (prompt.requires_desktop) {
+    return <PromptFrame tone={promptTone(prompt)} chip="Review" title="Review this PoC on desktop" queue={queueOf(props)}
+      actions={<CancelButton onPress={cancel} />}>
+      <Text variant="body" tone="ink2">Open the browser or terminal to review the command, runner and PoC scripts before approving execution.</Text>
+    </PromptFrame>;
+  }
   const description = typeof prompt.description === 'string' && prompt.description.trim() ? prompt.description.trim() : '';
   return (
     <ApprovalCard

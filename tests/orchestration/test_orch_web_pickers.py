@@ -105,3 +105,55 @@ def test_selector_builder_speaks_the_selector_grammar():
         assert selectors.parse(formatted) == selectors.parse(text), (text, formatted)
     assert out[-1] is None                                # unparseable: the builder falls back to text
 
+
+
+INDEX = {"labels": {"env": {"prod": 4, "staging": 2}, "role": {"web": 3, "db": 1, "worker": 2}, "region": {"ap-southeast-2": 6}}}
+
+
+def _pickers(body: str):
+    prelude = ("global.window = {OrchUI: {esc: s => String(s), icon: () => '', uid: p => p, debounce: f => f},"
+               " OrchAPI: {}, OrchSchema: {}}; global.document = {};")
+    return _node(prelude + (JS / "pickers.js").read_text(encoding="utf-8") + "\nconst P = window.OrchPickers;\n" + body)
+
+
+def test_label_multi_select_builds_a_selector_the_master_accepts():
+    out = _pickers("""
+        const start = P.parseSelector('role!=db,!legacy');
+        const picked = P.applyFacets(start, [['env', 'prod'], ['role', 'web'], ['role', 'worker']]);
+        const one = P.formatSelector(picked);
+        const back = P.facetPicks(picked);
+        const fewer = P.formatSelector(P.applyFacets(picked, back.filter(([k, v]) => !(k === 'role' && v === 'worker'))));
+        const none = P.formatSelector(P.applyFacets(picked, []));
+        process.stdout.write(JSON.stringify({one, back, fewer, none}));""")
+    # One value of a key is key=v, several are `key in (…)`; hand-made ≠ / absent conditions stay.
+    assert out["one"] == "env=prod,role in (web,worker),role!=db,!legacy"
+    assert selectors.parse(out["one"]) and out["back"] == [["env", "prod"], ["role", "web"], ["role", "worker"]]
+    assert out["fewer"] == "env=prod,role=web,role!=db,!legacy"
+    assert out["none"] == "role!=db,!legacy"
+
+
+def test_typed_selector_suggests_keys_operators_and_values():
+    cases = [
+        ("", ["env", "region", "role"]),                       # every key
+        ("ro", ["role"]),                                      # by prefix
+        ("role", ["role=…", "role!=…", "role in (…)", "role notin (…)"]),   # a whole key: how to compare
+        ("role=", ["web", "worker", "db"]),                    # values, most used first
+        ("env=prod,role in (web,", ["worker", "db"]),          # inside in (…): the rest of the values
+        ("env=prod, re", ["region"]),                          # a later term
+        ("!l", []),                                            # no key starts with l
+        ("role i", ["in (a,b)"]),                              # operator words after a key
+        ("role in (db", []),                                   # a value typed in full: nothing more to offer
+        ("env=prod", []),
+    ]
+    out = _pickers("""
+        const cases = %s; const index = %s;
+        process.stdout.write(JSON.stringify(cases.map(t => { const r = P.selectorCompletions(t, t.length, index);
+            return {labels: r.items.map(i => i.label), from: r.from, to: r.to, inserts: r.items.map(i => i.insert)}; })));""" %
+                   (json.dumps([c[0] for c in cases]), json.dumps(INDEX)))
+    for (text, expect), got in zip(cases, out):
+        assert got["labels"] == expect, (text, got)
+    # Accepting replaces only the partial word: "env=prod,role in (web," + "worker" stays a valid selector.
+    text = "env=prod,role in (web,"
+    got = out[4]
+    completed = text[:got["from"]] + got["inserts"][0] + text[got["to"]:] + ")"
+    assert selectors.parse(completed) == selectors.parse("env=prod,role in (web,worker)")

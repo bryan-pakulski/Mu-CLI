@@ -178,12 +178,14 @@ def context_status(args: Dict[str, Any], context) -> str:
     uncheckpointed = max(0, history_len - max(summary_anchor, checkpoint_anchor))
     l2_stale = uncheckpointed >= 12
 
-    todo_count = sum(
-        1 for e in session.turn_scratchpad.entries if "todo" in e.tags
-    ) if hasattr(session, "turn_scratchpad") else 0
-    scratch_count = sum(
-        1 for e in session.turn_scratchpad.entries if "todo" not in e.tags
-    ) if hasattr(session, "turn_scratchpad") else 0
+    try:
+        from mu.modes.work import work_state
+
+        _work_counts = work_state(session).counts()
+    except Exception:  # noqa: BLE001
+        _work_counts = {}
+    todo_count = sum(_work_counts.values())
+    scratch_count = len(session.turn_scratchpad.entries) if hasattr(session, "turn_scratchpad") else 0
 
     # Staleness signals — the actionable pruning targets. The agent retires
     # stale memory and clears stale todos instead of letting dead state
@@ -195,16 +197,8 @@ def context_status(args: Dict[str, Any], context) -> str:
     stale_memory_count = sum(1 for e in memory_entries if e.status == "stale")
     active_memory_count = sum(1 for e in memory_entries if e.status == "active")
 
-    stale_todos = 0
-    in_progress_todos = 0
-    if hasattr(session, "turn_scratchpad"):
-        for e in session.turn_scratchpad.entries:
-            if "todo" not in e.tags:
-                continue
-            if any(t == "status:completed" for t in e.tags):
-                stale_todos += 1
-            elif any(t == "status:in_progress" for t in e.tags):
-                in_progress_todos += 1
+    stale_todos = int(_work_counts.get("done", 0)) + int(_work_counts.get("dropped", 0))
+    in_progress_todos = int(_work_counts.get("in_progress", 0))
 
     memory_max = int(getattr(session.task_memory, "max_entries", 0)) if memory_entries else 0
     memory_pressure = round(100.0 * memory_count / memory_max, 1) if memory_max > 0 else 0.0

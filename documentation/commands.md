@@ -16,6 +16,8 @@ one-line summary; this file is the full reference.
 | `/session new [name]` | Start a new session (interactive provider pick if a UI is attached). |
 | `/session delete <name>` | Delete a saved session. |
 | `/continue` | Resume the loop after a blocker or pause. |
+| `/blocker` (alias `/blockers`) or `/blocker list` | List open blockers the agent raised with `raise_blocker` (id, mode, summary, what it needs). |
+| `/blocker resolve <id> [answer]` | Resolve one blocker with an optional answer. Sending your next chat message also resolves every open blocker, with the message as the answer. |
 
 ## Provider, model, and prompt
 
@@ -23,6 +25,17 @@ one-line summary; this file is the full reference.
 | --- | --- |
 | `/model [name]` | Show the active model, or switch with an argument. |
 | `/provider <name>` | Switch provider (`openai`, `gemini`, `ollama`). |
+| `/prompts` (alias `/prompt`) | List every system prompt (base and each mode) and where it comes from. |
+| `/prompts reload` | Clear the prompt cache to pick up file edits. |
+| `/prompts init [name\|all]` | Write template files to `~/.mucli/prompts/` for editing. |
+| `/prompts show <name>` | Print the effective prompt text. |
+| `/prompts validate [name]` | Check that the critical tool anchors are present. |
+| `/prompts edit <name>` | Open the override file in `$EDITOR` (or print its path). |
+| `/prompts diff <name>` | Compare an override with the bundled prompt. |
+| `/prompts keep <name>` | Keep an override older than the bundled prompt and silence its notice until the bundled version moves again. |
+| `/prompts reset <name>` | Move the override aside (`<name>.md.bak`) so the bundled prompt applies. |
+
+The bundled templates in `mu/prompts/templates/` are the single prompt source. When a user override's `version` is older than the bundled template, the terminal and GUI show a one-time notice pointing at `diff`, `keep` and `reset`; the override keeps working.
 
 ## Mode toggles
 
@@ -47,12 +60,12 @@ workflow, tools, and quality bar.
 | Mode | Description | Doc |
 | --- | --- | --- |
 | `default` | Baseline workflow: parallel reads, evidence-based verification, retrieval-aware. | [default_mode.md](default_mode.md) |
-| `debug` | Reproduce-first debugging — deterministic repro, locate, bisect, fix, verify. | [debug_mode.md](debug_mode.md) |
-| `feature` | Staged feature plan engine with explicit approval gates. | [feature_plan_engine.md](feature_plan_engine.md) |
+| `debug` | Debug cases — engine-checked repro, hypotheses, fix verification, root cause. | [debug_mode.md](debug_mode.md) |
+| `feature` | Feature plans — user-approved draft, evidence-backed criteria, review, user completion. | [feature_plan_engine.md](feature_plan_engine.md) |
 | `research` | Exploration and explanation with citations and credibility weighting. | [research_mode.md](research_mode.md) |
-| `loop` | Long-horizon autonomous loop with goal lock and timeline output. | [loop_mode.md](loop_mode.md) |
+| `loop` | Long-horizon work on a user-owned mission with increments, budgets and done-when checks. | [loop_mode.md](loop_mode.md) |
 | `security` | Security audit gated on verified PoC + verified patch. | [security_mode.md](security_mode.md) |
-| `teacher` | Structured course engine — diagnose → curriculum → per-lesson grade loop. | [teacher_mode.md](teacher_mode.md) |
+| `teacher` | Structured course engine — diagnose → learner-approved curriculum → gated lesson loop. | [teacher_mode.md](teacher_mode.md) |
 
 ## Files and workspace
 
@@ -165,36 +178,70 @@ at runtime. See [configuration.md](configuration.md) for the full list.
 | `/unset --all` | Restore all variables to defaults. |
 | `/variables` | Show every variable and its current value. |
 
+## Debug cases
+
+`/debug` works on the session's debug cases (debug mode). Changes made
+with the command are recorded with the actor `user:cli`. See
+[debug_mode.md](debug_mode.md).
+
+| Subcommand | Description |
+| --- | --- |
+| `/debug` or `/debug status` | The current case: title, status, symptom, accepted reproducer, latest hypotheses, suspects, recent check runs and the next step. |
+| `/debug cases` | Every case with its status; `*` marks the current one. |
+| `/debug select <id>` | Make a case current. |
+| `/debug close <root cause>` | Close the current case once it is `verified`; saves the root cause to the Memory Ledger and reports a gap when no regression test was recorded. |
+| `/debug unreproducible <why>` | Close the current case as unreproducible (not allowed once verified). |
+
 ## Feature workflow
 
-`/feature` manages persistent multi-phase feature plans. With no
-argument, lists features. See [feature_plan_engine.md](feature_plan_engine.md)
-for the engine model.
+`/feature` manages the session's feature plans: the user approves, the
+agent executes. With no argument, lists features. User actions go
+through the same engine gates as the panel and mobile and are recorded
+with the actor `user:cli`. See
+[feature_plan_engine.md](feature_plan_engine.md).
 
 | Subcommand | Description |
 | --- | --- |
 | `/feature` or `/feature list` | List session features. |
 | `/feature new <name>` | Create a new feature record. |
-| `/feature load <id>` | Load an existing feature into the active slot. |
+| `/feature load <id>` | Load an existing feature into the active slot; the agent resumes rather than re-plans. |
 | `/feature delete <id>` | Remove a feature record. |
 | `/feature exit` (alias: `unload`) | Clear the active feature without deleting it. |
-| `/feature status` | Status of the active feature. |
-| `/feature phases` | List phases of the active feature. |
-| `/feature create <plan\|phase\|task> <args>` | Engine-driven creation of the next planning artifact. `plan <name>`, `phase <title> \| <goal>`, or `task <phase_id> \| <title> \| <overview> \| <exit1;exit2>`. |
-| `/feature show <board\|execution\|reviews>` | Render a view of the active feature (default `board`). |
-| `/feature move <task-id> <status>` | Move a task to a new status (`completed` auto-attaches the task's exit criteria). |
-| `/feature block <task-id> <reason>` | Mark a task blocked. |
-| `/feature review auto` / `/feature review <task-id> <summary>` | Auto-review all completed tasks, or review one task with a summary. |
-| `/feature archive <task-id>` | Archive a completed-and-reviewed task. |
-| `/feature monitor` | Watch progress in real time. |
+| `/feature status` / `/feature phases [<id>]` | Print the plan: approval, tasks, criteria and evidence. |
+| `/feature approve` | Approve the draft; records you, the time and the plan hash. The model cannot approve. |
+| `/feature start <task>` | Start a task (one in progress at a time). |
+| `/feature move <task> <status> [reason]` | The same gated move as the panel. |
+| `/feature attest <task> <criterion> <why>` | Mark a criterion met without a run, recorded as a user attestation. |
+| `/feature done <task> <reason>` | Complete a task whose criteria are not all met, recorded as an override. |
+| `/feature diff <proposal> approve\|reject [reason]` | Decide a diff proposal. |
+| `/feature review` | List what still blocks completion. |
+| `/feature complete` | Mark the feature complete; needs every task completed and reviewed, no open blockers and a passing suite run after the last change. |
 | `/feature help` | Inline help. |
+
+## Loop missions
+
+`/loop` manages the loop mission. You own the mission; the agent works
+it. Pause, resume and stop take effect at the agent's next iteration
+boundary. See [loop_mode.md](loop_mode.md).
+
+| Subcommand | Description |
+| --- | --- |
+| `/loop` or `/loop status` | Goal, status, budget left, done-when criteria, last increment and backlog. |
+| `/loop start <goal> [--done "<criterion>" [--check "<cmd>"]]... [--max-increments N] [--max-cost USD] [--max-hours H] [--max-minutes M] [--max-turns N]` | Start a mission and switch to loop mode. `--check` attaches a command that must exit 0 to the preceding `--done`. Refused while another mission is running, paused or blocked. |
+| `/loop pause [reason]` | Pause the mission. |
+| `/loop resume` | Resume a paused mission, or extend a finished one. Refused while a budget is used up. |
+| `/loop stop [reason]` | End the mission; a stopped mission cannot resume. |
+| `/loop goal <text>` | Change the goal, recorded with you as the actor. |
+| `/loop budget --max-cost USD --max-hours H ...` | Raise or set budgets. |
+| `/loop attest <criterion id> <why>` | Mark a done-when criterion met without a run, recorded as an override. |
 
 ## Teacher mode
 
 `/teach` (alias `/t`) manages teacher-mode courses. Works from any mode
 (e.g. for `/teach status` peeks); the agent only drives lessons while
-`/mode teacher` is active. See [teacher_mode.md](teacher_mode.md) for
-the engine model.
+`/mode teacher` is active. Learner decisions go through the same engine
+gates as the panel and mobile and are recorded with the actor
+`user:cli`. See [teacher_mode.md](teacher_mode.md) for the engine model.
 
 | Subcommand | Description |
 | --- | --- |
@@ -206,6 +253,9 @@ the engine model.
 | `/teach next` | Next pending lesson hint. |
 | `/teach grades` | Markdown table of every graded assignment. |
 | `/teach curriculum` | Render the syllabus. |
+| `/teach approve` | Approve the proposed curriculum (the learner's consent; the model cannot approve). |
+| `/teach start <lesson_id> --override <reason>` | Start a lesson out of order; the reason is recorded. |
+| `/teach finish --early <reason>` | Record an early finish so the course can be finalised before every lesson has passed. |
 | `/teach delete <id>` | Delete a course (irreversible). |
 | `/teach help` | Inline help. |
 
@@ -213,15 +263,20 @@ the engine model.
 
 | Command | Description |
 | --- | --- |
-| `/research <query>` | Run web search + synthesis as a one-shot. Uses the same research tools the model has available. |
-| `/research status` | Source counts, by type, by topic, average credibility, current mode, active topic. |
-| `/research sources [--type X] [--min N] [--query Q] [--topic T]` | List every source the research tools have registered with the citation engine. Each row has id, type, topic, credibility (★), title, URL. Filters: `--type web\|academic\|social\|forum\|news\|documentation\|other`, `--min <0..1>`, `--query <substring>`, `--topic <substring>`. |
-| `/research show <id>` | Full record for one source: title, URL, type, topic, credibility score, authors, dates, metadata. |
-| `/research bibliography [topic]` (also `biblio`/`bib`) | Compile the markdown bibliography block (`[^n]:` footnotes with credibility ratings) grouped by topic. Optional topic arg emits just one bucket. |
-| `/research stats` | Breakdown by source type + topic + credibility-tier histogram. |
-| `/research topic [name]` | Show the active research topic, or set it to `name` so sources registered afterwards are grouped under that ask. |
-| `/research topics` | List all research topics that have at least one source, with per-topic counts. |
-| `/research clear` | Wipe the citation engine. Useful when starting a new research topic. |
+| `/research <query>` | Switch to research mode and send the query as a research request. |
+| `/research new <query>` | Clear the research trail, then run the query. |
+| `/research status` | Questions, claims, sources by state (candidate / read / cited), gaps, current question. |
+| `/research questions` | The question tree with status (open / answered / contested / dropped), claim and origin counts. |
+| `/research claims [qid]` | Recorded claims (all, or one question and its sub-questions) with confidence, contested flag and sources. |
+| `/research gaps` | Questions without claims, contested and low-confidence claims, unread candidates worth reading. |
+| `/research sources [--state S] [--type X] [--min N] [--query Q] [--topic T]` | Sources, read and cited by default. `--state candidate\|read\|cited`, `--type web\|academic\|social\|forum\|news\|documentation\|other`, `--min <0..1>` credibility, `--query` title/URL substring, `--topic` question substring. |
+| `/research show <n\|sN>` | One source by citation number or candidate id: state, origin, credibility, authors, dates, questions. |
+| `/research bibliography [--cited] [qid]` (also `biblio`/`bib`) | The markdown bibliography: cited sources grouped by root question, then read-but-uncited ones under "Consulted" (`--cited` drops those). |
+| `/research stats` | Sources read, independent origins, average credibility, counts by state and type, claim confidence. |
+| `/research topic [name]` | Show the current question, or select (creating if needed) the root question `name`. |
+| `/research topics` | The question groups that have read sources, with counts. |
+| `/research export <dir>` | Write `questions.md`, `source_register.md` and `evidence_log.md` from the ledger (workspace and container sessions; workspace bounds apply). |
+| `/research clear` | Wipe the session's research trail: sources, questions and claims. |
 
 ## Shell escape
 
@@ -254,3 +309,11 @@ the engine model.
   consistent response shape.
 - A command that mutates session state (e.g. `/plan on`, `/set ...`)
   takes effect immediately; subsequent model turns see the new state.
+
+
+### Security scans
+
+`/security [status|scan <title>|list|open <id>|scope [JSON]|coverage|report]` manages the
+session's audit. `/security runner host` explicitly enables real-host PoCs for that scan;
+`/security runner docker` or `auto` returns to container execution. Each PoC still requires
+human command/script review. See [Security mode](security_mode.md).

@@ -1,26 +1,53 @@
+// Feature mode (modes_v2.md §4.3; mu/gui/routers/feature.py): the active plan (plan_view —
+// status draft → approved → executing → review → done, approval, tasks with criteria and their
+// evidence, reviews, diff proposals, completion gaps, events), the session's features, open
+// blockers and the check runs the plan cites. Every mutation goes through the engine's gates.
+
 import { api } from './client';
-import { ModeWorkspaceContract } from './modeWorkspace';
+import type { Blocker, CheckRun } from './modeState';
+
+export type FeaturePlanStatus = 'draft' | 'approved' | 'executing' | 'review' | 'done';
+export type FeatureTaskStatus = 'not_started' | 'in_progress' | 'blocked' | 'completed' | 'archived';
+
+export interface FeatureCriterionEvidence {
+  kind: 'run' | 'file' | 'attested' | string;
+  ref?: string;
+  justification?: string;
+  actor?: string;
+  at?: number;
+}
+
+export interface FeatureCriterion {
+  id: string;
+  text: string;
+  check: { command?: string; predicate?: Record<string, unknown> } | null;
+  met: boolean;
+  evidence: FeatureCriterionEvidence[];
+}
 
 export interface FeatureTask {
   id: number;
   title: string;
-  phase_id?: number | null;
-  status: string;
-  objectives: string[];
-  action_points?: string[];
-  exit_criteria: string[];
-  verified_exit_criteria: string[];
-  blocked_reason: string;
+  phase_id: number | null;
+  objective: string;
+  actions: string[];
+  criteria: FeatureCriterion[];
+  status: FeatureTaskStatus | string;
   notes: string;
+  origin: string;
+  started_at: number | null;
+  completed_at: number | null;
+  diff_stat: string;
+  reviewed: boolean;
+  override: { reason?: string; actor?: string; at?: number; [key: string]: unknown } | null;
+  unmet: string[];
 }
 
 export interface FeaturePhase {
-  id: string | number;
+  id: number;
   title: string;
   goal: string;
   order: number;
-  status: string | null;
-  tasks: FeatureTask[];
 }
 
 export interface FeatureEvent {
@@ -37,58 +64,61 @@ export interface FeatureReviewRecord {
   id: string;
   task_id: number;
   summary: string;
-  limitations: string[];
   issues: Array<Record<string, unknown>>;
+  diff_stat: string;
+  check_run: string;
+  actor: string;
   created_at: number;
 }
 
 export interface FeatureDiffProposal {
   id: string;
-  review_id: string;
   task_id: number;
-  issue_id: string;
   diff: string;
-  status: string;
+  rationale: string;
+  status: 'pending' | 'approved' | 'rejected' | string;
   decision_reason: string;
+  decided_by: string;
   created_at: number;
-  decided_at?: number | null;
+  decided_at: number | null;
 }
 
-export interface FeatureSummary {
+export interface FeaturePlan {
   feature_id: string;
   feature_name: string;
   feature_request: string;
-  directory?: string;
-  metadata_path?: string;
+  directory: string;
+  metadata_path: string;
+  status: FeaturePlanStatus | string;
+  revision: number;
+  approval: { actor?: string; at?: number; plan_hash?: string; [key: string]: unknown } | null;
+  approval_history: Array<Record<string, unknown>>;
+  tasks: FeatureTask[];
+  phases_meta: FeaturePhase[];
+  event_log: FeatureEvent[];
+  review_records: FeatureReviewRecord[];
+  diff_proposals: FeatureDiffProposal[];
+  current_task_id: number | null;
+  completion_requested: boolean;
+  completion: Record<string, unknown> | null;
+  created_at: number;
+  updated_at: number;
+  hash: string;
   approved: boolean;
-  review_status: string;
-  review_notes?: string;
-  overall_status: string;
-  task_count: number;
-  phase_count?: number;
-  tasks_completed: boolean;
-  phases: Array<Record<string, unknown>>;
-  phase_columns: FeaturePhase[];
-  event_count: number;
-  review_count?: number;
-  diff_proposal_count?: number;
-  event_log?: FeatureEvent[];
-  review_records?: FeatureReviewRecord[];
-  diff_proposals?: FeatureDiffProposal[];
-  review_summaries?: Array<Record<string, unknown>>;
-  next_task?: FeatureTask | null;
-  next_phase?: Record<string, unknown> | null;
-  execution: Record<string, unknown>;
-  created_at?: number;
-  updated_at?: number;
-  read_only?: boolean;
-  preview_feature_id?: string;
+  approval_current: boolean;
+  current_task: number | null;
+  next_task: number | null;
+  counts: Partial<Record<FeatureTaskStatus, number>>;
+  unreviewed: number[];
+  completion_gaps?: string[];
 }
 
 export interface FeatureListItem {
   feature_id: string;
   feature_name: string;
-  status: string;
+  status: string | null;
+  task_count: number;
+  completed_count: number;
   is_active: boolean;
   archived: boolean;
   created_at?: number;
@@ -98,27 +128,34 @@ export interface FeatureListItem {
 export interface FeatureState {
   active: boolean;
   active_feature_id: string | null;
-  plan: FeatureSummary | null;
+  plan: FeaturePlan | null;
   features: FeatureListItem[];
-  metadata_path: string | null;
-  read_only?: boolean;
-  workspace: ModeWorkspaceContract;
+  blockers: Blocker[];
+  runs: CheckRun[];
+  read_only: boolean;
 }
+
+const fid = (featureId: string) => encodeURIComponent(featureId);
 
 export const featureApi = {
   getState: () => api.get<FeatureState>('/api/feature/state'),
-  preview: (featureId: string) =>
-    api.get<FeatureState>(`/api/feature/${encodeURIComponent(featureId)}/preview`),
-  approve: (featureId: string) => api.post<{ ok: boolean }>(`/api/feature/${encodeURIComponent(featureId)}/approve`),
-  load: (featureId: string) => api.post<{ ok: boolean }>(`/api/feature/${encodeURIComponent(featureId)}/load`),
-  unload: (featureId: string) => api.post<{ ok: boolean }>(`/api/feature/${encodeURIComponent(featureId)}/unload`),
-  archive: (featureId: string) => api.post<{ ok: boolean }>(`/api/feature/${encodeURIComponent(featureId)}/archive`),
-  unarchive: (featureId: string) => api.post<{ ok: boolean }>(`/api/feature/${encodeURIComponent(featureId)}/unarchive`),
-  delete: (featureId: string) => api.delete<{ ok: boolean }>(`/api/feature/${encodeURIComponent(featureId)}`),
-  transitionTask: (taskId: number, toStatus: string, notes?: string, blockedReason?: string) =>
-    api.post<{ ok: boolean; task_id: number; to_status: string }>(`/api/feature/tasks/${taskId}/transition`, {
-      to_status: toStatus, notes, blocked_reason: blockedReason,
-    }),
-  toggleExitCriterion: (taskId: number, idx: number) =>
-    api.post<{ ok: boolean; task_id: number; criterion_index: number; verified: boolean }>(`/api/feature/tasks/${taskId}/exit-criteria/${idx}/toggle`),
+  preview: (featureId: string) => api.get<FeatureState>(`/api/feature/${fid(featureId)}/preview`),
+  /** Approve the active draft (user-only). */
+  approve: () => api.post<FeatureState>('/api/feature/approve'),
+  startTask: (taskId: number) => api.post<FeatureState>(`/api/feature/tasks/${taskId}/start`),
+  transitionTask: (taskId: number, toStatus: string, reason = '') =>
+    api.post<FeatureState>(`/api/feature/tasks/${taskId}/transition`, { to_status: toStatus, reason }),
+  attestCriterion: (taskId: number, criterionId: string, note: string) =>
+    api.post<FeatureState>(`/api/feature/tasks/${taskId}/criteria/${encodeURIComponent(criterionId)}/attest`, { note }),
+  completeTask: (taskId: number, overrideReason = '') =>
+    api.post<FeatureState>(`/api/feature/tasks/${taskId}/complete`, { override_reason: overrideReason }),
+  decideDiff: (proposalId: string, decision: 'approved' | 'rejected', reason = '') =>
+    api.post<FeatureState>(`/api/feature/diffs/${encodeURIComponent(proposalId)}/decide`, { decision, reason }),
+  /** Mark the feature complete (the engine enforces the preconditions). */
+  complete: () => api.post<FeatureState>('/api/feature/complete'),
+  load: (featureId: string) => api.post<{ ok: boolean }>(`/api/feature/${fid(featureId)}/load`),
+  unload: (featureId: string) => api.post<{ ok: boolean }>(`/api/feature/${fid(featureId)}/unload`),
+  archive: (featureId: string) => api.post<{ ok: boolean }>(`/api/feature/${fid(featureId)}/archive`),
+  unarchive: (featureId: string) => api.post<{ ok: boolean }>(`/api/feature/${fid(featureId)}/unarchive`),
+  delete: (featureId: string) => api.delete<{ ok: boolean }>(`/api/feature/${fid(featureId)}`),
 };

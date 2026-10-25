@@ -73,7 +73,7 @@ Routers are mounted under `/api/*` (`mu/gui/app.py`):
 | `/api` | `inspector` | variable/config inspection + `/set`/`/unset` + layer budgets |
 | `/api/teacher` | `teacher` | teacher-mode course CRUD |
 | `/api/feature` | `feature` | feature plan state/create/approve/load/archive + task transitions |
-| `/api/research` | `research` | research subcommands + citation engine |
+| `/api/research` | `research` | the session's research ledger (questions, claims, sources) |
 | `/api/security` | `security` | security-mode audit surface |
 | `/api/loop` | `loop` | loop-mode control |
 | `/api/debug` | `debug` | debug-mode surface |

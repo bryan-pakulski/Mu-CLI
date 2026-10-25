@@ -1,128 +1,161 @@
-// Teacher mode (web teacher_panel.html): the course, its modules and lessons, mastery checks and
-// the retention schedule.
+// Teacher mode (modes_v2.md §4.6, §5.3 Teacher, §5.4 Android): the path (modules → lessons with
+// their gate state in line 2), objective mastery, assignments with grades, and spaced reviews with
+// their due dates. Now holds the curriculum approval (the learner's consent), due reviews, an
+// exercise waiting for the learner, a grade awaiting judgement and any blocker.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { ModeWorkspaceIntro, useModeWorkspaceView, workspaceState, workspaceTabs } from '../components';
-import { PanelPage, PanelSection } from '../components/chat/PanelPage';
-import { teacherApi, type TeacherLesson, type TeacherModule, type TeacherState } from '../api/teacher';
+import { PanelPage, PanelSection, Fact } from '../components/chat/PanelPage';
+import {
+  NowBoard, blockersFor, dueText, lessonGateLine, resolveBlockerAction, teacherNow, teacherSentence, useCheckRunSheet, useModeActions,
+  type NowItem,
+} from '../components/modes';
+import { modeStateApi, type Blocker } from '../api/modeState';
+import { teacherApi, type TeacherAssignment, type TeacherState } from '../api/teacher';
+import { modeState } from '../theme/status';
 import { spacing } from '../theme/tokens';
-import { Row, Rows, Text } from '../ui';
+import { Banner, Button, Row, Sheet, Text } from '../ui';
 
-/** Course / module / lesson status → the shared status vocabulary. */
-export function lessonStatus(status: string | null | undefined): string {
-  if (status === 'completed' || status === 'done') return 'done';
-  if (status === 'presenting' || status === 'in_progress') return 'active';
-  return 'pending';
+const TABS = [
+  { key: 'path', label: 'Path' },
+  { key: 'mastery', label: 'Mastery' },
+  { key: 'reviews', label: 'Reviews' },
+];
+
+/** An assignment's grade as a mark: awaiting judgement waits; graded passes or fails. */
+export function gradeMark(a: TeacherAssignment): { status: string; label: string } {
+  if (!a.grade) return { status: 'pending', label: a.status.replace(/_/g, ' ') };
+  if (a.grade.status === 'awaiting_judgement') return { status: 'waiting', label: 'awaiting judgement' };
+  const mark = modeState('check_run', a.grade.passed ? 'passed' : 'failed');
+  return { status: mark.status, label: `${mark.label} ${a.grade.score_pct}%` };
 }
 
 export function TeacherScreen() {
   const [state, setState] = useState<TeacherState | null>(null);
+  const [blockers, setBlockers] = useState<Blocker[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [expandedModule, setExpandedModule] = useState<string | null>(null);
-  const workspaceView = useModeWorkspaceView(state?.workspace);
+  const [tab, setTab] = useState('path');
+  const [openAssignment, setOpenAssignment] = useState<TeacherAssignment | null>(null);
 
   const load = useCallback(async () => {
-    try { setError(null); setState(await teacherApi.getState()); }
-    catch (e) { setError(String(e)); }
+    try {
+      setError(null);
+      const [next, open] = await Promise.all([
+        teacherApi.getState(),
+        modeStateApi.listBlockers().then(r => r.open).catch(() => [] as Blocker[]),
+      ]);
+      setState(next);
+      setBlockers(blockersFor('teacher', open));
+    } catch (e) { setError(String(e)); }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
   useFocusEffect(useCallback(() => { setLoading(true); void load(); }, [load]));
 
-  const workspace = state?.workspace;
-  const course = state?.course;
-  const showModules = workspaceView.selectedView !== 'mastery' && workspaceView.selectedView !== 'reviews';
-  const assignments = (course?.assignments || []) as Array<Record<string, any>>;
-  const reviews = (course?.scheduled_reviews || []) as Array<Record<string, any>>;
-  const empty = !state || (!state.active && state.courses.length === 0);
+  const actions = useModeActions(load);
+  const sheet = useCheckRunSheet();
+  const course = state?.course || null;
+  const now = useMemo(() => teacherNow(course, blockers), [course, blockers]);
 
+  const actionsFor = (item: NowItem) => {
+    if (item.kind === 'blocker') {
+      return <Button label="Answer" variant="primary" testID={`now-answer-${item.ref}`}
+        onPress={() => void actions.run(resolveBlockerAction(item), args => modeStateApi.resolveBlocker(item.ref, String(args.resolution || '')))} />;
+    }
+    if (item.kind === 'approve_curriculum') {
+      return <Button label="Approve curriculum" variant="primary" icon="circle-check" testID="teacher-approve"
+        onPress={() => void actions.run({ id: 'approve', label: 'Approve curriculum', confirm: 'Start this course with the proposed modules and lessons?' }, () => teacherApi.approve())} />;
+    }
+    return null;
+  };
+
+  const lessonsOf = (moduleId: string) => (course?.lessons || []).filter(l => l.module_id === moduleId);
+  const empty = !loading && !error && !course && !(state?.courses.length) && !now.length;
   return (
-    <PanelPage testID="teacher-screen" title={workspace?.title || 'Teacher'} state={workspaceState(workspace)}
-      tabs={workspaceTabs(workspace)} tab={workspaceView.selectedView} onTab={workspaceView.selectView}
+    <PanelPage testID="teacher-screen" title={course?.subject || 'Teacher'} state={teacherSentence(course)}
+      tabs={TABS} tab={tab} onTab={setTab}
       loading={loading} error={error} onRetry={() => void load()}
-      empty={!loading && !error && empty ? { title: 'No courses', message: 'No teacher courses available.' } : null}
-      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }}>
-      {state && workspace ? (
+      empty={empty ? { title: 'No course', message: 'Tell the teacher what you want to learn in teacher mode; it proposes a curriculum for you to approve.' } : null}
+      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }}
+      overlay={<>{actions.element}{sheet.element}</>}>
+      {actions.error ? <Banner tone="danger" title="That didn't go through" testID="teacher-error">{actions.error}</Banner> : null}
+      <NowBoard items={now} actionsFor={actionsFor} />
+
+      {!course && state?.courses.length ? (
+        <PanelSection title="Courses">
+          {state.courses.map(c => {
+            const mark = modeState('teacher_course', c.status);
+            return <Row key={c.course_id} status={mark.status} title={c.subject || c.course_id} when={mark.label}
+              sub={c.lessons ? `${c.lessons_completed} of ${c.lessons} lessons` : undefined} />;
+          })}
+        </PanelSection>
+      ) : null}
+
+      {course && tab === 'path' ? [...course.modules].sort((a, b) => a.order - b.order).map(m => (
+        <PanelSection key={m.module_id} title={m.title} right={m.mastery_pct != null ? <Text variant="caption" tone="ink3" numeric>{`${m.mastery_pct}%`}</Text> : undefined} testID={`module-${m.module_id}`}>
+          {lessonsOf(m.module_id).map(l => {
+            const mark = modeState('teacher_lesson', l.status);
+            return <Row key={l.lesson_id} status={mark.status} title={l.title} when={mark.label} sub={lessonGateLine(l) || undefined}
+              selected={l.lesson_id === course.current_lesson_id} testID={`lesson-${l.lesson_id}`} />;
+          })}
+        </PanelSection>
+      )) : null}
+
+      {course && tab === 'mastery' ? (
         <>
-          <ModeWorkspaceIntro workspace={workspace} />
-          {course ? (
-            <PanelSection title="Course">
-              <Row status={lessonStatus(course.status)} title={course.subject} when={course.status.replace(/_/g, ' ')}
-                sub={`${course.target_level} · ${course.lessons_completed_count}/${course.lesson_total} lessons`} testID="teacher-course" />
-            </PanelSection>
-          ) : (
-            <PanelSection title="No active course" count={state.courses.length} empty="No courses yet.">
-              {state.courses.map(c => <Row key={c.course_id} status={lessonStatus(c.status)} title={c.subject} when={c.status.replace(/_/g, ' ')} />)}
-            </PanelSection>
-          )}
-          {course && showModules ? (
-            <PanelSection title="Modules" count={course.modules.length} empty="No modules yet.">
-              {course.modules.map(module => (
-                <ModuleRow key={String(module.module_id)} module={module} expanded={expandedModule === String(module.module_id)}
-                  onToggle={() => setExpandedModule(prev => (prev === String(module.module_id) ? null : String(module.module_id)))} />
-              ))}
-            </PanelSection>
-          ) : null}
-          {course && workspaceView.shows('mastery') ? (
-            <PanelSection title="Demonstrated mastery" count={assignments.length} empty="No mastery checks recorded.">
-              {assignments.map((assignment, index) => {
-                const grade = assignment.grade as Record<string, any> | undefined;
-                return (
-                  <Row key={String(assignment.assignment_id || index)} status={grade ? (grade.passed ? 'done' : 'waiting') : 'pending'}
-                    title={String(assignment.assignment_id || 'Assignment')} when={grade ? `${grade.score_pct ?? '—'}%` : undefined}
-                    sub={(
-                      <View style={styles.sub}>
-                        <Text variant="caption" tone="ink3">{String(assignment.kind || assignment.status || 'assignment')}</Text>
-                        {assignment.prompt ? <Text variant="caption" tone="ink2">{String(assignment.prompt)}</Text> : null}
-                        {grade?.feedback ? <Text variant="caption" tone="ink3">Evidence: {String(grade.feedback)}</Text> : null}
-                        {!grade ? <Text variant="caption" tone="attention">Mastery not assessed yet.</Text> : null}
-                      </View>
-                    )} />
-                );
-              })}
-            </PanelSection>
-          ) : null}
-          {course && workspaceView.shows('reviews') ? (
-            <PanelSection title="Retention schedule" count={reviews.length} empty="No spaced reviews scheduled.">
-              {reviews.map((review, index) => (
-                <Row key={String(review.review_id || index)} status={review.status === 'done' ? 'done' : 'pending'}
-                  title={String(review.source_lesson_title || review.source_lesson_id || 'Review')}
-                  when={review.due_at_lesson_count != null ? `lesson ${review.due_at_lesson_count}` : undefined}
-                  sub={[String(review.status || 'scheduled'), review.score_pct != null ? `recall score ${review.score_pct}%` : '', review.notes ? String(review.notes) : ''].filter(Boolean).join(' · ')} />
-              ))}
-            </PanelSection>
-          ) : null}
+          <PanelSection title="Objectives" right={course.course_mastery != null ? <Text variant="caption" tone="ink3" numeric>{`course ${course.course_mastery}%`}</Text> : undefined}
+            empty="No objectives yet.">
+            {course.mastery.map((row, i) => (
+              <Row key={`${row.lesson_id}:${i}`} title={row.objective} when={row.mastery_pct != null ? `${row.mastery_pct}%` : 'not assessed'}
+                sub={row.attempts ? `${row.attempts} attempt${row.attempts === 1 ? '' : 's'}` : undefined} />
+            ))}
+          </PanelSection>
+          <PanelSection title="Assignments" empty="No assignments yet.">
+            {course.assignments.map(a => {
+              const mark = gradeMark(a);
+              return <Row key={a.assignment_id} status={mark.status} title={a.prompt.split('\n')[0] || a.assignment_id} when={mark.label}
+                onPress={() => setOpenAssignment(a)} testID={`assignment-${a.assignment_id}`} />;
+            })}
+          </PanelSection>
         </>
       ) : null}
+
+      {course && tab === 'reviews' ? (
+        <>
+          <PanelSection title="Due" empty="Nothing due.">
+            {course.due_reviews.map(r => {
+              const mark = modeState('teacher_review', 'due');
+              return <Row key={r.review_id} status={mark.status} title={r.objective || r.source_lesson_id} when={dueText(r)} testID={`review-${r.review_id}`} />;
+            })}
+          </PanelSection>
+          <PanelSection title="Upcoming" empty="No reviews scheduled.">
+            {course.upcoming_reviews.filter(r => !course.due_reviews.some(d => d.review_id === r.review_id)).map(r => {
+              const mark = modeState('teacher_review', 'scheduled');
+              return <Row key={r.review_id} status={mark.status} title={r.objective || r.source_lesson_id} when={dueText(r)} testID={`review-${r.review_id}`} />;
+            })}
+          </PanelSection>
+        </>
+      ) : null}
+
+      <Sheet visible={openAssignment !== null} onClose={() => setOpenAssignment(null)} title="Assignment" testID="assignment-sheet">
+        {openAssignment ? (
+          <View style={styles.sheet}>
+            <Row status={gradeMark(openAssignment).status} title={gradeMark(openAssignment).label} />
+            <Text variant="body">{openAssignment.prompt}</Text>
+            {openAssignment.grade?.feedback ? <Fact label="Feedback" value={openAssignment.grade.feedback} /> : null}
+            {(openAssignment.grade?.rubric_breakdown || []).map((r, i) => (
+              <Fact key={i} label={String(r.criterion || `criterion ${i + 1}`)} value={[r.score != null ? `score ${r.score}` : '', r.weight != null ? `weight ${r.weight}` : '', r.description ? String(r.description) : ''].filter(Boolean).join(' · ')} />
+            ))}
+            {openAssignment.grade?.check_run ? <Button variant="ghost" label="Grader run ▸" onPress={() => { const id = openAssignment.grade!.check_run; setOpenAssignment(null); sheet.open(id); }} /> : null}
+          </View>
+        ) : null}
+      </Sheet>
     </PanelPage>
   );
 }
 
-function ModuleRow({ module, expanded, onToggle }: { module: TeacherModule; expanded: boolean; onToggle: () => void }) {
-  const done = module.lessons.filter(l => l.status === 'completed').length;
-  return (
-    <Row status={lessonStatus(module.status)} title={module.title} when={`${done}/${module.lessons.length}`} onPress={onToggle}
-      accessibilityLabel={`${module.title}, ${done} of ${module.lessons.length} lessons${expanded ? ', expanded' : ''}`}
-      testID={`module-${module.module_id}`}
-      actions={expanded ? (
-        <View style={styles.lessons}>
-          <Rows>{module.lessons.map(lesson => <LessonRow key={lesson.lesson_id} lesson={lesson} />)}</Rows>
-        </View>
-      ) : undefined} />
-  );
-}
-
-function LessonRow({ lesson }: { lesson: TeacherLesson }) {
-  return (
-    <Row status={lessonStatus(lesson.status)} title={lesson.title} when={lesson.status.replace(/_/g, ' ')}
-      sub={lesson.lecture_comprehension_pct !== null ? `Comprehension ${lesson.lecture_comprehension_pct}%` : undefined} />
-  );
-}
-
 const styles = StyleSheet.create({
-  sub: { gap: spacing.xs },
-  lessons: { flex: 1 },
+  sheet: { gap: spacing.sm },
 });

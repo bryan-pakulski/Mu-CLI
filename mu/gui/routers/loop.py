@@ -1,108 +1,146 @@
-"""Loop-mode introspection.
+"""Loop-mode state and controls: the mission (``mu.loop``).
 
-Surfaces the autonomous loop's goal, active flag, spawned features,
-and the current todo backlog (scratchpad-backed) so the GUI can show
-a dashboard while the agent is running hands-off.
+``GET  /api/loop/state``           mission (goal, status, budget + tightest meter, done-when,
+                                   increments), backlog (work items), open blockers, check runs
+``POST /api/loop/start``           the user starts a mission (goal, done_when, budget)
+``POST /api/loop/control``         pause | resume | stop (real: the watchdog obeys)
+``POST /api/loop/goal``            the user changes the goal
+``POST /api/loop/budget``          the user raises / sets budgets
+``POST /api/loop/criteria/{id}/attest``  the user marks a done-when criterion met (recorded)
+``POST /api/loop/backlog``         the user adds a backlog item
 """
 
 from __future__ import annotations
 
-import logging
-import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..mode_workspace import loop_workspace
 from ..mode_session import mode_session, mode_session_lock
+from .mode_state import check_payload, save, states_for, surface_actor
 
 router = APIRouter()
-_logger = logging.getLogger(__name__)
 
 
-def _entry_dict(entry) -> Dict[str, Any]:
+def loop_payload(session: Any) -> Dict[str, Any]:
+    from mu.loop.engine import tightest_budget
+
+    manager = session.session_manager
+    active = str(manager.variables.get("agent_mode", "default")) == "loop"
+    states = manager.mode_state
+    state = states.get("loop")
+    work = states.get("work")
+    with state.lock:
+        mission = state.mission.to_dict() if state.mission else None
+        meter = tightest_budget(state.mission) if state.mission else None
+    runs: List[Dict[str, Any]] = []
+    if mission:
+        checks = states.get("checks")
+        ids = {r for inc in mission["increments"] for r in inc["evidence"]}
+        ids |= {r for c in mission["done_when"] for r in c["evidence"]}
+        runs = [check_payload(checks.get(r)) for r in sorted(ids, key=lambda x: int(x[1:]) if x[1:].isdigit() else 0)
+                if checks.get(r) is not None]
+    current = work.current()
     return {
-        "id": entry.id,
-        "content": entry.content,
-        "tags": list(entry.tags or []),
-        "source": entry.source,
-        "kind": getattr(entry, "kind", ""),
-        "created_at": entry.created_at,
-        "updated_at": entry.updated_at,
+        "active": active,
+        "mission": mission,
+        "budget_meter": meter,
+        "backlog": [i.to_dict() for i in work.list()],
+        "current_item": current.id if current else None,
+        "blockers": [b.to_dict() for b in states.get("blockers").open_blockers()],
+        "runs": runs,
+        "past": [{"id": p.get("id"), "goal": p.get("goal"), "status": p.get("status")}
+                 for p in state.past[-5:]],
     }
 
 
 @router.get("/state")
 async def get_loop_state(request: Request) -> Dict[str, Any]:
     session = mode_session(request)
-    if session is None:
-        return {
-            "active": False,
-            "loop_goal": "",
-            "loop_active": False,
-            "loop_features": [],
-            "backlog": [],
-            "memory": [],
-            "workspace": loop_workspace(
-                "", [], [], [], loop_active=False, active=False
-            ),
-        }
-    sm = session.session_manager
-    variables = sm.variables
-    mode_active = variables.get("agent_mode", "default") == "loop"
+    if session is None or getattr(session.session_manager, "mode_state", None) is None:
+        return {"active": False, "mission": None, "budget_meter": None, "backlog": [],
+                "current_item": None, "blockers": [], "runs": [], "past": []}
+    return loop_payload(session)
 
-    loop_goal = str(variables.get("loop_goal", "") or "").strip()
-    loop_active = bool(variables.get("loop_active", False))
 
-    raw_features = variables.get("loop_features")
-    if isinstance(raw_features, str):
-        import json
+def _act(request: Request, fn) -> Dict[str, Any]:
+    from mu.modes.events import GateError
+
+    session, _states = states_for(request)
+    with mode_session_lock(request, session):
         try:
-            raw_features = json.loads(raw_features)
-        except (ValueError, TypeError):
-            raw_features = []
-    loop_features = list(raw_features or [])
+            fn(session, surface_actor(request))
+        except GateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        save(session)
+    return loop_payload(session)
 
-    # Backlog: todo items from the scratchpad (tagged "todo").
-    backlog: List[Dict[str, Any]] = []
-    try:
-        entries = sm.turn_scratchpad.list_entries(limit=50)
-        for e in entries:
-            tags = [t.lower() for t in (e.tags or [])]
-            if "todo" in tags:
-                status = "pending"
-                for t in tags:
-                    if t.startswith("status:"):
-                        status = t.split(":", 1)[1]
-                backlog.append({**_entry_dict(e), "status": status})
-    except Exception as exc:
-        _logger.warning("loop: scratchpad read failed: %s", exc)
 
-    # Memory snapshot: recent task_memory entries.
-    memory: List[Dict[str, Any]] = []
-    try:
-        entries = sm.task_memory.list_entries(limit=5)
-        memory = [_entry_dict(e) for e in entries]
-    except Exception as exc:
-        _logger.warning("loop: task_memory read failed: %s", exc)
+class StartBody(BaseModel):
+    goal: str
+    done_when: List[Any] = []
+    budget: Dict[str, float] = {}
 
-    return {
-        "active": True,
-        "loop_goal": loop_goal,
-        "loop_active": loop_active,
-        "loop_features": loop_features,
-        "backlog": backlog,
-        "memory": memory,
-        "workspace": loop_workspace(
-            loop_goal,
-            backlog,
-            loop_features,
-            memory,
-            loop_active=loop_active,
-            active=mode_active,
-        ),
-    }
+
+@router.post("/start")
+async def start(request: Request, body: StartBody) -> Dict[str, Any]:
+    from mu.loop.engine import start_mission
+
+    def run(session, actor):
+        start_mission(session, body.goal, done_when=body.done_when, budget=body.budget, actor=actor)
+        session.variables["agent_mode"] = "loop"
+
+    return _act(request, run)
+
+
+class ControlBody(BaseModel):
+    action: str = ""
+    reason: str = ""
+    # Earlier clients (Android) send {active: bool}.
+    active: Optional[bool] = None
+
+
+@router.post("/control")
+async def control(request: Request, body: ControlBody) -> Dict[str, Any]:
+    from mu.loop.engine import set_status
+
+    action = body.action or ("resume" if body.active else "pause" if body.active is not None else "")
+    status = {"pause": "paused", "resume": "running", "stop": "stopped"}.get(action)
+    if status is None:
+        raise HTTPException(status_code=400, detail="action must be pause, resume or stop")
+    return _act(request, lambda session, actor: set_status(session, status, reason=body.reason, actor=actor))
+
+
+class GoalBody(BaseModel):
+    goal: str
+
+
+@router.post("/goal")
+async def goal(request: Request, body: GoalBody) -> Dict[str, Any]:
+    from mu.loop.engine import set_goal
+
+    return _act(request, lambda session, actor: set_goal(session, body.goal, actor=actor))
+
+
+@router.post("/budget")
+async def budget(request: Request, body: Dict[str, float]) -> Dict[str, Any]:
+    from mu.loop.engine import set_budget
+
+    return _act(request, lambda session, actor: set_budget(session, body, actor=actor))
+
+
+class AttestBody(BaseModel):
+    note: str
+
+
+@router.post("/criteria/{criterion_id}/attest")
+async def attest(request: Request, criterion_id: str, body: AttestBody) -> Dict[str, Any]:
+    from mu.loop.engine import attest as attest_criterion
+
+    return _act(request, lambda session, actor: attest_criterion(session, criterion_id, note=body.note, actor=actor))
 
 
 class BacklogItemBody(BaseModel):
@@ -110,53 +148,11 @@ class BacklogItemBody(BaseModel):
     status: str = "pending"
 
 
-class LoopControlBody(BaseModel):
-    active: bool
-    goal: str = ""
-
-
-@router.post("/control")
-async def control_loop(request: Request, body: LoopControlBody) -> Dict[str, Any]:
-    """Pause or resume mission execution without rebuilding its backlog.
-
-    Starting a brand-new loop remains a chat/model operation.  This control is
-    intentionally narrower: it toggles an existing mission and preserves its
-    workstreams, memory, and queue.
-    """
-    session = mode_session(request)
-    if session is None:
-        raise HTTPException(status_code=412, detail="no session active")
-
-    goal = body.goal.strip() or str(session.variables.get("loop_goal", "") or "").strip()
-    if body.active and not goal:
-        raise HTTPException(status_code=409, detail="set a loop goal before resuming")
-
-    with mode_session_lock(request, session):
-        session.variables["loop_active"] = body.active
-        if body.active:
-            session.variables["loop_goal"] = goal
-            session.variables["agent_mode"] = "loop"
-            session._ensure_loop_goal_persistence()
-        session.session_manager.save_history(session.folder_context)
-
-    return {"ok": True, "loop_active": body.active, "loop_goal": goal}
-
-
 @router.post("/backlog")
 async def add_backlog_item(request: Request, body: BacklogItemBody) -> Dict[str, Any]:
-    """Add a new todo item to the loop backlog (scratchpad)."""
-    session = mode_session(request)
-    if session is None:
-        raise HTTPException(status_code=412, detail="no session active")
-    sm = session.session_manager
-    content = body.content.strip()
-    if not content:
+    from mu.modes.work import work_state
+
+    if not body.content.strip():
         raise HTTPException(status_code=400, detail="content is required")
-
-    tags = ["todo", f"status:{body.status}"]
-    lock = mode_session_lock(request, session)
-    with lock:
-        entry = sm.turn_scratchpad.save(content, tags=tags, source="gui", kind="todo")
-        sm.save_history()
-
-    return {"ok": True, "id": entry.id}
+    return _act(request, lambda session, actor: work_state(session).add(
+        body.content, status=body.status, actor=actor, mode="loop"))

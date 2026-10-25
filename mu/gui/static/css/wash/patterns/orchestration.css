@@ -299,6 +299,20 @@
     .orch-combo__title { color: var(--wash-ink); font-weight: var(--wash-type-label-weight); }
     .orch-combo__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wash-space-2); }
     .orch-combo__summary { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* The selector builder's label multi-select and the typed selector's suggestions. */
+    .orch-facets { display: grid; gap: var(--wash-space-2); }
+    .orch-facets__chips { display: flex; flex-wrap: wrap; gap: var(--wash-space-2); margin: 0; padding: 0; list-style: none; }
+    .orch-facet__chip { display: inline-flex; align-items: center; gap: var(--wash-space-1); padding: 2px var(--wash-space-1) 2px var(--wash-space-3); border-radius: var(--wash-radius-pill); background: var(--wash-accent-wash); color: var(--wash-accent-ink); font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-size); }
+    .orch-facet__remove { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--wash-size-control-sm); height: var(--wash-size-control-sm); padding: 0; border: 0; border-radius: var(--wash-radius-pill); background: transparent; color: inherit; cursor: pointer; }
+    .orch-facet__remove .w-icon { flex: none; }
+    .orch-facet__remove:hover, .orch-facet__remove:focus-visible { background: var(--wash-surface); }
+    .orch-facet__option { flex-direction: row; align-items: center; gap: var(--wash-space-2); }
+    .orch-facet__option .orch-combo__title { flex: 1; font-family: var(--wash-font-mono); font-weight: var(--wash-type-body-weight); }
+    .orch-facet__tick { inline-size: 1.2em; color: var(--wash-accent-ink); text-align: center; }
+    .orch-facet__option[aria-selected="true"] { background: transparent; outline: 0; }
+    .orch-facet__option[aria-selected="true"] .orch-combo__title { color: var(--wash-accent-ink); font-weight: var(--wash-type-label-weight); }
+    .orch-facet__option[data-active], .orch-facet__option:hover { background: var(--wash-accent-wash); }
+    .orch-facet__option[data-active] { outline: 2px solid var(--wash-accent-ink); outline-offset: -2px; }
     .orch-combo__empty { padding: var(--wash-space-3); color: var(--wash-ink-3); }
     .orch-complete__option { flex-direction: row; align-items: baseline; justify-content: space-between; }
     .orch-params { align-items: start; }

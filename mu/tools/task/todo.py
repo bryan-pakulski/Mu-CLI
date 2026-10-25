@@ -1,74 +1,63 @@
-"""TodoWrite-style task tool, backed by `ScratchpadStore`.
+"""TodoWrite-style task tools over the session's work items (``mu.modes.work``).
 
-Three operations, exposed as three tools the model can call:
+  * ``todo_write(content, status?)``         add a work item; returns its id
+  * ``todo_set_status(id, status, evidence?)`` change status; ``done`` can cite
+                                             passing check runs (``r<n>``), and
+                                             must in loop mode
+  * ``todo_list(status?)``                   list items
+  * ``todo_delete(id)`` / ``todo_clear(status?)`` prune
 
-  * `todo_write(content, status?)`   - add a new todo. `status` defaults to
-                                       "pending". Returns the new id.
-  * `todo_set_status(id, status)`    - update a todo's status. Valid
-                                       statuses: pending, in_progress,
-                                       completed, blocked.
-  * `todo_list(status?)`             - list todos, optionally filtered by
-                                       status. Returns a numbered list
-                                       with id, status, and content.
-
-Status is encoded in the entry's `tags` as `"status:<value>"`. We always
-also attach the `"todo"` tag so todos can be distinguished from other
-scratchpad entries (memory tools share the same store, and the model
-may also save general scratchpad notes).
-
-Why scratchpad and not task_memory: TodoWrite is per-turn / per-session
-ephemeral planning. Durable cross-session facts go to `task_memory`.
+Items are typed records in session state: never evicted, exactly one
+``in_progress`` (starting one pauses the previous). ``completed`` is accepted
+as an alias of ``done``. Ids are numeric in the tools (``#3``) and ``w3`` in
+panels and evidence links.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
+from mu.modes.events import GateError
+from mu.modes.work import STATUSES, normalize_status, work_state
 from mu.tools import tool
 
+VALID_STATUSES = ("pending", "in_progress", "done", "completed", "blocked", "dropped")
+_MARKERS = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]", "blocked": "[!]", "dropped": "[-]"}
 
-VALID_STATUSES = ("pending", "in_progress", "completed", "blocked")
-_TODO_TAG = "todo"
+
+def _envelope(tool_name: str, ok: bool, message: str, data: Dict[str, Any] | None = None,
+              error_code: str | None = None) -> Dict[str, Any]:
+    return {
+        "ok": ok,
+        "error_code": None if ok else (error_code or "invalid_args"),
+        "message": message,
+        "data": data or {},
+        "artifacts": [],
+        "telemetry": {"tool_name": tool_name},
+    }
 
 
-def _store(context):
-    """Resolve the ScratchpadStore from the execution context.
-
-    Context.session.turn_scratchpad is the live store on a real session.
-    For unit tests that pass a session-less context we degrade to a
-    transient per-process store.
-    """
-    session = getattr(context, "session", None)
-    if session is not None and hasattr(session, "turn_scratchpad"):
-        return session.turn_scratchpad
-    # Fallback: keep a process-local store so the tool can still be
-    # exercised standalone in tests.
-    global _FALLBACK_STORE
+def _numeric(item_id: str) -> int:
     try:
-        return _FALLBACK_STORE
-    except NameError:
-        pass
-    from mu.memory.stores import ScratchpadStore
-    _FALLBACK_STORE = ScratchpadStore()
-    return _FALLBACK_STORE
+        return int(str(item_id).lstrip("w"))
+    except ValueError:
+        return 0
 
 
-_FALLBACK_STORE = None
+def _item_dict(item) -> Dict[str, Any]:
+    return {"id": _numeric(item.id), "ref": item.id, "content": item.title,
+            "status": item.status, "evidence": list(item.evidence),
+            "updated_at": item.updated_at}
 
 
-def _status_tag(status: str) -> str:
-    return f"status:{status}"
+def _mode(context) -> str:
+    variables = getattr(context, "variables", None) or {}
+    session = getattr(context, "session", None)
+    if not variables and session is not None:
+        variables = getattr(session, "variables", None) or {}
+    return str(variables.get("agent_mode", "default") or "default").lower()
 
 
-def _entry_status(entry) -> str:
-    for tag in entry.tags:
-        if tag.startswith("status:"):
-            return tag.split(":", 1)[1]
-    return "pending"
-
-
-def _set_status_tag(entry, status: str) -> None:
-    new_tags = [t for t in entry.tags if not t.startswith("status:")]
-    new_tags.append(_status_tag(status))
-    entry.tags = new_tags
+def _owner(context):
+    return context if getattr(context, "session", None) is not None else None
 
 
 # -------------------------------------------------------------------- write
@@ -77,8 +66,8 @@ def _set_status_tag(entry, status: str) -> None:
 @tool(
     name="todo_write",
     description=(
-        "Add a new task to the current session's TodoWrite list. Returns "
-        "the assigned id so it can be updated later with todo_set_status."
+        "Add a task to the session's plan (work items). Returns the id to "
+        "update later with todo_set_status."
     ),
     parameters={
         "type": "object",
@@ -102,40 +91,17 @@ def _set_status_tag(entry, status: str) -> None:
 def todo_write(args: Dict[str, Any], context) -> Dict[str, Any]:
     content = str(args.get("content", "") or "").strip()
     if not content:
-        return {
-            "ok": False,
-            "error_code": "invalid_args",
-            "message": "todo_write requires non-empty 'content'.",
-            "data": {},
-            "artifacts": [],
-            "telemetry": {"tool_name": "todo_write"},
-        }
-    status = str(args.get("status") or "pending").strip().lower()
-    if status not in VALID_STATUSES:
-        return {
-            "ok": False,
-            "error_code": "invalid_args",
-            "message": (
-                f"Unknown status {status!r}. Use one of: {', '.join(VALID_STATUSES)}."
-            ),
-            "data": {},
-            "artifacts": [],
-            "telemetry": {"tool_name": "todo_write"},
-        }
-
-    entry = _store(context).save(
-        content,
-        tags=[_TODO_TAG, _status_tag(status)],
-        source="todo_write",
-    )
-    return {
-        "ok": True,
-        "error_code": None,
-        "message": f"Added todo #{entry.id} ({status}): {content}",
-        "data": {"id": entry.id, "content": entry.content, "status": status},
-        "artifacts": [],
-        "telemetry": {"tool_name": "todo_write"},
-    }
+        return _envelope("todo_write", False, "todo_write requires non-empty 'content'.")
+    try:
+        status = normalize_status(args.get("status") or "pending")
+        if status == "done" and _mode(context) == "loop":
+            raise GateError("In loop mode a task is marked done with evidence: add it, then "
+                            "todo_set_status(id, 'done', evidence=['r<n>']).")
+        item = work_state(_owner(context)).add(content, status=status, mode=_mode(context))
+    except (ValueError, GateError) as exc:
+        return _envelope("todo_write", False, str(exc))
+    return _envelope("todo_write", True, f"Added todo #{_numeric(item.id)}: {content} ({item.status})",
+                     _item_dict(item))
 
 
 # ----------------------------------------------------------- set_status
@@ -143,19 +109,21 @@ def todo_write(args: Dict[str, Any], context) -> Dict[str, Any]:
 
 @tool(
     name="todo_set_status",
-    description="Update a todo's status. Use to mark tasks in_progress, completed, or blocked.",
+    description=(
+        "Update a task's status (one task is in_progress at a time; starting one "
+        "pauses the previous). Cite passing check runs as evidence when marking done."
+    ),
     parameters={
         "type": "object",
         "properties": {
-            "id": {
-                "type": "integer",
-                "description": "The numeric id returned by todo_write.",
+            "id": {"type": "integer", "description": "The numeric id returned by todo_write."},
+            "status": {"type": "string", "enum": list(VALID_STATUSES), "description": "New status."},
+            "evidence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Ids of passing check runs (r<n>) that show the task is done. Required in loop mode.",
             },
-            "status": {
-                "type": "string",
-                "enum": list(VALID_STATUSES),
-                "description": "New status.",
-            },
+            "note": {"type": "string", "description": "Optional one-line note."},
         },
         "required": ["id", "status"],
     },
@@ -167,52 +135,25 @@ def todo_set_status(args: Dict[str, Any], context) -> Dict[str, Any]:
     try:
         todo_id = int(args.get("id"))
     except (TypeError, ValueError):
-        return {
-            "ok": False,
-            "error_code": "invalid_args",
-            "message": "todo_set_status requires integer 'id'.",
-            "data": {},
-            "artifacts": [],
-            "telemetry": {"tool_name": "todo_set_status"},
-        }
-    status = str(args.get("status") or "").strip().lower()
-    if status not in VALID_STATUSES:
-        return {
-            "ok": False,
-            "error_code": "invalid_args",
-            "message": (
-                f"Unknown status {status!r}. Use one of: {', '.join(VALID_STATUSES)}."
-            ),
-            "data": {},
-            "artifacts": [],
-            "telemetry": {"tool_name": "todo_set_status"},
-        }
-
-    store = _store(context)
-    entry = next(
-        (e for e in store.entries if e.id == todo_id and _TODO_TAG in e.tags),
-        None,
-    )
-    if entry is None:
-        return {
-            "ok": False,
-            "error_code": "not_found",
-            "message": f"No todo with id #{todo_id}.",
-            "data": {"id": todo_id},
-            "artifacts": [],
-            "telemetry": {"tool_name": "todo_set_status"},
-        }
-    _set_status_tag(entry, status)
-    import time
-    entry.updated_at = time.time()
-    return {
-        "ok": True,
-        "error_code": None,
-        "message": f"Todo #{entry.id} status: {status}",
-        "data": {"id": entry.id, "content": entry.content, "status": status},
-        "artifacts": [],
-        "telemetry": {"tool_name": "todo_set_status"},
-    }
+        return _envelope("todo_set_status", False, "todo_set_status requires integer 'id'.")
+    try:
+        status = normalize_status(args.get("status"))
+    except ValueError as exc:
+        return _envelope("todo_set_status", False, str(exc))
+    store = work_state(_owner(context))
+    if store.get(todo_id) is None:
+        return _envelope("todo_set_status", False, f"No todo with id #{todo_id}.", {"id": todo_id},
+                         "not_found")
+    evidence = args.get("evidence") or []
+    if isinstance(evidence, str):
+        evidence = [evidence]
+    try:
+        item = store.set_status(todo_id, status, evidence=list(evidence),
+                                note=str(args.get("note") or ""),
+                                require_evidence=_mode(context) == "loop")
+    except GateError as exc:
+        return _envelope("todo_set_status", False, str(exc), {"id": todo_id}, exc.code)
+    return _envelope("todo_set_status", True, f"Todo #{todo_id} status: {item.status}", _item_dict(item))
 
 
 # -------------------------------------------------------------------- list
@@ -220,15 +161,11 @@ def todo_set_status(args: Dict[str, Any], context) -> Dict[str, Any]:
 
 @tool(
     name="todo_list",
-    description="List todos in the current session. Optional 'status' filter.",
+    description="List the session's tasks. Optional 'status' filter.",
     parameters={
         "type": "object",
         "properties": {
-            "status": {
-                "type": "string",
-                "enum": list(VALID_STATUSES),
-                "description": "Filter to only this status.",
-            },
+            "status": {"type": "string", "enum": list(VALID_STATUSES), "description": "Filter to only this status."},
         },
     },
     requires_approval=False,
@@ -236,62 +173,22 @@ def todo_set_status(args: Dict[str, Any], context) -> Dict[str, Any]:
     result_mode="json",
 )
 def todo_list(args: Dict[str, Any], context) -> Dict[str, Any]:
-    status_filter: Optional[str] = (
-        str(args.get("status")).strip().lower() if args.get("status") else None
-    )
-    if status_filter and status_filter not in VALID_STATUSES:
-        return {
-            "ok": False,
-            "error_code": "invalid_args",
-            "message": (
-                f"Unknown status {status_filter!r}. "
-                f"Use one of: {', '.join(VALID_STATUSES)}."
-            ),
-            "data": {},
-            "artifacts": [],
-            "telemetry": {"tool_name": "todo_list"},
-        }
-
-    store = _store(context)
-    todos = []
-    for entry in store.entries:
-        if _TODO_TAG not in entry.tags:
-            continue
-        entry_status = _entry_status(entry)
-        if status_filter and entry_status != status_filter:
-            continue
-        todos.append(
-            {
-                "id": entry.id,
-                "content": entry.content,
-                "status": entry_status,
-                "updated_at": entry.updated_at,
-            }
-        )
-    todos.sort(key=lambda t: (t["status"] != "in_progress", t["id"]))
-
+    try:
+        status = normalize_status(args["status"]) if args.get("status") else None
+    except ValueError as exc:
+        return _envelope("todo_list", False, str(exc))
+    items = work_state(_owner(context)).list(status)
+    items.sort(key=lambda i: (i.status != "in_progress", _numeric(i.id)))
+    todos = [_item_dict(i) for i in items]
     if not todos:
-        msg = "No todos."
+        message = "No todos."
     else:
-        lines = []
-        for t in todos:
-            marker = {
-                "pending": "[ ]",
-                "in_progress": "[~]",
-                "completed": "[x]",
-                "blocked": "[!]",
-            }.get(t["status"], "[?]")
-            lines.append(f"{marker} #{t['id']}: {t['content']}")
-        msg = "\n".join(lines)
-
-    return {
-        "ok": True,
-        "error_code": None,
-        "message": msg,
-        "data": {"todos": todos, "count": len(todos)},
-        "artifacts": [],
-        "telemetry": {"tool_name": "todo_list"},
-    }
+        message = "\n".join(
+            f"{_MARKERS.get(t['status'], '[?]')} #{t['id']}: {t['content']}"
+            + (f" (evidence {', '.join(t['evidence'])})" if t["evidence"] else "")
+            for t in todos
+        )
+    return _envelope("todo_list", True, message, {"todos": todos, "count": len(todos)})
 
 
 # ------------------------------------------------------------------- delete
@@ -300,19 +197,12 @@ def todo_list(args: Dict[str, Any], context) -> Dict[str, Any]:
 @tool(
     name="todo_delete",
     description=(
-        "Remove a task from the todo ledger by id. Use to prune stale or "
-        "abandoned items so the ledger stays honest — the agent owns which "
-        "tasks are still relevant. Unlike todo_set_status(completed), this "
-        "fully removes the entry."
+        "Remove a task by id. Use to prune stale or abandoned items so the plan "
+        "stays honest; prefer status 'dropped' when the record matters."
     ),
     parameters={
         "type": "object",
-        "properties": {
-            "id": {
-                "type": "integer",
-                "description": "The numeric id returned by todo_write.",
-            },
-        },
+        "properties": {"id": {"type": "integer", "description": "The numeric id returned by todo_write."}},
         "required": ["id"],
     },
     requires_approval=False,
@@ -323,38 +213,13 @@ def todo_delete(args: Dict[str, Any], context) -> Dict[str, Any]:
     try:
         todo_id = int(args.get("id"))
     except (TypeError, ValueError):
-        return {
-            "ok": False,
-            "error_code": "invalid_args",
-            "message": "todo_delete requires integer 'id'.",
-            "data": {},
-            "artifacts": [],
-            "telemetry": {"tool_name": "todo_delete"},
-        }
-
-    store = _store(context)
-    entry = next(
-        (e for e in store.entries if e.id == todo_id and _TODO_TAG in e.tags),
-        None,
-    )
-    if entry is None:
-        return {
-            "ok": False,
-            "error_code": "not_found",
-            "message": f"No todo with id #{todo_id}.",
-            "data": {"id": todo_id},
-            "artifacts": [],
-            "telemetry": {"tool_name": "todo_delete"},
-        }
-    store.entries = [e for e in store.entries if e.id != todo_id]
-    return {
-        "ok": True,
-        "error_code": None,
-        "message": f"Deleted todo #{todo_id}: {entry.content}",
-        "data": {"id": todo_id, "content": entry.content},
-        "artifacts": [],
-        "telemetry": {"tool_name": "todo_delete"},
-    }
+        return _envelope("todo_delete", False, "todo_delete requires integer 'id'.")
+    store = work_state(_owner(context))
+    if store.get(todo_id) is None:
+        return _envelope("todo_delete", False, f"No todo with id #{todo_id}.", {"id": todo_id}, "not_found")
+    item = store.delete(todo_id)
+    return _envelope("todo_delete", True, f"Deleted todo #{todo_id}: {item.title}",
+                     {"id": todo_id, "content": item.title})
 
 
 # -------------------------------------------------------------------- clear
@@ -363,22 +228,13 @@ def todo_delete(args: Dict[str, Any], context) -> Dict[str, Any]:
 @tool(
     name="todo_clear",
     description=(
-        "Bulk-remove todos from the ledger. With no argument, removes every "
-        "completed todo (the everyday prune after a turn's work). Pass "
-        "status='completed' explicitly to prune finished items, or "
-        "status='all' to wipe the whole ledger and start fresh (use when the "
-        "user's ask has shifted and the old plan no longer applies)."
+        "Bulk-remove tasks. With no argument, removes done tasks; status='all' "
+        "wipes the plan (use when the user's ask has shifted)."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "status": {
-                "type": "string",
-                "description": (
-                    "Which todos to remove: 'completed' (default) prunes "
-                    "finished items; 'all' wipes the ledger."
-                ),
-            },
+            "status": {"type": "string", "description": "'completed'/'done' (default) or 'all'."},
         },
     },
     requires_approval=False,
@@ -386,52 +242,17 @@ def todo_delete(args: Dict[str, Any], context) -> Dict[str, Any]:
     result_mode="json",
 )
 def todo_clear(args: Dict[str, Any], context) -> Dict[str, Any]:
-    scope = str(args.get("status") or "completed").strip().lower()
-    store = _store(context)
-    before = [e for e in store.entries if _TODO_TAG in e.tags]
-
+    scope = str(args.get("status") or "done").strip().lower()
+    store = work_state(_owner(context))
     if scope == "all":
-        removed = list(before)
-        store.entries = [e for e in store.entries if _TODO_TAG not in e.tags]
-    elif scope == "completed":
-        removed = [e for e in before if _entry_status(e) == "completed"]
-        _ids = {e.id for e in removed}
-        store.entries = [e for e in store.entries if not (_TODO_TAG in e.tags and e.id in _ids)]
+        removed = store.clear_items(None)
+    elif scope in ("completed", "done"):
+        removed = store.clear_items("done")
     else:
-        return {
-            "ok": False,
-            "error_code": "invalid_args",
-            "message": (
-                f"Unknown scope {scope!r}. Use 'completed' (default) or 'all'."
-            ),
-            "data": {},
-            "artifacts": [],
-            "telemetry": {"tool_name": "todo_clear"},
-        }
-
-    # Recompute _next_id so new saves don't collide with retained entries.
-    remaining = [e for e in store.entries if _TODO_TAG in e.tags]
-    store._next_id = (max(e.id for e in store.entries) + 1) if store.entries else 1
-
-    return {
-        "ok": True,
-        "error_code": None,
-        "message": f"Cleared {len(removed)} todo(s) (scope={scope}).",
-        "data": {
-            "removed": len(removed),
-            "scope": scope,
-            "remaining": len(remaining),
-        },
-        "artifacts": [],
-        "telemetry": {"tool_name": "todo_clear"},
-    }
+        return _envelope("todo_clear", False, f"Unknown scope {scope!r}. Use 'done' (default) or 'all'.")
+    return _envelope("todo_clear", True, f"Cleared {removed} todo(s) (scope={scope}).",
+                     {"removed": removed, "scope": scope, "remaining": len(store.items)})
 
 
-__all__ = [
-    "todo_write",
-    "todo_set_status",
-    "todo_list",
-    "todo_delete",
-    "todo_clear",
-    "VALID_STATUSES",
-]
+__all__ = ["todo_write", "todo_set_status", "todo_list", "todo_delete", "todo_clear",
+           "VALID_STATUSES", "STATUSES"]

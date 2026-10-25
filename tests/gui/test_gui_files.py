@@ -406,19 +406,6 @@ def test_css_has_files_panel_and_codemirror_theme():
     assert ".CodeMirror { background: var(--wash-canvas); color: var(--wash-ink); }" in src
 
 
-def test_todos_are_not_offered_as_a_separate_view():
-    index = open(INDEX_HTML, encoding="utf-8").read()
-    js = open(APP_JS, encoding="utf-8").read()
-    assert 'class="mode-option todo-view-option"' not in index
-    assert "Todos</span>" not in index
-    assert "$store.mode.setView('loop'); open = false" not in index
-    assert 'class="todo-field"' not in index
-    assert 'Alpine.store("loop").load();' in js
-    # The todo snapshot still refreshes independently of the active view;
-    # background tabs now pause polling and refresh when made visible.
-    assert "pollVisible('loop', 5000)" in js
-
-
 def test_prompt_card_remains_visible_when_answer_or_cancel_post_fails():
     js = open(APP_JS, encoding="utf-8").read()
     assert "if (!answered) return;" in js

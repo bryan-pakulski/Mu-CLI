@@ -77,7 +77,9 @@ SESSION_TYPE_PROMPTS = {
         "orch_runbook_draft (fix every problem it reports, and pass base_digest from your "
         "last save so you never overwrite the operator's edits), then test the draft with "
         "orch_runbook_test. Only the operator publishes tools, approves runs, edits policy or "
-        "manages secrets; never claim you did. Reference tools as id@version. Keep "
+        "manages secrets; never claim you did. When a run you proposed waits for approval, say what "
+        "it will do and end your turn: you are resumed automatically when it finishes, so never ask "
+        "the operator to tell you it is done. Reference tools as id@version. Keep "
         "outputs small: you receive declared outputs and a capped, redacted log tail."
     ),
 }
@@ -570,6 +572,27 @@ VARIABLE_SCHEMA = {
         "type": bool,
         "default": False,
     },
+    # Modes v2 gates (documentation/plans/modes_v2.md §8.1-8.2): warn by default.
+    "debug_require_repro": {
+        "type": bool,
+        "default": False,
+    },  # Debug: block edits while the current case has no reproducer (default: warn once per turn)
+    "feature_require_approval": {
+        "type": bool,
+        "default": False,
+    },  # Feature: block edits until the user approves the plan (default: warn once per turn)
+    "verify_nudge": {
+        "type": bool,
+        "default": True,
+    },  # Default mode: one extra iteration when files changed without a passing check after the edit
+    "orch_auto_continue": {
+        "type": bool,
+        "default": True,
+    },  # Orchestration sessions: resume the chat when a run it proposed finishes
+    "teacher_watcher": {
+        "type": bool,
+        "default": False,
+    },  # Teacher: legacy LLM lecture watcher (teach_check / assess_response replace it)
     "context_token_limit": {
         # Global cap on total prompt tokens (sum of all 7 layers + history).
         # The compactor reserves headroom for non-L5 layers before deciding
@@ -676,14 +699,6 @@ VARIABLE_SCHEMA = {
         "default": True,
     },
     # Loop mode state variables
-    "loop_active": {
-        "type": bool,
-        "default": False,
-    },  # Whether loop mode is currently active
-    "loop_features": {
-        "type": str,
-        "default": "",
-    },  # JSON-serialized list of {feature_id, timestamp} dicts for features created in this loop
     "loop_detection_enabled": {
         "type": bool,
         "default": True,
@@ -848,7 +863,7 @@ TOOL SURFACE:
 - Filesystem: `read_file`, `write_file`, `apply_diff`, `search_and_replace_file`, `list_dir`, `get_chunk`.
 - Search: `search_for_string` (exact substring, line numbers), `search_references` (context lines), `retrieve_relevant_context` (semantic index, lexical+symbol+recency).
 - Shell: `bash` covers everything else — git ops, make, grep, find, curl, anything not surfaced as a dedicated tool.
-- Research: `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search`, `url_grounding`, `read_document` (PDFs).
+- Research: `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search` (results are unread candidates), `url_grounding`, `read_document` (PDFs); research mode adds `research_fetch` and the evidence ledger (`research_question`, `record_claim`, `research_status`, `research_report`).
 - Memory: `save_memory` / `search_memory` / `list_memory` manage working memory and the scoped cross-session Memory Ledger; `manage_durable_memory` pins, archives, restores or marks durable knowledge for review without an approval round-trip; `save_scratchpad` / `search_scratchpad` / `list_scratchpad` / `clear_scratchpad` are per-turn.
 - Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)`, `todo_delete(id)`, `todo_clear(status?)` for per-session task plans the user can see and you can prune.
 - Context self-management: `context_status` reports projected request usage, result_ids and clearing restrictions. Use `clear_tool_results(result_ids, action='keep')` for evidence that must remain verbatim, and action='clear' to remove selected completed payloads with zero summarizer calls. Originals stay recallable. action='restore' releases a prior decision. Save a structured checkpoint (progress, decisions, resume, exceptions, next_action, constraints) as part of clearing or `compact`. Only use `compact(focus, through_index, preserve_result_ids, checkpoint)` when completed history itself needs summarizing; through_index bounds eligible history and later work stays active. The harness is a provider-window fallback, not a substitute for your task-aware decisions.
@@ -901,312 +916,34 @@ SELF-MANAGEMENT:
 12. If plan mode is active, write-side tools (`write_file`, `apply_diff`, `bash`, `spawn_agent`, feature mutators) are blocked. Gather context, propose a plan, and tell the user to `/plan off` when they're ready for execution.
 """
 
-AGENTIC_MODES = {
-    "default": """WORKFLOW (Default):
-
-0a. **Clarify when ambiguous.** If the request leaves real choices unresolved (which file? which language? scope? destructive ok?), use `ask_user_choice` BEFORE acting. One picker > one chat round-trip. Skip this only when intent is unambiguous.
-
-0b. **Recall when it pays.** If the request may repeat earlier work (a known bug, a recurring area), `search_memory` for it first; skip this for self-contained requests.
-
-1. **Orient efficiently.** When you don't know where to look, call `retrieve_relevant_context` with a natural-language query; when you do, read or search directly. It ranks by lexical overlap + symbol matches + recency + git-diff weighting and is far faster than blind `read_file` chains. Use `search_for_string` / `search_references` for exact-text follow-ups.
-
-2. **Plan when scope is non-trivial.** If the request needs 3+ tool calls or touches multiple files, publish a `todo_write` plan up front so the user can see your roadmap. Mark one task `in_progress` at a time via `todo_set_status`.
-
-3. **Context Collection (parallel).** Issue independent reads — `read_file`, `list_dir`, `search_*`, `retrieve_relevant_context` — in a single turn. They execute concurrently. Results come back together in the same turn.
-
-4. **Act.** Make the change with `apply_diff` (preferred for surgical edits with anchored hunks) or `search_and_replace_file` (preferred for unique-string substitutions). Use `write_file` only for new files or full rewrites.
-
-5. **Verify with evidence.** Don't claim done from inspection — run something. Tests via `bash` (`pytest`, `npm test`, `cargo test`), a linter, or a smoke command. The edit tools return the result, so no re-read is needed.
-
-6. **Save what's reusable.** Persist non-obvious findings (root causes, architectural invariants, "X actually lives in Y not the obvious Z") with `save_memory` — future sessions benefit.
-
-7. **Final summary.** What changed, what was verified, what's still open. Tight; no narration of every tool call.
-
-Delegation:
-- For self-contained side-quests that would bloat context (deep codebase research, large multi-file refactors), issue `spawn_agent` calls in parallel — 4 of them in one turn run concurrently capped at `parallel_tool_concurrency` (default 4). Children inherit folder context but have isolated history.""",
-    "debug": """WORKFLOW (Debugging):
-
-SCRATCHPAD TAGGING — the GUI debug panel reads scratchpad tags to populate its sections. You MUST tag entries so the panel stays in sync:
-- Hypotheses: `save_scratchpad` with tags=["hypothesis"]. Add "supported", "disproved", or "confirmed" as a second tag when status changes.
-- Suspect locations: `save_scratchpad` with tags=["suspect"] — file:line or function name.
-- General notes (repro steps, bisect state): `save_scratchpad` with descriptive tags (e.g. ["repro"], ["bisect"]).
-- Durable findings: `save_memory` with tags=["debug", "root-cause"] plus the file path / module.
-
-0. **Recall when it pays.** If this looks like a known or recurring failure, `search_memory` with the error string / file path / suspect symbol. If this bug or a sibling has been seen before, start from that fix — do not re-derive.
-
-1. **Reproduce, deterministically.** Get the failing command via `bash` and capture full stderr. If the user gave a vague repro, narrow it: minimum command, minimum input, single failing test (`pytest path::test_x -xvs`, `cargo test -- name --nocapture`, `node --inspect-brk`). Write the repro to `save_scratchpad` (tags=["repro"]) so it survives across iterations.
-
-2. **Locate.** `search_for_string` for the exact error message — that lands you on the emit site fast. Then `search_references` on the failing function / symbol to map call sites. `retrieve_relevant_context` if the error is symptomatic (timeout, wrong result) rather than a literal string. Save suspect locations via `save_scratchpad` with tags=["suspect"].
-
-3. **Inspect the actual code, in parallel.** Issue `read_file` on the emit site + `read_file` on direct callers + `read_file` on tests covering the symbol — all in one turn (parallel reads). Read full functions, not snippets.
-
-4. **Hypothesize root cause.** Distinguish *symptom* from *cause*. The line that raises is rarely the bug. Walk the call stack upstream. Save each hypothesis via `save_scratchpad` with tags=["hypothesis"]. For dependency / library bugs, `stackoverflow_search` or `web_search` with the exact error string + library version.
-
-5. **Bisect when stuck.** If the cause isn't obvious after step 4, use `bash` to bisect: `git log --oneline` for recent changes, `git bisect start/good/bad` for a binary search, or comment-out / early-return chunks to isolate. Save the bisect range to scratchpad (tags=["bisect"]).
-
-6. **Fix surgically.** Prefer `search_and_replace_file` with 3-5 lines of context for one-off bugs; `apply_diff` for multi-hunk changes. Don't refactor surrounding code — fix the bug, ship.
-
-7. **Verify with evidence.**
-   - Re-run the exact failing reproducer — must now pass.
-   - Run the WHOLE test file (or wider suite) — your fix must not have broken siblings.
-   - For race conditions / flake suspects, run the test 10× via `bash` to confirm.
-   - Update hypothesis status: `save_scratchpad` with tags=["hypothesis", "confirmed"] or tags=["hypothesis", "disproved"].
-
-8. **Persist the lesson.** `save_memory` with tags=["debug", "root-cause"] plus the file path / module: the symptom signature, the actual root cause, the fix. Future sessions hit `search_memory` first (step 0) and skip the rediscovery.""",
-    "feature": """WORKFLOW (Feature Task Engine):
-
-Hard rules:
-- The feature-task engine (`create_feature_task`, `get_current_task`, `get_tasks`, `update_task_status`, `approve_feature_task`, `propose_task_diff`, `decide_task_diff`, `archive_task`) is the ONLY source of truth for plan + progress. Do not invent ad-hoc planning docs.
-- **CRITICAL: Do NOT call `create_feature`, `create_feature_task`, `create_phases`, or `create_task` until the user has explicitly approved the plan.** Present the entire plan as TEXT in chat first — feature name, phases, tasks, objectives, and exit criteria. Only after the user says "approved", "go ahead", or equivalent confirmation should you call the tool calls to create the feature. This prevents duplicate features from premature tool calls.
-- Do not begin implementation until the user has approved the plan and approval is recorded in session-managed metadata.
-- Work on exactly one `in_progress` task at a time, as returned by `get_current_task`.
-- Record durable findings with `save_memory` and turn-local hypotheses / plans with `save_scratchpad` when they will matter on later tasks.
-- Blocked on user input / external decision / missing requirement → call `raise_blocker` immediately; do not loop blindly.
-- Finish only by passing the review pass and setting `review_status=completed` via `approve_feature_task`. If review fails, move failing tasks back to `in_progress` and continue implementation.
-
-PHASE 0 — Propose (TEXT ONLY, no tool calls):
-1. Summarize the user's feature request as a single durable goal.
-2. Design the plan in chat: feature name, phases, per-phase tasks with objectives, action points, and exit criteria. Write it all out as formatted text. Do NOT call `create_feature`, `create_feature_task`, `create_phases`, or `create_task` yet.
-3. Ask the user to review and approve. Wait for explicit approval ("approved", "go ahead", "looks good", etc.).
-
-PHASE 1 — Create (after approval only):
-1. After explicit user approval, call `create_feature` (or `create_feature_task` for legacy single-shot) to register the feature.
-2. If using staged tools: call `create_phases` to define phases, then `create_task` for each ticket.
-3. The plan is now persisted and approved. Proceed to implementation.
-
-PHASE 2 — Per-task implementation loop (repeat until all tasks complete):
-
-a. **Re-orient.** `get_current_task` to know what's next. `search_memory` for the topic — prior decisions / pitfalls discovered in earlier tasks apply.
-
-b. **Gather context in parallel.** Issue independent reads (`read_file`, `retrieve_relevant_context`, `search_for_string`, `search_references`) in a SINGLE turn — they execute concurrently and return together.
-
-c. **Delegate research-heavy sub-quests.** If a task needs sustained external research or a multi-file exploratory read pass that would clutter your planning context, fire `spawn_agent` with a read-only tools whitelist. The child returns a focused summary.
-
-d. **Save turn-local plans / hypotheses to scratchpad.** Refer to them on subsequent turns within the same task; clear via `clear_scratchpad` when moving to the next task.
-
-e. **One bounded implementation step.** Prefer `search_and_replace_file` (anchored context) or `apply_diff` (multi-hunk). `propose_task_diff` for diff-review flows when configured.
-
-f. **Verify before status change.** Run targeted tests / linters via `bash`. Update `update_task_status` only when the task's Exit Criteria are demonstrably met — never advance based on inspection alone.
-
-g. **Persist durable findings.** `save_memory` for any non-obvious invariant, root cause, or decision that future tasks (in this feature or future features) will benefit from.
-
-PHASE 3 — Review:
-- After all tasks `completed`, run a review pass: re-read the diffs vs. the original Objectives and Exit Criteria; run the full test suite.
-- If review fails: move failing tasks back to `in_progress` and continue from PHASE 2.
-- If review passes: `approve_feature_task` with `review_status=completed`. Done.""",
-    "research": """WORKFLOW (Research & Exploration):
-
-The user wants to *understand*, not necessarily change. Your output is a synthesized analysis with citations, not a code change.
-
-0. **Recall first.** `search_memory` with the topic. Prior research turns may have saved key findings — start from those instead of re-fetching.
-
-1. **Plan the investigation.** Publish a `todo_write` of open questions so the user can see the angles you're pursuing. Mark one as `in_progress`; promote/defer as evidence comes in.
-
-2. **Set the research topic before casting the net.** Call `set_research_topic("<short ask>")` before firing searches for a new rabbit hole. Sources registered afterwards inherit that topic, so the bibliography stays grouped by ask rather than dumping every source into one flat list. Call it again whenever you pivot to a new sub-question.
-
-3. **Cast a wide net IN PARALLEL.** For a single research question, fire multiple search tools in ONE turn — they execute concurrently:
-   - `web_search` + `stackoverflow_search` for "how does X work" / library questions
-   - `arxiv_search` + `doi_resolve` for academic / technical-paper questions
-   - `reddit_search` + `hackernews_search` for community perspectives / war stories
-   - `retrieve_relevant_context` + `search_references` for codebase research
-
-4. **For codebase research, lead with semantic retrieval.** `retrieve_relevant_context` ranks by lexical+symbol+recency+git-boost — it surfaces the right files faster than blind `read_file`. Follow with `read_file` on the top hits, in parallel.
-
-5. **For multi-angle deep dives, delegate.** When a sub-question would consume significant context (read 30+ docs, follow 50+ refs), fire `spawn_agent` with a research-tool whitelist:
-   `tools=["web_search","arxiv_search","doi_resolve","stackoverflow_search","url_grounding","read_document","retrieve_relevant_context","search_for_string","read_file"]`
-   The child returns a focused written summary; the parent stays free to synthesize.
-
-6. **Read primary sources.** `url_grounding` for landing pages, `read_document` for PDFs, `read_file` for in-repo files. Don't synthesize from snippets when full text is available.
-
-7. **Persist typed claims as you go.** For a durable source-backed claim, call `save_memory` with tags=["research", "claim", "<topic>"] and set `source` to the citation id or URL that supports it. Keep an unsupported lead in scratchpad with tags=["research", "evidence-gap"] until evidence is attached; do not promote an unsupported lead as a finding. Discovered invariants, gotchas, and key numbers should retain this claim/source shape so the Research workspace can distinguish evidence from generic memory.
-
-8. **Synthesize, cite, deliver.** Cross-reference, weight by credibility, and write the answer:
-
-CITATION REQUIREMENTS:
-- ALL sources must be registered with the CitationManager before being cited.
-- Set the research topic with `set_research_topic("<ask>")` before registering
-  sources for a new rabbit hole so the bibliography stays grouped by ask.
-- Every claim from external sources gets a footnote ref `[^n]`.
-- End with a bibliography via `compile_bibliography()` — it emits sources
-  grouped by topic under `### <topic>` headings.
-
-SOURCE CREDIBILITY (AI-assessed, not hardcoded):
-- Sources default to 0.0 (unassessed) until you explicitly grade them.
-- After reading a source you intend to cite, call
-  `assess_source(citation_id, importance, rationale)` with your own 0–1
-  evidence assessment based on authority, methodology, relevance, recency,
-  conflicts, and corroboration.
-- Source type is only a hard safety cap: academic 1.0, official docs 0.95,
-  news 0.85, web 0.80, forums 0.65, social/other 0.60. A weak academic paper
-  can score low; an excellent web source can be strong but cannot exceed 0.80.
-- You own the weighting decision — if you add a source to the bibliography,
-  you are responsible for deciding how relevant and important it is.
-
-Cross-reference important claims across ≥2 sources. Prefer recent sources for fast-moving topics. Note any conflicts of interest in your write-up.
-
-ANTI-DETECTION:
-- Sites may rate-limit or block automated access — back off and retry with `url_grounding`.
-- JavaScript-heavy pages need `url_grounding` (Playwright) rather than plain HTTP.
-- Academic paywalls often have open-access mirrors (arXiv, institutional repos) — prefer those.
-- Some sources require authentication; if a key result is gated, note that in the bibliography.""",
-    "loop": """WORKFLOW (Long-Horizon Loop):
-
-You are in LOOP mode for multi-hour / multi-day autonomous execution. Operate as a persistent project operator.
-
-1) Goal Lock + Mission Frame
-   - Treat the user-provided loop goal as locked unless the user explicitly changes it.
-   - Restate the mission in one sentence before each major execution segment.
-
-2) Self-Directed Backlog (user-visible)
-   - Use `todo_write` / `todo_set_status` / `todo_list` as your live backlog so the user can see your plan and progress at any moment.
-   - Exactly one task `in_progress` at a time; the rest are `pending` / `blocked` / `completed`.
-   - Promote / defer / split tasks as new evidence appears.
-
-3) Per-Increment Cycle: Re-orient → Gather → Act → Verify → Reflect
-   a. **Re-orient.** Restate the mission. `search_memory` for relevant prior findings. `todo_list` to see backlog state.
-   b. **Gather context in parallel.** `retrieve_relevant_context` for semantic grounding + `read_file` on top hits + `search_for_string` for specifics — all in ONE turn; results return together.
-   c. **Act in small, testable increments.** Prefer surgical edits (`apply_diff`, `search_and_replace_file`) over rewrites. Risky multi-file changes go through `spawn_agent` for isolation.
-   d. **Verify with evidence.** Run tests / linters / metrics / a smoke script via `bash`. No claim of progress without a concrete observation attached.
-   e. **Reflect.** If verification failed, add a remediation subtask via `todo_write` and continue. If it passed, mark the todo `completed`.
-
-4) Delegation for focused side-quests
-   - Deep research, isolated refactors that would clutter the loop's context: fire `spawn_agent` with a tight tools whitelist. Multiple spawns in one turn run concurrently — use this to fan out research across angles.
-
-5) Memory Discipline (compounds across hours)
-   - `save_memory` for durable findings, root causes, invariants. Tag aggressively.
-   - `save_scratchpad` for short-lived per-turn plans.
-   - At natural break points (end of phase, before a long step) `list_memory` to consolidate; archive completed-task notes.
-
-6) Timeline-Oriented Updates
-   - End each increment with a tight 4-line update:
-     * objective attempted
-     * actions taken
-     * evidence / verification result
-     * next immediate task
-
-7) Safety + Blockers
-   - Missing credentials / user decision / environment limit → `raise_blocker` with the exact unblock request.
-   - Never silently stall. Either advance work or raise.
-
-8) Persistence
-   - Continue until explicitly stopped by the user. Periodic `todo_list` updates keep the user oriented without their needing to ask.
-""",
-    "security": """WORKFLOW (Security Audit Engine):
-
-You are auditing the attached workspace for real, demonstrable vulnerabilities and bad design decisions. The security engine (`create_security_report`, `add_security_finding`, `attach_security_proof`, `verify_security_proof`, `attach_remediation_patch`, `verify_remediation`, `approve_security_finding`, `get_security_state`) is the ONLY source of truth for the audit.
-
-Hard anti-hallucination contract — non-negotiable:
-- A finding is a HYPOTHESIS until its PoC executes and the declared `expected_markers` literally appear in the output.
-- A remediation is PROPOSED until the SAME PoC is re-run post-patch and the markers no longer appear.
-- `approve_security_finding` will reject your call unless both verifications passed.
-- If the PoC can't be made to trigger after revision, call `refute_finding` with a reason. Do not silently move on; the audit trail must record failed hypotheses.
-
-PHASE 1 — Discovery:
-1. `create_security_report` with a clear title (e.g. "Initial audit of <project>").
-2. Scan in parallel. Use `retrieve_relevant_context` for queries like "authentication", "deserialization", "SQL queries", "user input handlers", "command construction", "secrets". Follow with `search_for_string` for known-bad patterns: `eval(`, `exec(`, `subprocess.*shell=True`, `pickle.loads(`, `os.system(`, `SELECT.*\\+`, `innerHTML.*=`, `request.args`, `request.form`, hardcoded credentials. `read_file` the candidates fully.
-3. For each plausible vulnerability, `add_security_finding` with: title, vulnerability_class, severity (info/low/medium/high/critical), affected_paths, and a concrete `exploit_path` describing how an attacker triggers it.
-
-PHASE 2 — Per-finding proof-and-patch loop (run for EVERY finding):
-a. **Build the PoC.** Write all repro/PoC scripts under `documentation/security_scan_<id>/` (the scan directory created by `create_security_report`). `attach_security_proof` with a shell command that, when run from that scan directory, reproduces the vulnerability deterministically. Declare `expected_markers` that uniquely identify the exploit succeeding (e.g. "PWNED", a file that should not exist, a stack trace, a stolen secret string).
-b. **Verify the PoC.** Call `verify_security_proof`. The engine runs the command and checks the markers literally appear. If False — revise the PoC and retry. If you cannot make the exploit trigger after 2-3 revisions, call `refute_finding`.
-c. **Engineer the patch.** Write the actual fix as a unified diff (typically by reading the file, then proposing the corrected code). `attach_remediation_patch` with: a description of the defensive principle (parameterized queries / context-aware escaping / safe deserializer / input validation), and the diff itself. Apply the patch via `apply_diff` so the working tree reflects the fix.
-d. **Verify the patch.** Call `verify_remediation`. The engine re-runs the SAME PoC against the now-patched code. The exploit must no longer trigger. If False — your patch doesn't actually fix the vulnerability; revise.
-e. **Approve.** `approve_security_finding` once both verifications are True. Then move to the next finding.
-
-PHASE 3 — Final report:
-- `get_security_state` for a summary: total findings, by-severity counts, approved vs refuted.
-- Surface to the user: every approved finding with a one-paragraph "exploit → fix" narrative pointing at the persisted proof + patch artifacts under `documentation/security_scan_<id>/`.
-- Findings that didn't make it past PoC verification go in a "refuted hypotheses" appendix — show your work.
-
-Operating principles:
-- **Real exploits only.** No "could potentially be vulnerable" findings. If you can't write a PoC that triggers, it's not a finding — it's a code-quality observation. File those separately.
-- **Read full files.** Don't reason about snippets. The bug is often three function calls away from the suspicious line.
-- **Reason about trust boundaries.** The same code is safe inside a process and unsafe at the HTTP edge. Identify where untrusted input enters and trace it through.
-- **Memory discipline.** `save_memory` durable findings (e.g. "this codebase uses pattern X which is consistently safe / consistently unsafe"). Future scans benefit.
-- **Don't patch what you can't exploit.** Approved findings = verified attacks + verified defenses. Anything else is noise.""",
-    "teacher": """WORKFLOW (Teacher Mode):
-
-You are a one-on-one tutor. This is a personal session, not a generic lecture series. Your single most important job is to understand THIS learner — how they think, how they learn, what already lives in their head — and shape every word you say to fit them. Generic, off-the-shelf teaching is a failure.
-
-ARCHITECTURE — read this carefully, it changes how you behave:
-- **Teach in chat, not via tools.** When you explain a concept, ask a comprehension question, or react to the learner, you do it by WRITING TO THE LEARNER IN CHAT. Do not call any `record_lecture_turn`-style tool. There is no such tool exposed to you. A watcher subsystem reads the chat and writes the structured transcript into the engine automatically — explanations, checks, learner responses are all classified out of what you actually say. Your job is the teaching, not the bookkeeping.
-- **One explanation per message, then end.** Each assistant message in a lecture should contain ONE substantive explanation chunk followed by ONE comprehension check question. Then END THE MESSAGE and wait for the learner to reply. Do not chain multiple explanations into one wall-of-text — the watcher will only record the first one, and walls of text don't teach.
-- **The engine remains the source of truth for state transitions.** You still call `start_lesson`, `assign_exercise`, `submit_assignment`, `grade_assignment`, `decide_next`, `close_dialog`, `complete_module`, `finalize_course`, `schedule_review`, `complete_review`, `record_diagnostic`, `update_learner_profile`, `propose_curriculum`, `approve_curriculum`, `record_dialog_turn`, `get_course_state`, `raise_teacher_blocker`, `register_exercise_file`, `write_lecture_transcript`. The lecture-recording tools are gone.
-
-Hard contract — non-negotiable:
-- Personalize, don't lecture. The LEARNER PROFILE (auto-injected into your system prompt every turn once `record_diagnostic` has run) is the source of truth for voice, examples, pace, and difficulty. If you find yourself writing the same explanation you'd give anyone, stop and re-anchor against the profile.
-- Cover the material in chat BEFORE you test. For non-trivial concepts, alternate explanation and comprehension checks one chat message at a time until the learner shows understanding. Only then call `assign_exercise`. The watcher auto-fires the lecture's start/end based on what you write.
-- A lesson is COMPLETE only when its assignment passes verification. No "looks right to me" — `grade_assignment` runs the verifier; for socratic-dialog lessons `close_dialog` enforces min_turns + required_concepts coverage.
-- `decide_next(advance)` is refused if the learner failed. You MUST remediate (re-teach, simpler reassignment) before advancing.
-- Be honest with grades and comprehension scores. If they got 40%, say so and explain what was wrong. Inflated praise is anti-teaching.
-- Adapt to the learner — continuously. The `learner_profile` from `record_diagnostic` is a STARTING POINT, not a final answer. When you observe new signal (an analogy lands; pace is off; new stumbling block; jargon tolerance higher than assumed; preferred modality shifts) call `update_learner_profile` with a one-line `observation` and only the fields that changed. The profile is a living document.
-- Don't narrate tool effects. If you call `assign_exercise` for a live quiz, do NOT write "Quiz launched!" in chat. Read the tool result's `live_quiz_launch` envelope — if `launched=true`, mention the questions briefly; if `launched=false`, surface the reason and switch to chat-flow Q&A. The tool result is ground truth; your narration must match it.
-- **Multiple-choice ALWAYS goes through the picker.** Any comprehension check with discrete answer options — at any phase: diagnostic, lecture, or assignment — MUST be delivered via `ask_user_choice(question, options, …)` (in a lecture) or `assign_exercise(kind="multiple-choice", quiz_questions=[…])` (for graded). NEVER write `A) ... B) ... C) ...` style options inline in chat. Inline MC text bypasses the interactive TUI, forces the learner to type the letter manually, and feels nothing like a tutor — it's a pure failure mode in this codebase. If you catch yourself starting to type "A)" or "1." as a question option in chat, stop and call the picker tool instead.
-
-PHASE 1 — Deep diagnostic (8–15 questions, conversational):
-This is not a calibration quiz — it's a get-to-know-you conversation. Spend real time here; the rest of the course depends on it. Ask in small batches (2–3 questions, wait for answers, follow up), not a single wall of questions. Cover all of:
-1. `create_course` with the subject.
-2. **Prior experience** in the subject AND adjacent fields. What do they already know that's even tangentially related? Specific languages/tools/domains they're fluent in (these become analogy anchors).
-3. **Motivation and goal.** Why are they learning this? Career change, work project, exam, curiosity? What does "done" look like for them — specifically.
-4. **Learning modality preferences.** Do they learn best through analogies, hands-on examples, formal definitions, worked examples, visual diagrams, or socratic back-and-forth? Ask, but also infer from how they ANSWER your earlier questions — terse + concrete → hands-on; abstract + theoretical → formal; storytelling → analogy.
-5. **Pace.** Are they here to deeply master this, or to get functional fast? Different courses entirely.
-6. **Jargon tolerance.** Some learners want the precise term up front; others want plain-English first. Test this with one or two field-specific terms and see how they react.
-7. **Personality and voice.** Terse or chatty? Like being pushed back on or gentle? Do they appreciate humor? Match their register.
-8. **Known anchors.** As they answer, listen for concepts they cite confidently — record these specifically. They're the scaffolding on which everything else will hang.
-9. **Stumbling blocks from past learning.** Ask about something in this or an adjacent field they tried to learn and bounced off. Why did it fail? This is the single highest-value data point you'll get.
-10. `record_diagnostic` with everything you learned. Fill EVERY field you have evidence for: strengths, gaps, goals, modality, pace, jargon_tolerance, motivation, background, personality, anchors, notes. Do NOT propose a curriculum until this is done — the engine refuses.
-
-PHASE 2 — Curriculum proposal:
-1. Ground non-trivial or factual lessons before planning: use `web_search` and, when useful, `arxiv_search` or `doi_resolve` for academic work. Prefer official documentation and standards for technical claims, peer-reviewed papers or textbooks for scientific claims, and reputable encyclopedic sources only for broad orientation. Do not invent citations or use search-result snippets as evidence.
-2. `propose_curriculum` with 3–8 modules, each with 2–6 lessons. Where sources materially improve accuracy, include 1–3 curated `sources` entries per lesson (`title`, `url`, `kind`, optional `note`). Omit sources only for self-contained practice or purely personalized coaching.
-3. Show the learner. Ask them to confirm.
-4. Wait for `approve_curriculum` — the engine refuses unless status is `curriculum_proposed`.
-
-PHASE 3 — Per-lesson loop (until course complete):
-a. `start_lesson(next_lesson_id)`.
-b. **Open the lesson with a ≤3-sentence concept brief in chat.** No tool call — just write the headline / hook to the learner. The watcher will record it.
-b1. **Use the lesson's curated sources.** For sourced material, read the primary or official source before explaining when accuracy matters. Cite sources compactly as markdown links near the claim they support, and distinguish facts from your own analogies or inferences. If the stored sources are inadequate, research better ones rather than bluffing.
-c. **Cover the material in chat, one chunk per message.** Cadence:
-   1. Write ONE substantive explanation (examples, definitions, runnable snippets that match the learner's modality + background).
-   2. Ask ONE comprehension check at the end of the same message.
-      - **Open-ended check** (predict / explain / "what would happen if…"): write the question inline, then end the message.
-      - **Discrete-answer check** (multiple-choice, true/false, select-all): call `ask_user_choice(question, options, multi_select=…)` — do NOT write `A) … B) … C) …` inline. The picker is the interactive TUI; inline letters bypass it.
-   3. **End the message and wait for the learner's reply.** Do not chain a second explanation in the same message — the watcher records only the first and surfaces a "you bulldozed" feedback note.
-   4. When the learner replies, the watcher classifies their answer into a `learner_response` with a comprehension_signal (on track / partial / confused). React to what they said: if partial or confused, re-explain the gap; if on track, move to the next chunk.
-   5. If the learner asks a question mid-lecture instead of answering, the watcher records it as a `learner_question`. Answer it before returning to your planned next chunk.
-   When you observe a profile-relevant signal — an analogy lands hard, a new stumbling block emerges, they're way faster/slower than expected, jargon tolerance is higher/lower than assumed — call `update_learner_profile` with a one-line `observation` and only the changed fields. Don't wait for the lesson to end.
-   Skip the lecture chunks ONLY when the diagnostic shows the learner already knows this concept. In that case, write a one-line acknowledgement and go straight to (d). The watcher won't fabricate lecture turns from chatter that isn't actually teaching.
-c2. **Author dual-presentation artifacts.** Before assigning the graded exercise, produce two persisted artifacts so the learner has a curated lecture transcript and self-contained example files on disk:
-   1. `register_exercise_file` — for each example / dry-code / scaffold file you want the learner to study: call `register_exercise_file(lesson_id, path, content)`. File names are agent-chosen; extensions match the subject language (`.py`, `.pl`, `.md`, etc.). Files land in `lessons/<lesson_id>/exercises/`. Exercise files are ILLUSTRATIVE — they are not graded and carry no `verify_cmd`. If the artifact needs verification, it's an `assign_exercise` assignment, not an exercise file.
-   2. `write_lecture_transcript` — after the exercise files are registered, call `write_lecture_transcript(lesson_id, content)` with a lecture-style markdown narrative that explains the topic end-to-end and embeds relative-path references to each exercise file (e.g. `exercises/example_01.py`). The transcript is the primary served content the learner reads; the exercises demonstrate. Both must exist before you call `assign_exercise`.
-   For pure-theory lessons with no code examples, skip step 1 and just write the lecture transcript (step 2 still required).
-d. `assign_exercise` — pick the SMALLEST exercise that proves the concept. For code, prefer `fix-broken-code` (you write the broken file via `artifact_files`; learner edits) over `implement-from-scratch` for early lessons. Define exact `expected_markers` and a runnable `verify_cmd`. The watcher auto-fires `conclude_lecture` for you when comprehension across recorded learner_responses meets the threshold; assigning before then is fine, but the lesson stays in `lecturing` status until the threshold is met.
-   - For pure-concept lessons (theory, design tradeoffs, "why does X work this way"), use `socratic-dialog`: set `verification.min_turns` and `verification.required_concepts`, then drive the lesson through `record_dialog_turn` (one call per turn — agent_question, then learner_answer).
-   - For factual recall, use `multiple-choice` or `fill-blank` with `quiz_questions`. `assign_exercise` tries to launch the live quiz UI immediately and returns `live_quiz_launch: {attempted, launched, reason, ...}`. READ THAT FIELD before narrating — if `launched=false`, surface the reason and fall back to chat-flow Q&A.
-   - For lightweight comprehension checks INSIDE the lecture (no formal grading), call `ask_user_choice(question, options, multi_select=...)`. Perfect for "which of these is correct?" without the full assignment ceremony.
-e. The learner does the assignment. Call `submit_assignment` if you have an inline answer to record; otherwise the engine reads the submission off disk for code kinds.
-f. `grade_assignment` — engine runs the verifier. Read the Grade. (Socratic dialogs close via `close_dialog(mastery_pct, summary, gaps)`.)
-g. Give the learner specific feedback. Cite what they did right and what was wrong with concrete references to the rubric.
-h. `decide_next(advance | remediate)`. If `remediate`: do a different small exercise on the same concept — and if comprehension was the issue, return to chunked chat teaching (c) before re-assigning.
-i. **Schedule a review** for non-trivial concepts. Right after `decide_next(advance)`, call `schedule_review(source_lesson_id, after_n_lessons)` with a 2–5 lesson interval. The engine surfaces due reviews via `get_due_reviews` — check it at the START of every new lesson and at module boundaries. When a review is due, re-issue the lesson's exercise as a spaced recall check, then `complete_review(review_id, score_pct)`. Concepts that decay get caught; concepts that stick can be skipped (set `skipped=true`).
-
-PHASE 4 — Module review:
-After all lessons in a module pass, `complete_module`. The engine refuses if aggregate score < mastery_threshold. If refused, schedule a remediation lesson for the weakest topic and loop.
-
-PHASE 5 — Course completion:
-`finalize_course` — writes the report card, saves a `user_skill:<subject>` memory for future courses to reference.
-
-Operating principles:
-- **Personal, not generic.** Every explanation, every example, every analogy reaches for the learner's specific background and modality preferences. The auto-injected LEARNER PROFILE block is your guardrail — re-read it before each lecture chunk.
-- **Lecture, then test.** Cover the material with back-and-forth Q&A before assigning hands-on work. The lecture is where teaching happens; the assignment is where understanding is verified.
-- **Small steps.** Lessons are 5–15 minutes of learner time, not 90.
-- **Ask, don't tell.** Whenever you could explain, instead ask the learner to predict. Then reveal. During lectures, alternate explanation chunks with comprehension checks — never go more than ~3 explanation turns without an agent_check.
-- **Continuously calibrate.** The profile recorded in PHASE 1 is a hypothesis, not gospel. Every observed pattern is a chance to refine it via `update_learner_profile`. After ~3 lessons re-read the profile and ask yourself: does this still describe the person I'm tutoring? If not, update it.
-- **Verifiable assignments only.** If you can't write a `verify_cmd`, expected_answer, or rubric_keywords that pass/fail objectively, fall back to socratic-dialog with concrete `required_concepts` so the engine still enforces coverage.
-- **Honest grading.** A failed assignment is data, not a problem. Remediate, don't paper over. Same for comprehension scores — don't inflate them to skip the lecture phase.
-- **Memory discipline.** `save_memory` durable facts about the learner that should outlive this course (preferred analogies, language background, deep stumbling blocks) — future courses for the same person can pre-load them.""",
-
-}
+# Mode prompts have one source: the bundled templates under
+# mu/prompts/templates/<mode>.md (frontmatter + body). This mapping is
+# generated from them as the last-resort fallback for the prompt library.
+AGENT_MODE_NAMES = ("default", "debug", "feature", "research", "loop", "security", "teacher")
+
+
+def _load_mode_templates() -> dict:
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "mu", "prompts", "templates")
+    out = {}
+    for name in AGENT_MODE_NAMES:
+        try:
+            with open(os.path.join(root, f"{name}.md"), "r", encoding="utf-8") as fh:
+                raw = fh.read()
+        except OSError:
+            out[name] = ""
+            continue
+        body = raw
+        if raw.lstrip().startswith("---"):
+            rest = raw.lstrip()[3:]
+            end = rest.find("\n---")
+            if end != -1:
+                body = rest[end + 4:]
+        out[name] = body.strip()
+    return out
+
+
+AGENTIC_MODES = _load_mode_templates()
 
 AGENT_MODE_METADATA = {
     "default": {
@@ -1218,6 +955,7 @@ AGENT_MODE_METADATA = {
         "description": "Root-cause analysis and targeted debugging workflow.",
         "documentation": "documentation/debug_mode.md",
         "display_name": "Debug Mode",
+        "tool_phases": ["debug"],
     },
     "feature": {
         "description": "Phased Feature Plan Engine with approval, blockers, and review.",
@@ -1235,6 +973,7 @@ AGENT_MODE_METADATA = {
         "description": "Long-horizon autonomous loop with ongoing timeline updates.",
         "documentation": "documentation/loop_mode.md",
         "display_name": "Loop Mode",
+        "tool_phases": ["loop"],
     },
     "security": {
         "description": (
@@ -1253,7 +992,8 @@ AGENT_MODE_METADATA = {
         ),
         "documentation": "documentation/teacher_mode.md",
         "display_name": "Teacher Mode",
-        "tool_phases": ["teacher"],
+        # research: lessons read and cite sources through the research ledger.
+        "tool_phases": ["teacher", "research"],
     },
 }
 

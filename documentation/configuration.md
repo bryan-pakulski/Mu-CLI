@@ -297,6 +297,11 @@ inspectable via `/get <key>` or `/variables`. Defaults come from
 | `max_iterations` | int | `1000` | Hard cap on iterations per conversation turn. When reached mid-work, the agent runs one final consolidation turn (tools disabled) and writes a handoff summary to memory instead of stopping silently. |
 | `session_goal` | str | `""` | The user's pinned top-level task for the current turn, rendered in L3 every iteration so the model keeps direction even when L2 is compacted. Set with `/goal <text>`; clears at end of turn unless `session_goal_sticky` is in effect. |
 | `session_goal_sticky` | bool | `false` | When true (or in `loop`/`feature` mode, which default to sticky), `session_goal` is **not** cleared at end of turn — it persists across turns in L3 until cleared (`/goal clear`) or replaced. Long-horizon multi-turn work needs the goal to survive turn boundaries; conversational default-mode use does not. The `session_goal_sticky_explicit` tracker records whether the user set this via `/set`, so the mode-aware default only applies until overridden. |
+| `verify_nudge` | bool | `true` | Default mode: when files changed without a passing check after the last edit, give the model one more iteration to run one (or say why it can't). Never a hard block; the turn receipt marks the turn unverified. |
+| `debug_require_repro` | bool | `false` | Debug mode: block write-side edits while the current case has no reproducer (default: warn once per turn). |
+| `feature_require_approval` | bool | `false` | Feature mode: block write-side edits until the user approves the plan (default: warn once per turn). |
+| `orch_auto_continue` | bool | `true` | Orchestration sessions (GUI): resume the chat once with an automatic message when a run it proposed finishes. |
+| `teacher_watcher` | bool | `false` | Teacher mode: run the legacy LLM lecture watcher. `teach_check` / `assess_response` replace it. |
 | `reflective_retry_enabled` | bool | `true` | Show retryable tool failures + remediation hints inline. |
 | `streaming_enabled` | bool | `true` | Stream tokens one-by-one instead of one final panel. |
 | `structured_tool_results` | bool | `true` | Use structured envelope for tool results (vs. raw text). |
@@ -417,7 +422,7 @@ global-cap remainder; use `context_status` / `compact` or adjust
 | `memory_summary_limit` | int | `8` | Memory entries shown in the system prompt summary. |
 | `scratchpad_enabled` | bool | `true` | Enable turn-local scratchpad. |
 | `scratchpad_max_entries` | int | `24` | Max scratchpad entries before eviction. |
-| `scratchpad_persist_across_turns` | bool | `false` | Keep the scratchpad across turns. Mode-aware: `loop`/`feature` modes persist regardless; `default`/`teacher` clear at turn start unless this is `true`. |
+| `scratchpad_persist_across_turns` | bool | `false` | Keep the scratchpad across turns. Otherwise it is cleared at turn start in every mode: it is a per-turn notepad, and plans live in work items and mode state. |
 
 ### Collation
 
@@ -472,8 +477,6 @@ Per provider:
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `loop_active` | bool | `false` | Whether loop mode is currently engaged. |
-| `loop_features` | str | `""` | JSON list of features created during the current loop run. |
 | `loop_detection_enabled` | bool | `true` | Detect and break tight repeat loops. |
 | `loop_detection_repeat_threshold` | int | `5` | Repeat count that trips (tight) pattern-based loop detection. |
 | `loop_detection_periodic_max_period` | int | `6` | Soft knob (not in the canonical schema, but settable via `/set` and read with `int()`): max spacing, in tool calls, between two equal tool-name sequences for the *periodic* loop detector (R7) to flag a repeat. Lower = stricter. |

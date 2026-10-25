@@ -1,10 +1,12 @@
 """Research / web-data tools.
 
-Eight `@tool` handlers for fetching web pages, academic papers, forum
-posts, and structured Q&A. Implementations live in
-`mu/tools/research/handlers.py`; this module is the registration surface.
+``handlers`` holds search (candidates), reading (url_grounding,
+research_fetch, read_document) and assess_source; ``ledger_tools`` the
+evidence-ledger tools (questions, claims, evidence, status, report, export).
+This module is the registration surface.
 """
 
-from . import handlers  # noqa: F401 — registers 8 research tools at import time
+from . import handlers  # noqa: F401 — registers search/read tools at import time
+from . import ledger_tools  # noqa: F401 — registers the evidence-ledger tools
 
 __all__: list = []

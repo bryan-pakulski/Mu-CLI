@@ -67,11 +67,9 @@ def test_bash_pattern_fingerprint_differs_on_arg_structure():
     assert first != second
 
 
-def test_feature_bookkeeping_tools_are_excluded_from_loop_tracking():
-    assert Session._track_tool_for_loop_detection("update_task_status", {}) is False
-    assert Session._track_tool_for_loop_detection("get_execution_state", {}) is False
-    assert Session._track_tool_for_loop_detection("create_task", {}) is False
-    assert Session._track_tool_for_loop_detection("create_phases", {}) is False
+def test_mode_bookkeeping_tools_are_excluded_from_loop_tracking():
+    for name in ("feature_status", "start_task", "loop_increment", "debug_status", "teach_check"):
+        assert Session._track_tool_for_loop_detection(name, {}) is False, name
     assert Session._track_tool_for_loop_detection("search_for_string", {}) is True
 
 

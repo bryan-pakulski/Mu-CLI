@@ -10,6 +10,11 @@ from files on disk without editing Python source. Resolution priority
   3. **hardcoded fallback** in ``utils/config.py`` —
      ``AGENTIC_SYSTEM_BASE`` / ``AGENTIC_MODES``.
 
+A user file under ``$MUCLI_HOME/prompts/`` overrides the bundled template.
+When the override's ``version`` is older than the bundled template's, the
+harness says so once (``stale_overrides``) and offers keep / diff / reset;
+nothing is silently replaced.
+
 Layers 2 and 3 are this library's responsibility; layer 1 is handled by
 the call site in ``mu/agent/loop_body.py`` via ``session.variables.get(
 key) or PromptLibrary.get_*()`` so a runtime ``/set`` always wins.
@@ -264,35 +269,36 @@ _CRITICAL: Dict[str, List[Union[str, Tuple[str, ...]]]] = {
     ],
     "default": [
         "search_memory", "retrieve_relevant_context", "bash", "verif",
-        "todo_write", ("parallel", "concurrent"), "spawn_agent", "save_memory",
+        "todo_write", "parallel", "spawn_agent", "save_memory", "receipt",
     ],
     "debug": [
-        "search_memory", "reproduce", "locate", "verify", "parallel",
-        "bisect", "save_memory",
-        ("whole test", "wider", "full test", "race"),
+        "open_debug_case", "record_repro", "add_hypothesis", "update_hypothesis",
+        "verify_fix", "close_debug_case", "bisect_repro", "search_memory", "suite",
     ],
     "feature": [
-        "create_feature_task", "get_current_task", "get_tasks",
-        "update_task_status", "approve_feature_task", "parallel",
-        "spawn_agent", "save_memory", "save_scratchpad", "raise_blocker",
+        "propose_feature_plan", "revise_feature_plan", "start_task", "check_criterion",
+        "cite_evidence", "complete_task", "review_task", "run_feature_suite",
+        "request_feature_completion", "approve", "spawn_agent", "save_memory",
     ],
     "research": [
         "search_memory", "retrieve_relevant_context", "parallel",
-        "spawn_agent", "citation", "credibility", "[^n]", "save_memory",
-        "WORKFLOW",
+        "spawn_agent", "research_question", "record_claim", "research_status",
+        "research_report", "credibility", "[^n]", "save_memory", "WORKFLOW",
     ],
     "loop": [
-        "todo_write", "todo_set_status", "parallel",
-        "retrieve_relevant_context", "spawn_agent",
-        ("evidence", "verify"), "raise_blocker", "memory",
-        ("save_memory", "save_scratchpad"),
+        "loop_increment", "loop_status", "loop_check_done", "todo_write",
+        "todo_set_status", "evidence", "raise_blocker", "spawn_agent", "/loop start",
     ],
     "security": [
         "create_security_report", "add_security_finding",
         "verify_security_proof", "approve_security_finding",
     ],
     "history": [],
-    "teacher": [],
+    "teacher": [
+        "record_diagnostic", "propose_curriculum", "start_lesson", "teach_check",
+        "assess_response", "write_lecture_transcript", "assign_exercise",
+        "grade_assignment", "decide_next", "complete_review", "finalize_course",
+    ],
 }
 
 
@@ -306,8 +312,8 @@ def validate(name: str, text: str) -> List[str]:
     """Return a list of warning strings for missing critical anchors.
 
     Empty list means the prompt still names every required tool / workflow
-    anchor for its kind. ``history`` and ``teacher`` have no pinned anchors
-    (their content is free-form) and always validate clean.
+    anchor for its kind. ``history`` has no pinned anchors and always
+    validates clean.
     """
     anchors = _CRITICAL.get(name, [])
     lower = text.lower()
@@ -393,7 +399,10 @@ def write_override(name: str, text: str, *, version: Optional[int] = None) -> st
         raise KeyError(f"unknown prompt name: {name!r}")
     os.makedirs(prompts_dir(), exist_ok=True)
     path = _file_path(name)
-    meta = {"name": name, "version": version if version is not None else 1}
+    # An edit made now is based on the current bundled prompt.
+    if version is None:
+        version = bundled_version(name) or 1
+    meta = {"name": name, "version": version}
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(_render_with_frontmatter(meta, text))
     reload()
@@ -411,6 +420,109 @@ def read_override_raw(name: str) -> Optional[str]:
         return None
 
 
+# --- stale overrides -----------------------------------------------------
+
+def bundled_version(name: str) -> Optional[int]:
+    """Version of the bundled template for ``name`` (None when there is none)."""
+    resolved = _resolve_builtin(name)
+    return resolved.version if resolved is not None else None
+
+
+def _notices_path() -> str:
+    return os.path.join(prompts_dir(), ".notices.json")
+
+
+def _read_notices() -> Dict[str, Any]:
+    import json
+
+    try:
+        with open(_notices_path(), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def stale_overrides(names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """User override files whose version is older than the bundled template.
+
+    Overrides keep working; this only reports them so the user can keep,
+    diff or reset (``/prompts keep|diff|reset <name>``).
+    """
+    acknowledged = _read_notices()
+    out: List[Dict[str, Any]] = []
+    for name in names or known_names():
+        override = _resolve_file(name)
+        bundled = bundled_version(name)
+        if override is None or bundled is None:
+            continue
+        current = override.version or 0
+        if current >= bundled:
+            continue
+        out.append({
+            "name": name,
+            "override_version": current,
+            "bundled_version": bundled,
+            "path": override.path,
+            "acknowledged": acknowledged.get(name) == bundled,
+        })
+    return out
+
+
+def stale_notice(item: Dict[str, Any]) -> str:
+    name = item["name"]
+    return (
+        f"Your {name} prompt override is based on v{item['override_version']}; the bundled "
+        f"prompt is v{item['bundled_version']}. Keep it (/prompts keep {name}), compare "
+        f"(/prompts diff {name}) or reset to the bundled prompt (/prompts reset {name})."
+    )
+
+
+def acknowledge_stale(name: str) -> None:
+    """Keep the override: stop the notice until the bundled version moves again."""
+    import json
+
+    if name not in known_names():
+        raise KeyError(f"unknown prompt name: {name!r}")
+    data = _read_notices()
+    data[name] = bundled_version(name)
+    os.makedirs(prompts_dir(), exist_ok=True)
+    with open(_notices_path(), "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+
+
+def reset_override(name: str) -> Optional[str]:
+    """Move the override aside (``<name>.md.bak``) so the bundled prompt applies.
+
+    Returns the backup path, or None when there was no override."""
+    if name not in known_names():
+        raise KeyError(f"unknown prompt name: {name!r}")
+    path = _file_path(name)
+    if not os.path.isfile(path):
+        return None
+    backup = path + ".bak"
+    os.replace(path, backup)
+    reload()
+    return backup
+
+
+def diff_override(name: str) -> str:
+    """Unified diff from the bundled prompt to the user's override ('' when equal/absent)."""
+    import difflib
+
+    if name not in known_names():
+        raise KeyError(f"unknown prompt name: {name!r}")
+    override = _resolve_file(name)
+    if override is None:
+        return ""
+    bundled = _resolve_builtin(name) or _hardcoded(name)
+    return "".join(difflib.unified_diff(
+        bundled.text.splitlines(keepends=True), override.text.splitlines(keepends=True),
+        fromfile=f"bundled/{name}.md (v{bundled.version})",
+        tofile=f"override/{name}.md (v{override.version})",
+    ))
+
+
 def nudge_empty_response() -> str:
     """Accessor kept here so the loop has one import for all prompt text."""
     return NUDGE_EMPTY_RESPONSE
@@ -418,6 +530,12 @@ def nudge_empty_response() -> str:
 
 __all__ = [
     "ResolvedPrompt",
+    "acknowledge_stale",
+    "bundled_version",
+    "diff_override",
+    "reset_override",
+    "stale_notice",
+    "stale_overrides",
     "get_base",
     "get_mode",
     "get_resolved",

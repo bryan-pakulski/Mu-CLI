@@ -901,15 +901,12 @@ def retire_thread(args: Dict[str, Any], context) -> Dict[str, Any]:
         status="archived",
     )
 
-    # Optionally drop matching scratchpad notes (never todos).
+    # Optionally drop matching scratchpad notes.
     scratch_removed = 0
     if clear_scratch:
         sp = _scratchpad(context)
         kept: list = []
         for e in sp.entries:
-            if "todo" in (e.tags or []):
-                kept.append(e)
-                continue
             if topic_l in (e.content or "").lower():
                 scratch_removed += 1
                 continue

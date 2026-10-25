@@ -1,0 +1,75 @@
+<!-- The expanded view (modes v2 §5.2): a mode's heavy surface over the conversation, as panes —
+     the feature board (phases as columns of rows) and the lesson reading view. Esc or "Back to
+     chat" returns; the state is in the URL (?mode-view=feature&open=t4). -->
+<section class="mode-expand" x-show="$store.modeExpand.mode" x-cloak
+         x-init="$nextTick(() => $store.modeExpand.restore())"
+         :aria-label="$store.modeExpand.mode === 'feature' ? 'Feature board' : ($store.modeExpand.mode === 'security' ? 'Security report' : 'Lesson')">
+    <header class="mode-expand__bar">
+        <button type="button" class="w-textbtn" @click="$store.modeExpand.close()">← Back to chat</button>
+        <button type="button" class="w-textbtn" x-show="$store.modeExpand.item === 'report'"
+                @click="navigator.clipboard && navigator.clipboard.writeText(($store.modeExpand.content || {}).markdown || '')">Copy markdown</button>
+        <h2 class="mode-expand__title"
+            x-text="$store.modeExpand.mode === 'feature'
+                ? (($store.feature.plan() || {}).feature_name || 'Feature')
+                : ($store.modeExpand.item === 'matrix' ? 'Claims × origins' : (($store.modeExpand.content || {}).title || ''))"></h2>
+    </header>
+
+    <!-- feature board: one column per phase, rows not cards -->
+    <template x-if="$store.modeExpand.mode === 'feature' && $store.feature.plan()">
+        <div class="w-panes mode-expand__board">
+            <template x-for="phase in $store.feature.phases()" :key="phase.id">
+                <div class="w-pane mode-expand__column">
+                    <h3 class="w-pane__title" x-text="phase.title"></h3>
+                    <ul class="w-rows">
+                        <template x-for="t in phase.tasks" :key="t.id">
+                            <li class="w-row" x-data="{ r: $store.feature.taskRow(t) }"
+                                :aria-selected="$store.modeExpand.item === 't' + t.id ? 'true' : null">
+                                <span class="w-sign" :data-status="r.status" aria-hidden="true" x-text="r.glyph"></span>
+                                <button type="button" class="w-row__main"
+                                        @click="$store.modeExpand.item = 't' + t.id; $store.feature.openTask(t)">
+                                    <span class="w-row__title" x-text="r.title"></span>
+                                    <span class="w-row__sub" x-text="r.sub"></span>
+                                </button>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+            </template>
+        </div>
+    </template>
+
+    <!-- research: the claims × origins matrix at full width -->
+    <template x-if="$store.modeExpand.mode === 'research' && $store.modeExpand.item === 'matrix'">
+        <div class="mode-expand__reading rs-matrix__scroll">
+            <table class="rs-matrix__table">
+                <thead>
+                    <tr>
+                        <th scope="col">Claim</th>
+                        <template x-for="o in $store.research.matrix().origins" :key="o">
+                            <th scope="col" class="rs-matrix__origin"><span x-text="o"></span></th>
+                        </template>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="row in $store.research.matrix().rows" :key="row.claim_id">
+                        <tr>
+                            <th scope="row" class="rs-matrix__claim" :title="row.text" x-text="row.claim_id + ' ' + row.text"></th>
+                            <template x-for="o in $store.research.matrix().origins" :key="o">
+                                <td class="rs-matrix__cell" :data-stance="(row.cells[o] || []).join(' ')"
+                                    :title="$store.research.stanceWords(row.cells[o])"
+                                    :aria-label="$store.research.stanceWords(row.cells[o]) || 'no evidence'">
+                                    <span aria-hidden="true" x-text="$store.research.stanceGlyphs(row.cells[o])"></span>
+                                </td>
+                            </template>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </template>
+
+    <!-- reading views: a lesson transcript, the research report -->
+    <template x-if="$store.modeExpand.mode === 'security' || $store.modeExpand.mode === 'teacher' || ($store.modeExpand.mode === 'research' && $store.modeExpand.item === 'report')">
+        <article class="mode-expand__reading w-markdown" @click="$store.modeExpand.openSecurityLink($event)" x-html="$store.modeExpand.html()"></article>
+    </template>
+</section>

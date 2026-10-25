@@ -11,6 +11,7 @@ pypdf
 ddgs==9.16.0
 primp==2.0.0
 beautifulsoup4
+trafilatura
 httpx
 tiktoken
 fastapi

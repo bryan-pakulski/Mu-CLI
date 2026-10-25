@@ -1,27 +1,16 @@
 ---
 name: default
-version: 3
-description: Lean default coding workflow (refined, anchors pinned).
+version: 4
+description: Default coding loop; the turn receipt makes "verify" checkable.
 ---
 WORKFLOW (Default):
 
-0a. **Clarify when ambiguous.** Real choices unresolved (which file? language? scope? destructive ok?) → `ask_user_choice` BEFORE acting. One picker beats one chat round-trip. Skip only when intent is unambiguous.
+1. **Clarify** real ambiguity (which file, scope, destructive?) with `ask_user_choice` before acting.
+2. **Recall** with `search_memory` when the request may repeat earlier work.
+3. **Orient**: `retrieve_relevant_context` when you don't know where to look; `read_file` / `search_for_string` / `search_references` when you do. Issue independent reads in one turn — they run in parallel.
+4. **Plan** work of 3+ steps with `todo_write`; one task `in_progress` at a time (`todo_set_status`).
+5. **Act** with `apply_diff` or `search_and_replace_file`; `write_file` for new files.
+6. **Verify**: run a test, linter or smoke command with `bash` (`purpose="verify"`). The harness keeps a turn receipt: files you changed and whether a check passed after the last edit. A turn that changes files without one ends *unverified*.
+7. **Summarise**: what changed, what was verified, what is open. Save non-obvious findings with `save_memory`.
 
-0b. **Recall when it pays.** Request may repeat earlier work (known bug, recurring area)? `search_memory` for it first. Skip for self-contained requests.
-
-1. **Orient efficiently.** Don't know where to look → `retrieve_relevant_context` with a natural-language query. Know where → read or search directly. It ranks by lexical overlap + symbol matches + recency + git-diff weighting — faster than blind `read_file` chains. `search_for_string` / `search_references` for exact-text follow-ups.
-
-2. **Plan when scope is non-trivial.** 3+ tool calls or multi-file → publish a `todo_write` plan up front so the user sees your roadmap. One task `in_progress` at a time via `todo_set_status`.
-
-3. **Collect in parallel.** Issue independent reads — `read_file`, `list_dir`, `search_*`, `retrieve_relevant_context` — in a single turn (concurrent execution). Results come back together in the same turn.
-
-4. **Act.** `apply_diff` (surgical anchored hunks) or `search_and_replace_file` (unique-string substitutions). `write_file` only for new files or full rewrites.
-
-5. **Verify with evidence.** Don't claim done from inspection — run something: tests via `bash` (`pytest`, `npm test`, `cargo test`), a linter, or a smoke command. Edit tools return the result; no re-read needed.
-
-6. **Save what's reusable.** Persist non-obvious findings (root causes, invariants, "X lives in Y not the obvious Z") with `save_memory` — future sessions benefit.
-
-7. **Final summary.** What changed, what was verified, what's open. Tight; no per-tool narration.
-
-Delegation:
-- Self-contained side-quests that would bloat context (deep research, large multi-file refactors): issue `spawn_agent` calls in parallel — 4 in one turn run concurrently, capped at `parallel_tool_concurrency` (default 4). Children inherit folder context, isolated history.
+Delegate self-contained side quests with parallel `spawn_agent` calls. If you need something only the user can give, `raise_blocker`.

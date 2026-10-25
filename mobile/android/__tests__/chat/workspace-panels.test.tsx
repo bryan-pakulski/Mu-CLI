@@ -1,6 +1,6 @@
-// Workspace panels as Mu pages (mobile_parity.md §6 Chat): the mode workspace feeds the page
-// header (title, status + metrics as the state sentence, views as tabs); entries are rows with
-// status signs; destructive actions ask first; answers and file reads go to the server.
+// Workspace panels as Mu pages (mobile_parity.md §6 Chat; modes_v2.md §5.4): the page header
+// carries the state sentence and text tabs; entries are rows with status signs; destructive
+// actions ask first; answers and file reads go to the server.
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
@@ -12,7 +12,7 @@ jest.mock('@react-navigation/native', () => {
     useFocusEffect: (fn: () => void) => React.useEffect(fn, [fn]),
   };
 });
-jest.mock('../../src/api/loop', () => ({ loopApi: { getState: jest.fn(), setActive: jest.fn(async () => ({})) } }));
+jest.mock('../../src/api/loop', () => ({ loopApi: { getState: jest.fn(), control: jest.fn(async () => ({})) } }));
 jest.mock('../../src/api/security', () => ({ securityApi: { getState: jest.fn(), approveFinding: jest.fn(async () => ({})), refuteFinding: jest.fn(async () => ({})) } }));
 jest.mock('../../src/api/prompts', () => ({ promptsApi: { listPending: jest.fn(), answer: jest.fn(async () => ({})), cancel: jest.fn(async () => ({})) } }));
 jest.mock('../../src/api/files', () => ({ filesApi: { getTree: jest.fn(), readFile: jest.fn() } }));
@@ -41,29 +41,55 @@ const workspace = (mode: string, title: string) => ({
 
 beforeEach(() => jest.clearAllMocks());
 
-it('Loop: the workspace becomes the header, and the backlog shows each item\'s status', async () => {
-  (loopApi.getState as jest.Mock).mockResolvedValue({
-    active: true, loop_goal: 'Ship it', loop_active: true, loop_features: [], memory: [], workspace: workspace('loop', 'Mission control'),
-    backlog: [{ id: 1, content: 'Write the parser', status: 'completed', source: 'plan.md', tags: [] }, { id: 2, content: 'Wire the CLI', status: 'blocked', source: '', tags: [] }],
-  });
+const mission = (over: Record<string, unknown> = {}) => ({
+  id: 'm1', goal: 'Ship it', status: 'running', status_reason: '', goal_history: [], budget: { max_cost_usd: 10 }, spent: { cost_usd: 3.4 },
+  done_when: [{ id: 'c1', text: 'Tests pass', check: null, met: true, evidence: ['r1'], attested_by: '', note: '' }],
+  increments: [{ n: 1, objective: 'Write the parser', result: 'passed', decision: '', next: 'wire the CLI', work_item: '', actions: [], evidence: ['r1'], delegations: [], remediation_item: '', at: 1 }],
+  started_at: Date.now() / 1000, ended_at: null, ...over,
+});
+const loopState = (over: Record<string, unknown> = {}) => ({
+  active: true, mission: mission(), budget_meter: { kind: 'cost_usd', used: 3.4, cap: 10, ratio: 0.34 }, current_item: 'w2', blockers: [], past: [],
+  backlog: [{ id: 'w1', title: 'Write the parser', status: 'done', note: '' }, { id: 'w2', title: 'Wire the CLI', status: 'blocked', note: '' }],
+  runs: [{ id: 'r1', purpose: 'verify', command: 'pytest -q', cwd: '/w', exit_code: 0, passed: true, predicate: { exit: 0 }, predicate_text: 'exit code 0', excerpt: '3 passed', duration_s: 2.1, runner: 'host' }],
+  ...over,
+});
+
+it('Loop: the mission feeds the state sentence; Pause is real, Stop asks first', async () => {
+  (loopApi.getState as jest.Mock).mockResolvedValue(loopState());
   const ui = wrap(<LoopScreen />);
-  expect(await ui.findByText('Mission control')).toBeTruthy();
+  expect(await ui.findByText('Ship it')).toBeTruthy();
   expect(ui.getByText('Running', { exact: false })).toBeTruthy();
-  expect(ui.getByText('2 queued', { exact: false })).toBeTruthy();
-  expect(ui.getByTestId('loop-screen-header-tabs-backlog')).toBeTruthy();
-  expect(ui.getByLabelText('done')).toBeTruthy();
-  expect(ui.getByLabelText('failed')).toBeTruthy();
-  expect(ui.getByText('1/2')).toBeTruthy();
-  await act(async () => { fireEvent.press(ui.getByTestId('loop-toggle')); });
-  expect(loopApi.setActive).toHaveBeenCalledWith(false, 'Ship it');
+  expect(ui.getByText('increment 1', { exact: false })).toBeTruthy();
+  expect(ui.getAllByText('$3.40 of $10.00', { exact: false }).length).toBe(2); // state sentence + budget meter
+  expect(ui.getByText('cost $3.40 of $10.00')).toBeTruthy();
+  expect(ui.queryByTestId('mode-now')).toBeNull();
+  await act(async () => { fireEvent.press(ui.getByTestId('loop-pause')); });
+  expect(loopApi.control).toHaveBeenCalledWith('pause');
+  fireEvent.press(ui.getByTestId('loop-screen-header-tabs-backlog'));
+  expect(ui.getByText('Wire the CLI')).toBeTruthy();
+  expect(ui.getByText('blocked')).toBeTruthy();
   fireEvent.press(ui.getByText('Chat'));
   expect(mockGoBack).toHaveBeenCalled();
 });
 
-it('Loop: says so when no loop is active', async () => {
-  (loopApi.getState as jest.Mock).mockResolvedValue({ active: false, loop_goal: '', loop_active: false, loop_features: [], backlog: [], memory: [], workspace: workspace('loop', 'Mission control') });
+it('Loop: a paused mission waits in Now with Resume; Stop needs confirmation', async () => {
+  (loopApi.getState as jest.Mock).mockResolvedValue(loopState({ mission: mission({ status: 'paused', status_reason: 'user paused' }) }));
   const ui = wrap(<LoopScreen />);
-  expect(await ui.findByText('No loop active')).toBeTruthy();
+  expect(await ui.findByText('Mission paused')).toBeTruthy();
+  await act(async () => { fireEvent.press(ui.getByTestId('now-resume')); });
+  expect(loopApi.control).toHaveBeenCalledWith('resume');
+  (loopApi.control as jest.Mock).mockClear();
+  await act(async () => { fireEvent.press(ui.getByTestId('loop-screen-header-menu')); });
+  await act(async () => { fireEvent.press(ui.getByText('Stop mission')); });
+  expect(loopApi.control).not.toHaveBeenCalled();
+  await act(async () => { fireEvent.press(ui.getByTestId('server-action-ok')); });
+  expect(loopApi.control).toHaveBeenCalledWith('stop');
+});
+
+it('Loop: says so when there is no mission', async () => {
+  (loopApi.getState as jest.Mock).mockResolvedValue({ active: false, mission: null, budget_meter: null, backlog: [], current_item: null, blockers: [], runs: [], past: [] });
+  const ui = wrap(<LoopScreen />);
+  expect(await ui.findByText('No mission')).toBeTruthy();
 });
 
 it('Security: refuting a finding asks first and does nothing when cancelled', async () => {
@@ -80,9 +106,8 @@ it('Security: refuting a finding asks first and does nothing when cancelled', as
   expect(ui.getByText('Abandon this finding as invalid?')).toBeTruthy();
   await act(async () => { fireEvent.press(ui.getByText('Cancel')); });
   expect(securityApi.refuteFinding).not.toHaveBeenCalled();
-  await act(async () => { fireEvent.press(ui.getByTestId('approve-f1')); });
-  await act(async () => { fireEvent.press(ui.getByTestId('server-action-ok')); });
-  expect(securityApi.approveFinding).toHaveBeenCalledWith('f1');
+  expect(ui.queryByTestId('approve-f1')).toBeNull();
+  expect(securityApi.approveFinding).not.toHaveBeenCalled();
 });
 
 it('Prompts: answering sends the text', async () => {

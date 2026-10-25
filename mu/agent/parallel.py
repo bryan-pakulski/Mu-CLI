@@ -207,6 +207,7 @@ PARALLEL_SAFE_TOOLS = frozenset(
         "stackoverflow_search",
         "hackernews_search",
         "url_grounding",
+        "research_fetch",
         "read_document",
         # Sub-agents — each has its own SessionManager
         "spawn_agent",

@@ -59,10 +59,10 @@ def glass_backdrops(theme: str) -> list[tuple[str, tuple, tuple]]:
     return out
 
 
-# The Wash glass leaf at full strength (patterns/shell.css: 100% − 20% opacity) over the full
+# The Wash glass leaf at full strength (patterns/shell.css: 100% − 22% opacity) over the full
 # scene paintings behind the persistent shell. Blur approximates the leaf's backdrop blur at
 # screen size (the painting at 400px wide, 6px Gaussian).
-GLASS_LEAF_ALPHA = 0.80          # blurred (Blur ≥ 60%)
+GLASS_LEAF_ALPHA = 0.78          # blurred (Blur ≥ 60%)
 GLASS_LEAF_ALPHA_SHARP = 0.88    # no blur: the painting behind text is sharp
 
 

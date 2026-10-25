@@ -1,3 +1,4 @@
+import { CheckRun } from './modeState';
 import { api } from './client';
 import { ModeWorkspaceContract } from './modeWorkspace';
 
@@ -7,6 +8,12 @@ export interface SecurityFinding {
   summary: string;
   vulnerability_class: string;
   severity: string;
+  cwe?: string;
+  cvss_vector?: string;
+  cvss_score?: number;
+  severity_confirmed?: boolean;
+  demonstrated_impact?: string;
+  runs?: CheckRun[];
   affected_paths: string[];
   exploit_path: string;
   references: string[];
@@ -31,6 +38,8 @@ export interface SecurityReportInfo {
   directory: string;
   metadata_path: string;
   findings_total: number;
+  scope?: Record<string, string | string[]>;
+  coverage?: { total: number; reviewed: number };
 }
 
 export interface SecuritySummary {
@@ -51,6 +60,12 @@ export interface SecurityState {
   findings: SecurityFinding[];
   summary: SecuritySummary | null;
   workspace: ModeWorkspaceContract;
+  plan_mode?: boolean;
+  runner?: string;
+  surface?: Array<{ id: string; path: string; line: number; status: string; note: string; snippet: string }>;
+  observations?: Array<{ id: string; title: string; note: string }>;
+  report_markdown?: string;
+  runs?: CheckRun[];
 }
 
 export const securityApi = {

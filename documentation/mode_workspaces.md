@@ -10,14 +10,56 @@ operating surface.
 
 Mode-owned state remains canonical:
 
-- Research: citation ledger and research task memory
+- Research: the research ledger (questions, claims, sources)
 - Security: security report, proof, and remediation records
-- Debug: investigation scratchpad and durable root-cause memory
-- Loop: mission variables, todo scratchpad, workstreams, and checkpoints
-- Feature: feature plan engine, task events, exit criteria, and reviews
-- Teacher: course engine, learner profile, assignments, grades, and reviews
+- Debug: debug cases (`mu/debug`) with their check runs; root causes in the
+  Memory Ledger
+- Loop: the loop mission (`mu/loop`): goal, done-when criteria, budgets,
+  increments, and the work-item backlog
+- Feature: the feature plan file (approval, tasks, criteria evidence,
+  reviews, events)
+- Teacher: the course file (curriculum, lessons, checks, grades, mastery,
+  dated reviews) and the learner profile
 
-`mu/gui/mode_workspace.py` adapts those records into a versioned presentation
+Debug, loop, work items, blockers, check runs and receipts are typed mode
+state saved with the session (`mu/modes/state.py`); feature plans and
+courses stay on disk with a pointer in the session.
+
+## The mode shell
+
+Research, debug, feature, loop and teacher panels share one shell
+(`fragments/mode_shell.html`, `static/js/mode_shell.js`; models in
+`mode_models.js`, Alpine stores in `mode_stores.js`):
+
+- one header bar: the mode's name, a **state sentence** built from its
+  facts with zero parts dropped, text tabs (no counts) and at most one
+  primary action;
+- **Now**, shown only when something waits for the user — user-only
+  decisions (plan approval, curriculum consent, diff decisions),
+  blockers, failed runs, exhausted budgets, due reviews — each with its
+  action visible;
+- rows with marks from `vocabulary.json`; one record opens in a
+  `WashSheet`; check runs share one row and sheet (command, cwd, runner,
+  exit code, predicate, excerpt, full output from the result store);
+- an **expanded view** (`fragments/mode_expand.html`) over the
+  conversation for the heavy surfaces — the feature board, the research
+  matrix and report, the lesson reading view — with its state in the URL
+  (`?mode-view=feature&open=t4`);
+- a one-field dialog (`fragments/mode_ask.html`) for blocker answers,
+  override reasons, root causes and mission goals.
+
+User actions go through the mode engines with the surface as the actor
+(`user:gui`, `user:mobile`, `user:cli`); overrides are recorded as
+`override` events. Shared routes live under `/api/mode-state/` (check
+runs and their output, blockers and resolve, work items, receipts).
+Android has the same pieces in `mobile/android/src/components/modes/`.
+
+Default mode has no panel: its surface is the turn receipt under each
+assistant message and the Plan disclosure above the composer
+([default_mode.md](default_mode.md)).
+
+Security still uses the earlier workspace header. `mu/gui/mode_workspace.py`
+adapts the research and security records into a versioned presentation
 contract. It does not copy the records into a second database and it does not
 change agent context. Every existing mode state endpoint includes a
 `workspace` object alongside its native payload.
@@ -71,12 +113,12 @@ these boundaries visible.
 
 | Mode | Primary lenses | Verification language |
 | --- | --- | --- |
-| Research | Brief, Claims, Sources, Citations | source-linked, credibility, evidence gap |
+| Research | Questions, Claims, Sources, Citations | source-linked, credibility, evidence gap |
 | Security | Risk, Findings, Proof, Fixes | proof verified, fix verified, approved/refuted |
-| Debug | Case, Hypotheses, Observations, Root causes | untested, supported, disproved, confirmed |
-| Loop | Mission, Queue, Workstreams, Checkpoints | pending, in progress, blocked, reported complete |
-| Feature | Plan, Tasks, Criteria, Reviews | exit criterion verified, blocker, review evidence |
-| Teacher | Path, Curriculum, Mastery, Reviews | comprehension check, grade, rubric, recall review |
+| Debug | Case, Hypotheses, Runs, Root causes | untested, supported, refuted, confirmed |
+| Loop | Mission, Timeline, Backlog | running, paused, blocked, done; increment passed/failed |
+| Feature | Plan, Tasks, Criteria, Reviews | draft, approved, criterion evidence (run, user-attested, missing), override |
+| Teacher | Path, Lesson, Mastery, Reviews | comprehension check, grade, awaiting judgement, rubric, review due |
 
 ## Interaction rules
 
@@ -88,8 +130,8 @@ these boundaries visible.
 - Domain actions stay next to their domain records: security approval,
   feature-task transitions, course switching, and loop pause/resume do not go
   through a generic mode mutation endpoint.
-- Loop pause/resume preserves the existing mission, backlog, checkpoints, and
-  workstreams. Starting a brand-new mission remains a chat/model operation.
+- Loop pause/resume preserves the existing mission, backlog and increments.
+  Starting a mission is a user action (panel Start or `/loop start`).
 
 ## Visual system
 

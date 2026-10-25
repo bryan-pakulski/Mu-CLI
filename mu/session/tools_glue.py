@@ -6,9 +6,8 @@ syncs, the `_loop_blocker_raised` watchdog signal, etc.):
 
   * `execute_tool_with_memory(session, name, args)` — fires the
     `pre_tool` / `post_tool` hooks around `execute_tool`, honors
-    short-circuit (plan-mode, secret-guard, custom hooks) and abort
-    return values, and runs the feature-mode "no writes outside docs"
-    check.
+    short-circuit (plan-mode, secret-guard, mode gates, custom hooks)
+    and abort return values.
 
   * `build_structured_tool_result(session, name, args, raw_result)` —
     wraps a raw tool result string in the structured envelope the
@@ -16,10 +15,6 @@ syncs, the `_loop_blocker_raised` watchdog signal, etc.):
     telemetry). Per-tool data-extraction branches handle the cases
     where the model wants typed access (read_file → char_count, etc.).
 
-  * `sync_feature_state_for_tool(session, name, args, raw, structured)`
-    — when the just-executed tool was a feature-mode mutator or
-    `raise_blocker`, write its result back into the session's feature
-    state so the next turn sees the updated plan / blocker.
 
 Tests covering these paths live in `tests/agent/test_mu_agent_session_integration.py`
 (pre/post_tool hooks, plan-mode block, abort flag), `tests/sessions/`
@@ -69,10 +64,6 @@ def execute_tool_with_memory(
     if abort is not None:
         session._record_hook_abort("pre_tool", abort)
         return _hook_abort_envelope(tool_name, session._hook_abort_reason)
-
-    feature_violation = session._feature_doc_tool_violation(tool_name, tool_args)
-    if feature_violation:
-        return f"Error: {feature_violation}"
 
     # --- Pre-write snapshot for workspace diff tracking ---
     # Write tools (write_file, apply_diff, search_and_replace_file) modify
@@ -128,30 +119,6 @@ def execute_tool_with_memory(
 
 
 # ---------------------------------------------------------------- structured result
-
-
-_FEATURE_MODE_TOOL_NAMES = frozenset(
-    {
-        "create_feature",
-        "create_phases",
-        "create_task",
-        "get_execution_state",
-        "block_task",
-        "resume_task",
-        "review_completed_tasks",
-        "review_all_completed_tasks",
-        "propose_task_diff",
-        "decide_task_diff",
-        "archive_task",
-        "create_feature_task",
-        "update_feature_task",
-        "approve_feature_task",
-        "get_current_task",
-        "get_tasks",
-        "update_task_status",
-        "raise_blocker",
-    }
-)
 
 
 _MEMORY_TOOL_NAMES = frozenset(
@@ -287,8 +254,6 @@ def build_structured_tool_result(
             descriptor = envelope.get("artifact")
             if isinstance(descriptor, dict):
                 structured["data"]["artifact"] = dict(descriptor)
-    elif tool_name in _FEATURE_MODE_TOOL_NAMES:
-        structured["data"] = session._parse_json_result(raw_text)
     elif tool_name in _MEMORY_TOOL_NAMES:
         structured["data"] = {"preview": clip_preview(raw_text, 220)}
 
@@ -418,93 +383,7 @@ def _apply_observation_transform(
 # ---------------------------------------------------------------- feature-state sync
 
 
-def sync_feature_state_for_tool(
-    session: Any,
-    tool_name: str,
-    tool_args: dict,
-    raw_result: Any,
-    structured_result: Any,
-) -> None:
-    """When the just-executed tool was a feature-mode mutator or
-    `raise_blocker`, write its result back into the session's feature
-    state so the next turn sees the updated plan / blocker.
-
-    Mutates `session._loop_blocker_raised` when `raise_blocker` fires
-    so the loop-mode watchdog knows the pause was intentional and
-    skips its "continue!" prod that would otherwise burn iterations
-    re-raising the same blocker."""
-    if tool_name in {
-        "create_feature",
-        "create_phases",
-        "create_task",
-        "get_execution_state",
-        "block_task",
-        "resume_task",
-        "review_completed_tasks",
-        "review_all_completed_tasks",
-        "propose_task_diff",
-        "decide_task_diff",
-        "archive_task",
-        "create_feature_task",
-        "get_tasks",
-        "get_current_task",
-        "approve_feature_task",
-        "update_feature_task",
-        "update_task_status",
-    }:
-        data = {}
-        if isinstance(structured_result, dict):
-            data = structured_result.get("data", {}) or {}
-            if isinstance(data.get("plan"), dict):
-                data = data["plan"]
-        if not isinstance(data, dict) or "feature_id" not in data:
-            data = session._parse_json_result(raw_result)
-            if isinstance(data.get("plan"), dict):
-                data = data["plan"]
-        if isinstance(data, dict) and data.get("feature_id"):
-            is_plan_summary = any(
-                key in data
-                for key in (
-                    "metadata_path",
-                    "directory",
-                    "review_status",
-                    "phases",
-                    "tasks",
-                    "next_task",
-                    "next_phase",
-                )
-            )
-            if is_plan_summary:
-                session._set_feature_state(feature_plan=data)
-            elif tool_name in {"get_current_task", "get_tasks"}:
-                metadata_path = str(
-                    (session.session_manager.get_feature_state() or {}).get(
-                        "metadata_path", ""
-                    )
-                    or ""
-                ).strip()
-                if metadata_path:
-                    session._refresh_feature_state(metadata_path)
-        return
-
-    if tool_name == "raise_blocker":
-        data = {}
-        if isinstance(structured_result, dict):
-            data = structured_result.get("data", {}) or {}
-        if not isinstance(data, dict) or not data.get("kind"):
-            data = session._parse_json_result(raw_result)
-        if isinstance(data, dict):
-            session._set_feature_state(status="awaiting_input", blocker=data)
-        # Signal the loop-mode watchdog that this pause is intentional
-        # — without this it would re-prompt the model with LOOP WATCHDOG
-        # every iteration, forcing repeated re-raises until budget is
-        # exhausted.
-        session._loop_blocker_raised = True
-        return
-
-
 __all__ = [
     "execute_tool_with_memory",
     "build_structured_tool_result",
-    "sync_feature_state_for_tool",
 ]

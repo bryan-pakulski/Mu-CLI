@@ -14,6 +14,17 @@ from mu.teacher.engine import (
 )
 from mu.teacher.grading import grade
 
+from mode_helpers import agent_session
+
+
+def _exec_grade(tmp_path, assignment):
+    """Code kinds are graded by running the verifier through run_check in work/."""
+    from mu.teacher.engine import Course
+    from mu.teacher.gates import grade_exec
+
+    course = Course(course_id="c", subject="s", directory=str(tmp_path / "course"))
+    return grade_exec(course, assignment, agent_session(tmp_path))
+
 
 def _assignment(kind: str, **overrides) -> Assignment:
     return Assignment(
@@ -37,7 +48,7 @@ def test_fix_broken_code_passes_when_markers_match(tmp_path):
             working_dir=str(tmp_path),
         ),
     )
-    g = grade(a, submission={})
+    g = _exec_grade(tmp_path, a)
     assert g.passed
     assert g.score_pct == 100
     assert "every expected marker" in g.feedback
@@ -54,7 +65,7 @@ def test_fix_broken_code_fails_on_missing_marker(tmp_path):
             working_dir=str(tmp_path),
         ),
     )
-    g = grade(a, submission={})
+    g = _exec_grade(tmp_path, a)
     assert not g.passed
     assert "Missing expected markers" in g.feedback
     assert "count=5" in g.feedback
@@ -74,7 +85,7 @@ def test_fix_broken_code_fails_on_forbidden_marker(tmp_path):
             working_dir=str(tmp_path),
         ),
     )
-    g = grade(a, submission={})
+    g = _exec_grade(tmp_path, a)
     assert not g.passed
     assert g.score_pct == 0
     assert "Forbidden markers" in g.feedback
@@ -209,7 +220,7 @@ def test_exec_timeout_marks_zero(tmp_path):
             working_dir=str(tmp_path),
         ),
     )
-    g = grade(a, submission={})
+    g = _exec_grade(tmp_path, a)
     assert not g.passed
     assert g.score_pct == 0
     assert g.verification_result["timed_out"] is True

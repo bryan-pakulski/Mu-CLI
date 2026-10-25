@@ -154,3 +154,19 @@ export function orchEffect(effect: string | null | undefined, style?: { semantic
   const semantic = style?.semantic || row?.semantic || 'danger';
   return { tone: semantic as Semantic, label: style?.label || row?.label || String(effect || '').replace(/_/g, ' ') };
 }
+
+// Modes v2 vocabulary (modes_v2.md §5.2): debug cases, hypotheses, check runs, work items,
+// blockers, feature plans/tasks/criteria, loop missions/increments, teacher courses/lessons/
+// reviews and the default-mode turn receipt. Each key maps onto a shared status row + label;
+// an unknown key keeps its raw word on the quiet `pending` mark (never an invented colour).
+export type ModeTable =
+  | 'debug_case' | 'hypothesis' | 'check_run' | 'work_item' | 'blocker' | 'feature_plan' | 'feature_task'
+  | 'criterion' | 'loop_mission' | 'loop_increment' | 'teacher_course' | 'teacher_lesson' | 'comprehension'
+  | 'teacher_review' | 'turn_receipt' | 'security_finding' | 'security_scan' | 'security_surface';
+
+export function modeState(table: ModeTable, key: string | null | undefined): { status: Status; label: string } {
+  const rows = ((vocabulary as Record<string, unknown>)[table] || {}) as Record<string, { status: string; label: string }>;
+  const raw = String(key || '');
+  const row = rows[raw];
+  return row ? { status: asStatus(row.status), label: row.label } : { status: 'pending', label: raw.replace(/_/g, ' ') };
+}

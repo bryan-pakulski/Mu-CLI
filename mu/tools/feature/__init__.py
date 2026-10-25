@@ -1,12 +1,10 @@
-"""Feature-mode tools (plan engine).
+"""Feature-mode tools over the feature plan engine (``mu/feature/engine.py``).
 
-18 `@tool`-decorated handlers covering the full feature-plan lifecycle:
-create / phases / tasks / status transitions / reviews / diffs /
-approval / blockers. Handler bodies live in `mu/tools/feature/handlers.py`
-(delegating to the `mu/feature/engine.py` engine); this module registers
-them so the agent loop sees them via `mu.tools`.
+The agent proposes a draft, executes one task at a time with evidence-backed
+exit criteria, reviews and requests completion; plan approval, diff decisions
+and completion belong to the user and have no tools.
 """
 
-from . import handlers  # noqa: F401 — registers 18 feature-mode tools at import time
+from . import handlers  # noqa: F401 — registers the feature plan tools
 
 __all__: list = []

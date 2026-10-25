@@ -152,6 +152,10 @@ def _load_command_modules() -> None:
     from . import profile  # noqa: F401 — registers /profile
     from . import job_analysis  # noqa: F401 — registers /jobtrace
     from . import orch  # noqa: F401 — registers /orch
+    from . import blocker  # noqa: F401 — registers /blocker
+    from . import security  # noqa: F401 — registers /security
+    from . import debug  # noqa: F401 — registers /debug
+    from . import loop  # noqa: F401 — registers /loop
 
 
 _load_command_modules()

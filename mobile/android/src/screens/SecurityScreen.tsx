@@ -4,9 +4,11 @@
 import React, { useCallback, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { ModeWorkspaceIntro, useModeWorkspaceView, workspaceState, workspaceTabs } from '../components';
+import { useModeWorkspaceView, workspaceState, workspaceTabs } from '../components';
 import { Fact, PanelPage, PanelSection } from '../components/chat/PanelPage';
 import { securityApi, type SecurityFinding, type SecurityState } from '../api/security';
+import { CheckRunRow, useCheckRunSheet } from '../components/modes';
+import { modeState } from '../theme/status';
 import { spacing } from '../theme/tokens';
 import { Button, Chip, Row, Sheet, Text, useServerActions, type ServerAction } from '../ui';
 
@@ -29,6 +31,7 @@ export function SecurityScreen() {
   const [selected, setSelected] = useState<SecurityFinding | null>(null);
   const workspaceView = useModeWorkspaceView(state?.workspace);
   const actions = useServerActions();
+  const runSheet = useCheckRunSheet(state?.runs || []);
 
   const load = useCallback(async () => {
     try { setError(null); setState(await securityApi.getState()); }
@@ -39,9 +42,11 @@ export function SecurityScreen() {
 
   const decide = async (finding: SecurityFinding, action: ServerAction) => {
     if (!(await actions.ask(action))) return;
-    if (action.id === 'approve') await securityApi.approveFinding(finding.finding_id);
-    else await securityApi.refuteFinding(finding.finding_id, 'Refuted via mobile UI');
-    void load();
+    try {
+      if (action.id === 'approve') await securityApi.approveFinding(finding.finding_id);
+      else await securityApi.refuteFinding(finding.finding_id, 'Refuted via mobile UI');
+      await load();
+    } catch (e) { setError(String(e)); }
   };
 
   const workspace = state?.workspace;
@@ -58,18 +63,21 @@ export function SecurityScreen() {
       loading={loading} error={error} onRetry={() => void load()}
       empty={!loading && !error && empty ? { title: 'No security findings', message: 'No security scan or findings available.' } : null}
       refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }}
-      overlay={actions.element}>
+      overlay={<>{actions.element}{runSheet.element}</>}>
       {state && workspace ? (
         <>
-          <ModeWorkspaceIntro workspace={workspace} />
+
           {state.report ? (
             <PanelSection title="Scan brief">
-              <Text variant="body" tone="ink2">{state.report.summary || 'No report summary recorded.'}</Text>
+              <Text variant="body" tone="ink2">{state.report.summary || state.report.title}</Text>
+              {state.runner ? <Fact label="Runner" value={state.runner} /> : null}
+              {state.report.coverage ? <Fact label="Coverage" value={`${state.report.coverage.reviewed} of ${state.report.coverage.total} surface items reviewed`} /> : null}
+              <Text variant="caption" tone="ink3">Review PoC execution commands on desktop.</Text>
             </PanelSection>
           ) : null}
           <PanelSection title="Findings" count={findings.length} empty="No records match this evidence lens.">
             {findings.map(item => (
-              <Row key={item.finding_id} testID={`finding-${item.finding_id}`} status={severitySign(item.severity)} title={item.title} when={item.severity}
+              <Row key={item.finding_id} testID={`finding-${item.finding_id}`} status={severitySign(item.severity)} title={item.title} when={`${item.cvss_score ?? ""} ${item.severity}`.trim()}
                 onPress={() => setSelected(item)}
                 sub={(
                   <View style={styles.sub}>
@@ -82,26 +90,36 @@ export function SecurityScreen() {
                 )}
                 actions={(
                   <View style={styles.chips}>
-                    {item.status !== 'approved' ? <Button label="Approve" variant="secondary" testID={`approve-${item.finding_id}`}
+                    {!state.plan_mode && item.status !== 'approved' && item.status !== 'refuted' && item.proof_verified && item.remediation_verified && item.severity_confirmed ? <Button label="Approve" variant="secondary" testID={`approve-${item.finding_id}`}
                       onPress={() => void decide(item, { id: 'approve', label: 'Approve', confirm: 'Finalize this security finding?' })} /> : null}
-                    {item.status !== 'refuted' ? <Button label="Refute" variant="ghost" testID={`refute-${item.finding_id}`}
+                    {!state.plan_mode && !['approved', 'refuted'].includes(item.status) ? <Button label="Refute" variant="ghost" testID={`refute-${item.finding_id}`}
                       onPress={() => void decide(item, { id: 'refute', label: 'Refute', danger: true, confirm: 'Abandon this finding as invalid?' })} /> : null}
                   </View>
                 )} />
             ))}
           </PanelSection>
+          {state.surface?.length ? <PanelSection title="Coverage">
+            {state.surface.map(item => <Row key={item.id} status={modeState('security_surface', item.status).status}
+              title={`${item.path}:${item.line}`} sub={item.note || item.snippet} />)}
+          </PanelSection> : null}
+          {state.observations?.length ? <PanelSection title="Observations">
+            {state.observations.map(o => <Row key={o.id} title={o.title} sub={o.note} />)}
+          </PanelSection> : null}
         </>
       ) : null}
       <Sheet visible={!!selected} onClose={() => setSelected(null)} title={selected?.title} testID="finding-sheet">
         {selected ? (
           <View>
-            <Fact label="Severity" value={selected.severity} />
+            <Fact label="Severity" value={`${selected.cvss_score ?? ''} ${selected.severity}`.trim()} />
+            {selected.cvss_vector ? <Fact label="CVSS 3.1" value={selected.cvss_vector} /> : null}
+            {selected.demonstrated_impact ? <Fact label="Demonstrated impact" value={selected.demonstrated_impact} /> : null}
             <Fact label="Class" value={selected.vulnerability_class} />
             <Fact label="Status" value={selected.status} />
             <Fact label="Exploit path" value={selected.exploit_path} mono />
             <Fact label="PoC command" value={selected.proof_command} mono />
             <Fact label="Affected paths" value={selected.affected_paths.join(', ')} mono />
             <Fact label="Evidence" value={proofText(selected)} />
+            {(selected.runs || []).map(run => <CheckRunRow key={run.id} run={run} onOpen={runSheet.open} />)}
           </View>
         ) : null}
       </Sheet>

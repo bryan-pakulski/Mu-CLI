@@ -22,49 +22,40 @@ count, and responsibility. Char counts are the source literal lengths
 |-----------|----------|------:|----------------|
 | `--system` CLI default | `mucli.py:1216` | ~603 | Non-agentic base instruction (the `session.system_instruction` prefix). Used as-is when agentic mode is OFF; prepended to the agentic base when ON. |
 | `AGENTIC_SYSTEM_BASE` | `utils/config.py:367` | 11 432 | Agentic base: caveman grammar, full TOOL SURFACE taxonomy (incl. self-management tools), sub-agent guidance, 13 GENERAL RULES, and a SELF-MANAGEMENT block (rule 7) instructing the agent to own its context — prune the todo ledger, promote durable/drop ephemeral, supersede-don't-sibling, reconcile on staleness signals from `context_status` (stale_memory_count/stale_todos/memory_pressure_pct), watch fill, self-trigger `checkpoint_progress`, recognize its own stall, write its own handoffs. Appended as `workspace_context` whenever agentic mode is ON. |
-| `AGENTIC_MODES["default"]` | `utils/config.py:437` | 2 412 | Collation-aware default coding workflow (clarify → recall → semantic retrieval → plan → parallel collect → act → verify → save → summarize). |
-| `AGENTIC_MODES["debug"]` | `utils/config.py:459` | 3 150 | Debugging workflow with scratchpad-tagging protocol (hypothesis/suspect/repro/bisect), recall-first, repro→locate→hypothesize→bisect→fix→verify→persist. |
-| `AGENTIC_MODES["feature"]` | `utils/config.py:488` | 3 021 | Feature Task Engine workflow: plan→per-task loop→review, anchored to the feature-task engine tools, mandatory memory+scratchpad, blockers. |
-| `AGENTIC_MODES["research"]` | `utils/config.py:523` | 3 180 | Research workflow: recall, parallel multi-source search, semantic retrieval for codebase, delegation, citation requirements + source credibility table, anti-detection. |
-| `AGENTIC_MODES["loop"]` | `utils/config.py:569` | 2 637 | Long-horizon autonomous loop: goal lock, user-visible backlog, per-increment re-orient→gather→act→verify→reflect, memory discipline, timeline updates. |
-| `AGENTIC_MODES["security"]` | `utils/config.py:611` | 4 356 | Security audit engine: anti-hallucination contract (PoC + patch both verified), discovery→per-finding proof-and-patch→final report, refutation of failed hypotheses. |
-| `AGENTIC_MODES["teacher"]` | `utils/config.py:657` | 14 483 | One-on-one tutor: personalization contract, chat-based teaching (watcher records), curriculum + per-lesson loop, dual-presentation artifacts, spaced review. |
+| Mode prompts | `mu/prompts/templates/<mode>.md` | 1 083 – 4 356 | One prompt per mode, describing the mode's loop; the bundled templates are the single source. `AGENTIC_MODES` in `utils/config.py` is generated from them at import (frontmatter stripped) and is only the hardcoded fallback. Sizes (body chars): default 1 083, debug 1 409, loop 1 319, feature 1 564, teacher 3 211, research 3 345, security 4 356. Gates and state live in the mode engines, not in prose. |
 | `AGENT_MODE_METADATA` | `utils/config.py:814` | — | Real-mode registry (display_name, description, documentation path, and optional specialist `tool_phases`). Mode tool phases are added to the effective provider schema automatically when lazy tool exposure is enabled. The remaining metadata drives `/mode`, the GUI modes list, and the splash banner. The read-only view panels (history, memory, systemPrompts) are NOT here — they live in `GUI_VIEW_PANELS` and are surfaced through the GUI Tools menu, not as settable agent modes. |
 | `GUI_VIEW_PANELS` | `utils/config.py` | — | GUI-only view-panel registry (history, memory, systemPrompts). Read-only; never agent modes — `POST /api/modes/{name}` rejects them and they never appear in `/mode`, the splash banner, or `--mode-prompt`. Surfaced as the `views` array in `GET /api/modes`. |
 | `NUDGE_EMPTY_RESPONSE` | `utils/config.py:788` | 161 | Injected as a user message when the model returns no text after tool calls (`loop_body.py:845`). |
-| Feature-mode dynamic block | `loop_body.py:475-489` | ~1 100 | Appended to `base_system_prompt` when `active_mode == "feature"`: FEATURE MODE SYSTEM PROMPT instructions (staged engine, exit criteria, one task at a time). |
-| Loop-mode dynamic block | `loop_body.py:490-503` | ~700 | Appended when `active_mode == "loop"`: LOOP MODE SYSTEM PROMPT + the locked `loop_goal`. |
-| Teacher learner-profile block | `loop_body.py:504-507` | variable | Appended when `active_mode == "teacher"` via `_render_learner_profile_block(session)` — the auto-injected LEARNER PROFILE. |
+| Mode capsule | `mu/modes/capsule.py` | ≤ 1 200 | The active mode's live records (current feature task and remaining criteria, the open debug case, the loop mission and budget, the teacher's learner profile, gate state and due reviews, default mode's unverified last turn, open blockers and work items). Rides in the request-only TURN CONTEXT on the turn's user message (`prompt_prefix_stable`, appended to the system prompt otherwise); never persisted. There are no per-message feature/loop directives or mode-specific system-prompt suffixes any more, and no LEARNER PROFILE system-prompt block. |
 | Resumption block | `loop_body.py:531` | variable | Appended for resumed sessions with in-flight teacher/feature state. |
 | L0–L5 hierarchical context | `mu/session/context.py:94` | variable | `inject_hierarchical_context` assembles L0 time prelude, L1B skills, L2 conversation summary, L3 active goal, L4/L4B retrieval, L5 history. |
 | L3 memory snapshot | `loop_body.py:655-663` | variable | Persisted working-memory snapshot + eviction notices (per turn). |
-| L3 scratchpad snapshot | `loop_body.py:678-690` | variable | Turn scratchpad snapshot + eviction notices (per turn). |
+| L3 scratchpad snapshot | `loop_body.py` | variable | Turn scratchpad snapshot + eviction notices (per turn). The scratchpad is a per-turn notepad in every mode; plans live in typed work items (`mu/modes/work.py`). |
 
 ### Assembly order (one turn)
 
 `loop_body.py` builds the prompt in this order:
 
 1. `base_system_prompt = session.system_instruction` (the `--system` value).
-2. Append feature/loop/teacher dynamic block (`loop_body.py:474-507`).
-3. Append `workspace_context` =
+2. Append `workspace_context` =
    `{agentic_system_base}\n\n### CURRENT STRATEGY MODE: {MODE}\n{mode_instruction}`
    plus an `ACTIVE TOOL REGISTRIES` receipt describing the effective provider
    schema (`loop_body.py:457`) — only when agentic.
-4. Append resumption block (`loop_body.py:531`).
-5. `inject_hierarchical_context` → L0–L5 (`loop_body.py:532`).
-6. Append L3 memory + scratchpad snapshots + eviction notices
-   (`loop_body.py:643-690`).
-7. `retry.py` reuses the assembled prompt across retries (no re-injection).
+3. Turn-scoped blocks (resumption briefing, triggered skills, durable
+   recall, the mode capsule) go into the request-only TURN CONTEXT with
+   `prompt_prefix_stable`, or are appended here without it.
+4. `inject_hierarchical_context` → L0–L5.
+5. Append L3 memory + scratchpad snapshots + eviction notices.
+6. `retry.py` reuses the assembled prompt across retries (no re-injection).
 
 `agentic_system_base` and `mode_instruction` are resolved with the
 priority ladder in §2.
 
 ### Per-iteration rebuild (not frozen at turn start)
 
-Steps 5–6 are re-run **every iteration within a turn**, so L2 (conversation
+Steps 4–5 are re-run **every iteration within a turn**, so L2 (conversation
 summary) and L3 (active goal / memory / scratchpad) reflect mid-turn updates
-(auto-compaction rewriting the summary, tools mutating `feature_state` /
-the scratchpad) instead of being frozen at their turn-start value — the
+(auto-compaction rewriting the summary, tools mutating the scratchpad) instead of being frozen at their turn-start value — the
 long-horizon amnesia bug. To keep this cheap:
 
 - L1B (skills) is built **once per turn**
@@ -91,10 +82,23 @@ hit the compaction budget still get a fresh Progress / Open-items picture.
    over files and hardcoded.
 2. **File override** — `$MUCLI_HOME/prompts/{base,<mode>}.md`
    (`MUCLI_HOME` defaults to `~/.mucli/`, `utils/config.py:13`).
-3. **Hardcoded fallback** — `AGENTIC_SYSTEM_BASE` / `AGENTIC_MODES` in
-   `utils/config.py`.
+3. **Bundled template** — `mu/prompts/templates/{base,<mode>}.md`, the
+   single source of each prompt.
+4. **Hardcoded fallback** — `AGENTIC_SYSTEM_BASE` / `AGENTIC_MODES` in
+   `utils/config.py` (`AGENTIC_MODES` is generated from the templates).
 
-Layers 2–3 live in `mu.prompts`; layer 1 is applied at the call site
+### Stale overrides
+
+A file override keeps working when the bundled template changes. When
+its `version` is older than the bundled template's, the terminal (once per
+process, at the start of a turn in that mode) and the GUI prompts panel show a
+notice: *Your debug prompt override is based on v1; the bundled prompt
+is v2*. `/prompts diff <name>` shows the difference, `/prompts keep
+<name>` silences the notice until the bundled version moves again
+(recorded in `prompts/.notices.json`), and `/prompts reset <name>` moves
+the override aside to `<name>.md.bak`.
+
+Layers 2–4 live in `mu.prompts`; layer 1 is applied at the call site
 (`mu/agent/loop_body.py:438-454` and `utils/runtime_metrics.py:222-242`)
 via `session.variables.get(key) or PromptLibrary.get_*()`, so a non-empty
 runtime override always wins and an empty-string override falls through
@@ -127,8 +131,8 @@ per-session version tracking.
   is supplied.
 - `reload()` — drop the mtime-keyed cache so edits apply next turn.
 - `init_templates(names, force=False)` — write template files to
-  `$MUCLI_HOME/prompts/`. Bundled refined templates for `base`/`default`;
-  other modes seeded verbatim from the hardcoded fallback so
+  `$MUCLI_HOME/prompts/`, seeded from the bundled template (the
+  hardcoded fallback only when a template is missing) so
   `/prompts init <mode>` externalizes the current prompt for editing.
 - `write_override(name, text, version=None)` — persist a file (GUI PUT).
 - `read_override_raw(name)` — raw file content (frontmatter + body).

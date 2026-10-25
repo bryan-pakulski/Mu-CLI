@@ -532,6 +532,78 @@
         }).filter(Boolean).join(',');
     }
 
+    /* Label facets (the multi-select): the key=value picks the rows' = / in conditions amount to,
+     * and back. Picks of one key become `key=v` (one) or `key in (a,b)` (several); other conditions
+     * (≠, not in, exists, absent) and half-made rows are kept as they are. */
+    function facetPicks(rows) {
+        const out = [];
+        rows.forEach(r => {
+            if (r.op === 'eq' && r.key && r.values[0]) out.push([r.key, r.values[0]]);
+            if (r.op === 'in' && r.key) r.values.forEach(v => out.push([r.key, v]));
+        });
+        return out;
+    }
+    function applyFacets(rows, picks) {
+        const keep = rows.filter(r => !((r.op === 'eq' || r.op === 'in') && r.key && r.values.length));
+        const byKey = new Map();
+        picks.forEach(([k, v]) => { if (!byKey.has(k)) byKey.set(k, []); if (!byKey.get(k).includes(v)) byKey.get(k).push(v); });
+        const facets = [...byKey].map(([key, values]) => (values.length === 1 ? { op: 'eq', key, values } : { op: 'in', key, values }));
+        return [...facets, ...keep];
+    }
+
+    /* Autocomplete for a typed selector: what fits at the caret, from the labels nodes carry.
+     * Returns {from, to, items: [{insert, label, detail}]}: replace text[from:to] with an item's
+     * `insert`. Keys first; then operators after a whole key; values after `=`, `!=` or `in (`. */
+    function selectorCompletions(text, caret, index) {
+        const labels = (index && index.labels) || {};
+        const before = String(text || '').slice(0, caret);
+        let depth = 0;
+        let start = 0;
+        for (let i = 0; i < before.length; i += 1) {
+            const ch = before[i];
+            if (ch === '(') depth += 1;
+            else if (ch === ')') depth -= 1;
+            else if (ch === ',' && depth === 0) start = i + 1;
+        }
+        const term = before.slice(start).replace(/^\s+/, '');
+        const nodes = n => `${n} node${n === 1 ? '' : 's'}`;
+        const keyTotal = k => Object.values(labels[k] || {}).reduce((a, b) => a + b, 0);
+        const keys = Object.keys(labels).sort();
+        // A value already typed in full isn't offered again (the list closes; type , for more).
+        const valuesOf = (key, prefix, skip = []) => Object.entries(labels[key] || {})
+            .filter(([v]) => v.toLowerCase().startsWith(prefix.toLowerCase()) && v !== prefix && !skip.includes(v))
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([v, n]) => ({ insert: v, label: v, detail: `${key} · ${nodes(n)}` }));
+        let m;
+        if ((m = /^([^\s!=(),]+)\s+(?:not)?in\s*\(([^)]*)$/.exec(term))) {
+            const parts = m[2].split(',');
+            const partial = parts[parts.length - 1].replace(/^\s+/, '');
+            return { from: caret - partial.length, to: caret, items: valuesOf(m[1], partial, parts.slice(0, -1).map(x => x.trim())) };
+        }
+        if ((m = /^([^\s!=(),]+)\s*(?:!=|==?)\s*([^\s,()]*)$/.exec(term))) {
+            return { from: caret - m[2].length, to: caret, items: valuesOf(m[1], m[2]) };
+        }
+        if ((m = /^!\s*([^\s!=(),]*)$/.exec(term))) {
+            return { from: caret - m[1].length, to: caret, items: keys.filter(k => k.startsWith(m[1])).map(k => ({ insert: k, label: `!${k}`, detail: 'nodes without this label' })) };
+        }
+        if ((m = /^([^\s!=(),]+)\s+([a-z]*)$/.exec(term)) && labels[m[1]]) {
+            const ops = [['in (', 'in (a,b)', 'any of several values'], ['notin (', 'notin (a,b)', 'none of these values']];
+            return { from: caret - m[2].length, to: caret, items: ops.filter(([o]) => o.startsWith(m[2])).map(([insert, label, detail]) => ({ insert, label, detail })) };
+        }
+        if ((m = /^([^\s!=(),]*)$/.exec(term))) {
+            const partial = m[1];
+            if (labels[partial]) {
+                const ops = [['=', `${partial}=…`, 'equals'], ['!=', `${partial}!=…`, 'not equal'], [' in (', `${partial} in (…)`, 'any of several values'],
+                    [' notin (', `${partial} notin (…)`, 'none of these values']];
+                return { from: caret, to: caret, items: ops.map(([insert, label, detail]) => ({ insert, label, detail })) };
+            }
+            const items = keys.filter(k => k.toLowerCase().startsWith(partial.toLowerCase()))
+                .map(k => ({ insert: k, label: k, detail: `${nodes(keyTotal(k))} · ${Object.keys(labels[k]).length} value${Object.keys(labels[k]).length === 1 ? '' : 's'}` }));
+            return { from: caret - partial.length, to: caret, items };
+        }
+        return { from: caret, to: caret, items: [] };
+    }
+
     /* value: {labels, groups, nodes} (or a label-selector string with labelsOnly). */
     /* `emptyNote` (labelsOnly): what an empty selector means here, e.g. a group's (matches no
      * node, hand-picked members only); with it, an empty selector isn't previewed as "every node". */
@@ -543,6 +615,9 @@
         let index = { labels: {}, groups: [], nodes: [] };
         let previewSeq = 0;
         const id = idPrefix;
+        // The label multi-select (build mode) and the typed selector's completions (text mode).
+        const facet = { query: '', open: false, active: 0 };
+        let comp = { items: [], from: 0, to: 0, active: 0, open: false };
 
         function emit() {
             if (mode === 'build') sel.labels = formatSelector(rows);
@@ -573,14 +648,54 @@
                 <span class="w-select orch-sel__op"><select class="w-select__control" data-row-op="${i}" aria-label="Operator">${OPS.map(([k, l]) => `<option value="${k}"${r.op === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></span>
                 ${valueCtl}<button type="button" class="w-btn" data-variant="icon" data-size="sm" data-row-del="${i}" aria-label="Remove this condition" title="Remove">${icon('x', 'sm')}</button></li>`;
         }
+        function facetOptions() {
+            const q = facet.query.trim().toLowerCase();
+            const out = [];
+            Object.keys(index.labels).sort().forEach(k => Object.entries(index.labels[k] || {}).sort((a, b) => a[0].localeCompare(b[0])).forEach(([v, n]) => {
+                if (!q || `${k}=${v}`.toLowerCase().includes(q)) out.push({ key: k, value: v, count: n });
+            }));
+            return out;
+        }
+        function facetHtml() {
+            const picks = facetPicks(rows);
+            const isPicked = (k, v) => picks.some(([a, b]) => a === k && b === v);
+            const opts = facetOptions();
+            facet.active = Math.min(facet.active, Math.max(0, opts.length - 1));
+            let lastKey = null;
+            const list = opts.map((o, i) => {
+                const head = o.key !== lastKey ? `<li role="presentation" class="orch-combo__group">${esc(o.key)}</li>` : '';
+                lastKey = o.key;
+                const on = isPicked(o.key, o.value);
+                return `${head}<li role="option" id="${id}-fo-${i}" class="orch-combo__option orch-facet__option" data-facet-option="${i}" aria-selected="${on}"${i === facet.active ? ' data-active' : ''}>
+                    <span class="orch-facet__tick" aria-hidden="true">${on ? '✓' : ''}</span><span class="orch-combo__title">${esc(o.key)}=${esc(o.value)}</span><span class="orch-sub">${esc(o.count)}</span></li>`;
+            }).join('');
+            return `<div class="orch-facets" data-facets>
+                ${picks.length ? `<ul class="orch-facets__chips" aria-label="Chosen labels">${picks.map(([k, v]) => `<li><span class="orch-facet__chip">${esc(k)}=${esc(v)}<button type="button" class="orch-facet__remove" data-facet-remove="${esc(JSON.stringify([k, v]))}" aria-label="Remove ${esc(k)}=${esc(v)}">${icon('x', 'sm')}</button></span></li>`).join('')}</ul>` : ''}
+                <div class="orch-combo">
+                    <label class="w-sr-only" for="${id}-facet">Add labels</label>
+                    <input class="w-input orch-combo__input" id="${id}-facet" data-facet-input role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
+                        aria-controls="${id}-facets" aria-expanded="${facet.open}"${facet.open && opts.length ? ` aria-activedescendant="${id}-fo-${facet.active}"` : ''}
+                        value="${esc(facet.query)}" placeholder="${Object.keys(index.labels).length ? 'Add labels: type to filter, e.g. env=prod' : 'No labels on any node yet'}" autocomplete="off" spellcheck="false"${Object.keys(index.labels).length ? '' : ' disabled'}>
+                    <span class="orch-combo__chevron" aria-hidden="true">${icon('chevron-down', 'sm')}</span>
+                    <div class="orch-combo__list" ${facet.open ? '' : 'hidden'}><ul class="orch-combo__options" role="listbox" id="${id}-facets" aria-multiselectable="true" aria-label="Labels on your nodes">${list || '<li class="orch-combo__empty" role="presentation">No label matches.</li>'}</ul></div>
+                </div>
+                <p class="orch-sub">Several values of one label match any of them; different labels must all match.</p>
+            </div>`;
+        }
+        function compHtml() {
+            if (!comp.open || !comp.items.length) return `<div class="orch-combo__list" data-comp hidden></div>`;
+            return `<div class="orch-combo__list" data-comp><ul class="orch-combo__options" role="listbox" id="${id}-comp" aria-label="Suggestions">${comp.items.map((it, i) =>
+                `<li role="option" id="${id}-co-${i}" class="orch-combo__option" data-comp-option="${i}" aria-selected="${i === comp.active}"><span class="orch-combo__title orch-mono">${esc(it.label)}</span><span class="orch-combo__summary">${esc(it.detail || '')}</span></li>`).join('')}</ul></div>`;
+        }
         function paint() {
             const nodes = (index.nodes || []).filter(n => !test || (n.status === 'active' && n.canary));
             container.innerHTML = `<fieldset class="orch-fieldset orch-sel"><legend>${esc(label)}</legend>
                 <div class="orch-stack-sm">
                     <div class="orch-sel__head"><div class="w-segmented" role="group" aria-label="How to choose labels"><button type="button" class="w-segmented__option" aria-pressed="${mode === 'build'}" data-mode="build">Pick labels</button><button type="button" class="w-segmented__option" aria-pressed="${mode === 'text'}" data-mode="text">Type a selector</button></div></div>
-                    ${mode === 'build' ? `<ul class="orch-sel__rows" role="list">${rows.map(rowHtml).join('')}</ul>
+                    ${mode === 'build' ? `${facetHtml()}<ul class="orch-sel__rows" role="list">${rows.map(rowHtml).join('')}</ul>
                         <div class="w-btn-row"><button type="button" class="w-btn" data-variant="ghost" data-size="sm" data-row-add>${icon('plus', 'sm')}<span>Add a label condition</span></button>${rows.length ? `<code class="orch-mono orch-sub">${esc(formatSelector(rows) || '…')}</code>` : `<span class="orch-sub">${labelsOnly ? (emptyNote ? esc(emptyNote) : 'No condition: every node the run targets.') : 'No label condition.'}</span>`}</div>`
-                        : `<div class="w-field"><label class="w-field__label" for="${id}-text">Label selector</label><input class="w-input" data-mono id="${id}-text" value="${esc(sel.labels || '')}" placeholder="env=prod,role in (web,api),!legacy" autocomplete="off" spellcheck="false">
+                        : `<div class="w-field"><label class="w-field__label" for="${id}-text">Label selector</label><div class="orch-combo"><input class="w-input" data-mono id="${id}-text" value="${esc(sel.labels || '')}" placeholder="env=prod,role in (web,api),!legacy" autocomplete="off" spellcheck="false"
+                            role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-controls="${id}-comp" aria-expanded="${comp.open && comp.items.length > 0}">${compHtml()}</div>
                             <p class="w-field__hint">Comma means AND: <code>k=v</code>, <code>k!=v</code>, <code>k in (a,b)</code>, <code>k notin (a,b)</code>, <code>k</code> (present), <code>!k</code> (absent)${labelsOnly ? '' : ', <code>*</code> for every node'}.</p>${errLine('')}</div>`}
                     ${!labelsOnly && (index.groups || []).length ? `<div class="orch-sel__block"><p class="orch-label-text">Groups</p><div class="orch-checks">${index.groups.map(g => `<label class="w-check"><input class="w-check__input" type="checkbox" data-group="${esc(g.name)}"${(sel.groups || []).includes(g.name) ? ' checked' : ''}><span>${esc(g.name)} <span class="orch-sub">${esc(g.count)} · <code class="orch-mono">${esc(g.selector)}</code></span></span></label>`).join('')}</div></div>` : ''}
                     ${!labelsOnly ? `<div class="orch-sel__block"><p class="orch-label-text">${test ? 'Canary nodes' : 'Explicit nodes'}</p>${nodes.length ? `<div class="orch-checks">${nodes.map(n => `<label class="w-check"><input class="w-check__input" type="checkbox" data-node="${esc(n.id)}"${(sel.nodes || []).includes(n.id) ? ' checked' : ''}><span>${esc(n.name)} ${ui.chip(n.style, { sm: true })}${n.canary && !test ? ' <span class="orch-tag">canary</span>' : ''}</span></label>`).join('')}</div>` : `<p class="orch-muted">${test ? 'No active canary nodes. Mark one canary on its node page, or start a test node.' : 'No nodes yet.'}</p>`}</div>` : ''}
@@ -615,11 +730,130 @@
                 emit(); paintSummary();
             }));
             container.querySelectorAll('[data-row-del]').forEach(b => b.addEventListener('click', () => { rows.splice(Number(b.dataset.rowDel), 1); paint(); emit(); }));
+            bindFacets();
             const text = container.querySelector(`#${id}-text`);
-            text?.addEventListener('input', () => { sel.labels = text.value.trim(); emit(); });
+            if (text) bindCompletion(text);
             container.querySelectorAll('[data-group]').forEach(c => c.addEventListener('change', () => { sel.groups = [...container.querySelectorAll('[data-group]:checked')].map(x => x.dataset.group); emit(); }));
             container.querySelectorAll('[data-node]').forEach(c => c.addEventListener('change', () => { sel.nodes = [...container.querySelectorAll('[data-node]:checked')].map(x => x.dataset.node); emit(); }));
         }
+        /* ------------------------------------------------ the label multi-select */
+        function refocusFacet() {
+            const input = container.querySelector('[data-facet-input]');
+            if (!input) return;
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+        }
+        function togglePick(o) {
+            const picks = facetPicks(rows);
+            const at = picks.findIndex(([k, v]) => k === o.key && v === o.value);
+            if (at >= 0) picks.splice(at, 1); else picks.push([o.key, o.value]);
+            rows = applyFacets(rows, picks);
+            emit();
+            paint();
+            refocusFacet();
+        }
+        function bindFacets() {
+            const input = container.querySelector('[data-facet-input]');
+            if (!input) return;
+            const opts = () => facetOptions();
+            const repaintList = () => {
+                const box = container.querySelector('[data-facets]');
+                if (!box) return;
+                box.outerHTML = facetHtml();
+                bindFacets();
+                refocusFacet();
+            };
+            input.addEventListener('focus', () => { if (!facet.open) { facet.open = true; repaintList(); } });
+            input.addEventListener('input', () => { facet.query = input.value; facet.open = true; facet.active = 0; repaintList(); });
+            input.addEventListener('keydown', e => {
+                const list = opts();
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    facet.open = true;
+                    facet.active = list.length ? (facet.active + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length : 0;
+                    repaintList();
+                } else if (e.key === 'Enter' && facet.open && list[facet.active]) {
+                    e.preventDefault();
+                    togglePick(list[facet.active]);
+                } else if (e.key === 'Escape' && facet.open) {
+                    e.preventDefault();
+                    facet.open = false;
+                    repaintList();
+                } else if (e.key === 'Backspace' && !input.value) {
+                    const picks = facetPicks(rows);
+                    if (picks.length) { e.preventDefault(); picks.pop(); rows = applyFacets(rows, picks); emit(); paint(); refocusFacet(); }
+                }
+            });
+            input.addEventListener('blur', () => setTimeout(() => {
+                if (!container.contains(document.activeElement) || !document.activeElement.closest('[data-facets]')) {
+                    if (facet.open) { facet.open = false; const box = container.querySelector('[data-facets]'); if (box) { box.outerHTML = facetHtml(); bindFacets(); } }
+                }
+            }, 120));
+            container.querySelectorAll('[data-facet-option]').forEach(li => {
+                li.addEventListener('mousedown', e => e.preventDefault());       // keep the input focused
+                li.addEventListener('click', () => { const o = opts()[Number(li.dataset.facetOption)]; if (o) { facet.active = Number(li.dataset.facetOption); togglePick(o); } });
+            });
+            container.querySelectorAll('[data-facet-remove]').forEach(b => b.addEventListener('click', () => {
+                const [k, v] = JSON.parse(b.dataset.facetRemove);
+                rows = applyFacets(rows, facetPicks(rows).filter(([a, c]) => !(a === k && c === v)));
+                emit();
+                paint();
+                refocusFacet();
+            }));
+        }
+
+        /* ------------------------------------------------ typed selector completions */
+        function bindCompletion(text) {
+            const refresh = () => {
+                const caret = text.selectionStart ?? text.value.length;
+                const next = selectorCompletions(text.value, caret, index);
+                comp = { ...next, active: 0, open: next.items.length > 0 && document.activeElement === text };
+                paintCompletion(text);
+            };
+            const accept = it => {
+                const v = text.value;
+                text.value = v.slice(0, comp.from) + it.insert + v.slice(comp.to);
+                const caret = comp.from + it.insert.length;
+                text.setSelectionRange(caret, caret);
+                sel.labels = text.value.trim();
+                emit();
+                refresh();
+            };
+            text.addEventListener('input', () => { sel.labels = text.value.trim(); emit(); refresh(); });
+            text.addEventListener('focus', refresh);
+            text.addEventListener('click', refresh);
+            text.addEventListener('keyup', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') refresh(); });
+            text.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== text) { comp.open = false; paintCompletion(text); } }, 120));
+            text.addEventListener('keydown', e => {
+                if (!comp.open || !comp.items.length) return;
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    comp.active = (comp.active + (e.key === 'ArrowDown' ? 1 : -1) + comp.items.length) % comp.items.length;
+                    paintCompletion(text);
+                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    accept(comp.items[comp.active]);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    comp.open = false;
+                    paintCompletion(text);
+                }
+            });
+            text._muAccept = accept;
+        }
+        function paintCompletion(text) {
+            const box = text.parentElement.querySelector('[data-comp]');
+            if (!box) return;
+            box.outerHTML = compHtml();
+            text.setAttribute('aria-expanded', String(comp.open && comp.items.length > 0));
+            if (comp.open && comp.items.length) text.setAttribute('aria-activedescendant', `${id}-co-${comp.active}`);
+            else text.removeAttribute('aria-activedescendant');
+            text.parentElement.querySelectorAll('[data-comp-option]').forEach(li => {
+                li.addEventListener('mousedown', e => e.preventDefault());
+                li.addEventListener('click', () => text._muAccept(comp.items[Number(li.dataset.compOption)]));
+            });
+        }
+
         function paintSummary() {
             const code = container.querySelector('.orch-sel__rows + .w-btn-row code, .orch-sel__rows + .w-btn-row .orch-sub');
             if (code) code.outerHTML = rows.length ? `<code class="orch-mono orch-sub">${esc(formatSelector(rows) || '…')}</code>` : `<span class="orch-sub">No label condition.</span>`;
@@ -689,5 +923,5 @@
         return { ready, value: () => selected, nodes: () => nodes };
     }
 
-    window.OrchPickers = { options, labels, watch, combobox, paramsForm, completion, selectorBuilder, nodePicker, parseSelector, formatSelector, splitRef, wholeTemplate };
+    window.OrchPickers = { options, labels, watch, combobox, paramsForm, completion, selectorBuilder, nodePicker, parseSelector, formatSelector, facetPicks, applyFacets, selectorCompletions, splitRef, wholeTemplate };
 })();

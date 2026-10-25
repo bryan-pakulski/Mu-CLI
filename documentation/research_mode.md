@@ -4,9 +4,11 @@ For "help me *understand* X" — explanations, write-ups, surveys.
 Switch in via `/mode research`.
 
 The output is a synthesized analysis with citations, not a code change.
-Source credibility is AI-assessed per source, claims are cross-referenced,
-and every external fact gets a footnote. Sources are grouped by research
-topic so the bibliography stays organized by ask.
+Research runs on a session-owned **evidence ledger**: questions → claims →
+quoted evidence → sources the agent has read. Search results are only
+candidates; a source is numbered and citable once it has been read, every
+claim quotes the source text it rests on, and confidence is computed from how
+many independent origins support it.
 
 For "fix this bug" use [debug](debug_mode.md). For "make this change"
 use [default](default_mode.md). For multi-hour deep dives use
@@ -14,84 +16,105 @@ use [default](default_mode.md). For multi-hour deep dives use
 
 ## Core behavior
 
-1. **Recall first**
-   - `search_memory` with the topic. Prior research turns may have
-     saved key findings — start from those instead of re-fetching.
+The loop is *plan questions → search (candidates) → read → record claims →
+check status → report*.
 
-2. **Plan the investigation**
-   - Publish a `todo_write` of open questions so the user can see the
-     angles being pursued.
-   - Mark one `in_progress`; promote / defer as evidence comes in.
+1. **Recall first.** `search_memory` with the topic, and `research_status`
+   for questions, claims and leads already recorded this session.
 
-3. **Set the research topic**
-   - Call `set_research_topic("<short ask>")` before firing searches for
-     a new rabbit hole. Sources registered afterwards inherit that topic,
-     so the bibliography stays grouped by ask.
-   - Call it again whenever pivoting to a new sub-question.
+2. **Plan questions.** `research_question(action="add", text=…)` for the main
+   question and each angle; `parent_id` makes a sub-question and `todo_id`
+   links a todo item. Adding or `select`-ing a question files the sources read
+   afterwards under it and ranks the passages reads return. (`/research topic
+   <name>` selects or creates a root question by name.)
 
-4. **Cast a wide net in parallel**
-   For a single question, fire multiple search tools in one turn —
-   they execute concurrently:
-   - `web_search` + `stackoverflow_search` — "how does X work" /
-     library questions
-   - `arxiv_search` + `doi_resolve` — academic / technical-paper
-     questions
-   - `reddit_search` + `hackernews_search` — community perspectives /
-     war stories
-   - `retrieve_relevant_context` + `search_references` — codebase
-     research
+3. **Search in parallel.** Fire several search tools in one turn — they run
+   concurrently:
+   - `web_search` + `stackoverflow_search` — how-things-work / library questions
+   - `arxiv_search` + `doi_resolve` — papers
+   - `reddit_search` + `hackernews_search` — practitioner perspectives
+   - `retrieve_relevant_context` + `search_references` — codebase research
 
-5. **Lead with semantic retrieval for in-repo questions**
-   - `retrieve_relevant_context` surfaces the right files faster than
-     blind `read_file`.
-   - Follow with `read_file` on the top hits, in parallel.
+   Every row is registered as a **candidate** (`s4`): deduplicated by
+   canonical URL, carrying its snippet and metadata, but never numbered and
+   never in the bibliography.
 
-6. **Delegate multi-angle deep dives**
-   - When a sub-question would consume significant context (read 30+
-     docs, follow 50+ refs), fire `spawn_agent` with a research-tool
-     whitelist:
-     ```
-     tools=["web_search","arxiv_search","doi_resolve",
-            "stackoverflow_search","url_grounding","read_document",
-            "retrieve_relevant_context","search_for_string","read_file"]
-     ```
-   - The child returns a focused summary; the parent stays free to
-     synthesize.
+4. **Read before citing.**
+   - `url_grounding(url or source_id, query, max_chars)` fetches a page
+     (5 MB cap; PDFs go to the PDF path; a near-empty page gets one
+     Playwright-rendered retry), extracts the main content (trafilatura, or a
+     boilerplate-dropping bs4 fallback) with title, authors, date and site,
+     and returns the passages most relevant to `query` — the current question
+     when omitted — within `max_chars` (default 6000), plus an outline of the
+     rest. The full text stays in the result store (`result_ref`; pull more
+     with `result_search` / `result_range`).
+   - `research_fetch([urls], query)` reads up to 6 pages concurrently; one
+     failing URL is reported without failing the others.
+   - `read_document` reads PDFs by path or URL the same way, one passage per
+     page, so the page heading is the locator.
+   - The source gets a stable citation number `[^n]` and is `read`. A second
+     URL whose text matches an already-read source (a mirror) is merged into
+     it.
 
-7. **Read primary sources**
-   - `url_grounding` for landing pages.
-   - `read_document` for PDFs — accepts either a local path or an
-     `http(s)://` URL. Passing a URL fetches the PDF directly (no
-     curl/download step) and auto-registers the source in the citation
-     engine (arxiv → academic, otherwise documentation).
-   - `read_file` for in-repo files.
-   - Don't synthesize from snippets when full text is available.
+5. **Record claims.** `record_claim(question_id, text, kind, evidence=[{citation_id,
+   stance, excerpt, locator}])`. The tool refuses evidence from an unread
+   candidate and any excerpt that does not occur in the source text
+   (whitespace/case-normalised, fuzzy ≥ 0.9; the error shows the nearest
+   passage). `kind` is `observed` (the source says it), `derived` (computed
+   from sources) or `inferred` (judgement). Citing promotes a source to
+   `cited`. `add_evidence` attaches later support, contradictions or
+   qualifications.
 
-8. **Persist findings as you go**
-   - `save_memory` with discovered invariants, gotchas, key numbers.
-     Multi-turn research compounds — tag aggressively with the topic.
+6. **Check coverage.** `research_status` lists each question's status,
+   claims, supporting origins, contradictions and unread candidates worth
+   reading, and the questions with no claims yet. `visual=true` adds a
+   claims × origins matrix for `publish_visualization`.
 
-9. **Synthesize, cite, deliver**
-   - Cross-reference, weight by credibility, write the answer.
+7. **Report.** `research_report` returns the skeleton below; the agent writes
+   the answer and prose into it. `research_export(dir)` writes
+   `questions.md`, `source_register.md` and `evidence_log.md` for the
+   [deep-research](../mu/skills/deep-research/SKILL.md) deliverable
+   (approval-gated, workspace bounds, blocked in plan mode).
+
+Sub-agents (`spawn_agent`) keep their own ledger: read the key sources they
+report before recording claims on them. Durable, non-obvious findings still
+go to `save_memory` for future sessions.
+
+### Confidence and status
+
+Origins, not URLs, are counted — the registrable domain by default (hosting
+platforms such as `github.io` or `substack.com` count per account), so three
+pages on one site support a claim once. `assess_source(…, origin=…)`
+overrides it, e.g. for syndicated wire copy.
+
+| Claim confidence | Rule |
+| --- | --- |
+| high | ≥ 2 supporting origins, one with credibility ≥ 0.7, no contradicting evidence |
+| medium | ≥ 2 supporting origins, or 1 origin with credibility ≥ 0.8; contradictions only while outnumbered |
+| low | otherwise |
+
+`kind="inferred"` caps at medium; the agent may lower a claim's confidence
+but never raise it. A question is **contested** when a claim has supporting
+and contradicting evidence from different origins, **answered** when every
+claim is at least medium, otherwise **open** (or **dropped** by the agent).
 
 ## Citation requirements
 
-- ALL sources must be registered with the CitationManager before being
-  cited.
-- Set the research topic with `set_research_topic("<ask>")` before
-  registering sources for a new rabbit hole — the bibliography is
-  grouped by topic.
-- Every claim from external sources gets a footnote ref `[^n]`.
-- End with a bibliography via `compile_bibliography()` — it emits
-  sources grouped by topic under `### <topic>` headings. Pass an
-  optional topic argument to compile just one bucket.
+- Cite only sources that were read; reference them with their `[^n]`
+  number. Numbers are stable for the session, so prose written before the
+  report still points at the right entry.
+- Every claim from an external source is recorded with `record_claim` and a
+  quoted excerpt; the report renders only recorded claims.
+- The bibliography (`/research bibliography`, the report's Sources
+  section) lists cited sources grouped by root question, then read but
+  uncited sources under "Consulted". Candidates never appear.
 
 ## Source credibility (AI-assessed, not hardcoded)
 
-Sources default to **0.0 (unassessed)** until the AI explicitly grades
-them. The AI owns the weighting decision.
+A read source starts at a conservative prior (half its type's cap) until
+the AI grades it; candidates score 0. The AI owns the weighting decision.
 
-After reading a source you intend to cite, call
+For each source you rely on, call
 `assess_source(citation_id, importance, rationale)` with a 0–1
 evidence-strength rating based on authority, methodology, relevance,
 recency, and corroboration.
@@ -112,16 +135,43 @@ A weak academic paper can score 0.2; an excellent web source can be
 strong but cannot exceed 0.80. If you add a source to the bibliography,
 you are responsible for deciding how relevant and important it is.
 
-- Cross-reference important claims across at least two sources.
+- Corroborate important claims from independent origins — the ledger
+  grades confidence on exactly that.
 - Prefer recent sources for fast-moving topics.
 - Note conflicts of interest in the write-up (e.g. a vendor blog about
   a vendor's own product).
 
 ## Output format
 
-A self-contained write-up: lead with the synthesized answer, follow
-with the reasoning / evidence, end with the bibliography. No tool-call
-narration; the user wants the finding, not the search history.
+`research_report` lays out:
+
+```
+## Answer       ← the agent writes the direct answer
+## Findings     ← per question: confidence, claims with [^n], quoted evidence
+## Contested    ← claims with supporting vs contradicting origins
+## Gaps         ← questions without claims, with unread candidates worth reading
+## Method       ← sources found / read / cited, claim and question counts
+## Sources      ← the bibliography
+```
+
+The final write-up leads with the answer, follows with the evidence, keeps
+the Contested and Gaps sections honest, and ends with the bibliography. No
+tool-call narration; the user wants the finding, not the search history.
+
+## Commands and GUI
+
+- `/research` — status; `questions`, `claims [qid]`, `gaps`,
+  `sources [--state candidate|read|cited --type --min --query --topic]`,
+  `show <n|sN>`, `bibliography [--cited] [qid]`, `stats`, `topic [name]`,
+  `topics`, `export <dir>`, `clear`, `new <query>`.
+- The Research panel shows the question tree with status and confidence,
+  each question's claims (a claim opens its evidence and sources), a Sources
+  tab with a state filter, and a claims × origins matrix.
+  `GET /api/research/state` serves the same data for the requested session.
+
+Research state is saved with the session (`research_sources` in
+`session.json`); extracted source text is kept once per text under
+`~/.mucli/research/texts/` for excerpt checks.
 
 ## When to leave research mode
 

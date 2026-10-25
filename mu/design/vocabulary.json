@@ -660,5 +660,413 @@
     "publish": {
       "label": "Publish"
     }
+  },
+  "research_question": {
+    "open": {
+      "status": "pending",
+      "label": "open"
+    },
+    "answered": {
+      "status": "done",
+      "label": "answered"
+    },
+    "contested": {
+      "status": "unverified",
+      "label": "contested"
+    },
+    "dropped": {
+      "status": "skipped",
+      "label": "dropped"
+    }
+  },
+  "research_confidence": {
+    "high": {
+      "status": "done",
+      "label": "high confidence"
+    },
+    "medium": {
+      "status": "pending",
+      "label": "medium confidence"
+    },
+    "low": {
+      "status": "unverified",
+      "label": "low confidence"
+    }
+  },
+  "research_stance": {
+    "supports": {
+      "status": "done",
+      "label": "supports"
+    },
+    "contradicts": {
+      "status": "failed",
+      "label": "contradicts"
+    },
+    "qualifies": {
+      "status": "skipped",
+      "label": "qualifies"
+    }
+  },
+  "research_source_state": {
+    "candidate": {
+      "status": "pending",
+      "label": "candidate"
+    },
+    "read": {
+      "status": "done",
+      "label": "read"
+    },
+    "cited": {
+      "status": "done",
+      "label": "cited"
+    }
+  },
+  "debug_case": {
+    "open": {
+      "status": "pending",
+      "label": "open"
+    },
+    "reproduced": {
+      "status": "active",
+      "label": "reproduced"
+    },
+    "root_caused": {
+      "status": "active",
+      "label": "root caused"
+    },
+    "fixed": {
+      "status": "unverified",
+      "label": "fixed, not verified"
+    },
+    "verified": {
+      "status": "done",
+      "label": "verified"
+    },
+    "closed": {
+      "status": "done",
+      "label": "closed"
+    },
+    "unreproducible": {
+      "status": "skipped",
+      "label": "unreproducible"
+    }
+  },
+  "hypothesis": {
+    "untested": {
+      "status": "pending",
+      "label": "untested"
+    },
+    "supported": {
+      "status": "active",
+      "label": "supported"
+    },
+    "refuted": {
+      "status": "failed",
+      "label": "refuted"
+    },
+    "confirmed": {
+      "status": "done",
+      "label": "confirmed"
+    }
+  },
+  "check_run": {
+    "passed": {
+      "status": "done",
+      "label": "passed"
+    },
+    "failed": {
+      "status": "failed",
+      "label": "failed"
+    },
+    "timed_out": {
+      "status": "failed",
+      "label": "timed out"
+    }
+  },
+  "work_item": {
+    "pending": {
+      "status": "pending",
+      "label": "to do"
+    },
+    "in_progress": {
+      "status": "active",
+      "label": "in progress"
+    },
+    "blocked": {
+      "status": "waiting",
+      "label": "blocked"
+    },
+    "done": {
+      "status": "done",
+      "label": "done"
+    },
+    "dropped": {
+      "status": "skipped",
+      "label": "dropped"
+    }
+  },
+  "blocker": {
+    "open": {
+      "status": "waiting",
+      "label": "needs you"
+    },
+    "resolved": {
+      "status": "done",
+      "label": "answered"
+    }
+  },
+  "feature_plan": {
+    "draft": {
+      "status": "waiting",
+      "label": "awaiting approval"
+    },
+    "approved": {
+      "status": "pending",
+      "label": "approved"
+    },
+    "executing": {
+      "status": "active",
+      "label": "executing"
+    },
+    "review": {
+      "status": "waiting",
+      "label": "in review"
+    },
+    "done": {
+      "status": "done",
+      "label": "done"
+    }
+  },
+  "feature_task": {
+    "not_started": {
+      "status": "pending",
+      "label": "not started"
+    },
+    "in_progress": {
+      "status": "active",
+      "label": "in progress"
+    },
+    "blocked": {
+      "status": "waiting",
+      "label": "blocked"
+    },
+    "completed": {
+      "status": "done",
+      "label": "completed"
+    },
+    "archived": {
+      "status": "skipped",
+      "label": "archived"
+    }
+  },
+  "criterion": {
+    "met": {
+      "status": "done",
+      "label": "met"
+    },
+    "attested": {
+      "status": "unverified",
+      "label": "attested"
+    },
+    "unmet": {
+      "status": "pending",
+      "label": "not met"
+    }
+  },
+  "loop_mission": {
+    "running": {
+      "status": "active",
+      "label": "running"
+    },
+    "paused": {
+      "status": "waiting",
+      "label": "paused"
+    },
+    "blocked": {
+      "status": "waiting",
+      "label": "blocked"
+    },
+    "stopped": {
+      "status": "skipped",
+      "label": "stopped"
+    },
+    "done": {
+      "status": "done",
+      "label": "done"
+    }
+  },
+  "loop_increment": {
+    "passed": {
+      "status": "done",
+      "label": "passed"
+    },
+    "partial": {
+      "status": "unverified",
+      "label": "partial"
+    },
+    "failed": {
+      "status": "failed",
+      "label": "failed"
+    }
+  },
+  "teacher_course": {
+    "diagnosing": {
+      "status": "active",
+      "label": "diagnostic"
+    },
+    "curriculum_proposed": {
+      "status": "waiting",
+      "label": "curriculum to approve"
+    },
+    "in_progress": {
+      "status": "active",
+      "label": "in progress"
+    },
+    "completed": {
+      "status": "done",
+      "label": "completed"
+    },
+    "archived": {
+      "status": "skipped",
+      "label": "archived"
+    }
+  },
+  "teacher_lesson": {
+    "pending": {
+      "status": "pending",
+      "label": "not started"
+    },
+    "presenting": {
+      "status": "active",
+      "label": "presenting"
+    },
+    "lecturing": {
+      "status": "active",
+      "label": "lecturing"
+    },
+    "assigned": {
+      "status": "waiting",
+      "label": "exercise out"
+    },
+    "graded": {
+      "status": "active",
+      "label": "graded"
+    },
+    "remediating": {
+      "status": "unverified",
+      "label": "remediating"
+    },
+    "completed": {
+      "status": "done",
+      "label": "passed"
+    }
+  },
+  "comprehension": {
+    "on_track": {
+      "status": "done",
+      "label": "on track"
+    },
+    "partial": {
+      "status": "unverified",
+      "label": "partial"
+    },
+    "confused": {
+      "status": "failed",
+      "label": "confused"
+    }
+  },
+  "teacher_review": {
+    "due": {
+      "status": "waiting",
+      "label": "due"
+    },
+    "scheduled": {
+      "status": "pending",
+      "label": "scheduled"
+    },
+    "done": {
+      "status": "done",
+      "label": "done"
+    },
+    "skipped": {
+      "status": "skipped",
+      "label": "skipped"
+    }
+  },
+  "turn_receipt": {
+    "verified": {
+      "status": "done",
+      "label": "checks passed"
+    },
+    "unverified": {
+      "status": "unverified",
+      "label": "unverified"
+    },
+    "no_changes": {
+      "status": "skipped",
+      "label": "no changes"
+    }
+  },
+  "security_finding": {
+    "new": {
+      "status": "unverified",
+      "label": "hypothesis"
+    },
+    "proof_attached": {
+      "status": "pending",
+      "label": "proof attached"
+    },
+    "exploit_verified": {
+      "status": "active",
+      "label": "proof verified"
+    },
+    "remediation_attached": {
+      "status": "pending",
+      "label": "fix attached"
+    },
+    "remediation_verified": {
+      "status": "waiting",
+      "label": "fix verified"
+    },
+    "approved": {
+      "status": "done",
+      "label": "approved"
+    },
+    "refuted": {
+      "status": "skipped",
+      "label": "refuted"
+    }
+  },
+  "security_scan": {
+    "scanning": {
+      "status": "active",
+      "label": "scanning"
+    },
+    "verifying": {
+      "status": "active",
+      "label": "verifying"
+    },
+    "complete": {
+      "status": "done",
+      "label": "complete"
+    }
+  },
+  "security_surface": {
+    "unreviewed": {
+      "status": "pending",
+      "label": "unreviewed"
+    },
+    "reviewed_clean": {
+      "status": "done",
+      "label": "reviewed clean"
+    },
+    "finding": {
+      "status": "waiting",
+      "label": "finding"
+    },
+    "observation": {
+      "status": "skipped",
+      "label": "observation"
+    }
   }
 }

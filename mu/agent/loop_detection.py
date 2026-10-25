@@ -19,7 +19,7 @@ Three primitives:
 
   * `track_tool_for_loop_detection(name)` — boolean filter excluding
     bookkeeping tools that can legitimately repeat during a feature
-    progression (`update_task_status`, `get_tasks`, ...).
+    progression (`feature_status`, `loop_increment`, ...).
 
   * `is_repeated_tool_sequence(history, threshold)` — true when the
     last `threshold` fingerprints in `history` are all identical and
@@ -40,19 +40,18 @@ from typing import Any, List
 # should NOT count toward loop detection (they're bookkeeping calls).
 _BOOKKEEPING_TOOLS = frozenset(
     {
-        # Feature-mode mutators/inspectors
-        "create_feature",
-        "create_phases",
-        "create_task",
-        "update_task",
-        "update_phases",
+        # Mode bookkeeping: plan / case / mission records and their status reads
+        "feature_status",
+        "start_task",
         "review_task",
-        "review_all_completed_tasks",
-        "review_completed_tasks",
-        "update_task_status",
-        "get_execution_state",
-        "get_tasks",
-        "get_current_task",
+        "debug_status",
+        "add_hypothesis",
+        "update_hypothesis",
+        "add_suspect",
+        "loop_status",
+        "loop_increment",
+        "teach_check",
+        "assess_response",
         # Meta/tooling calls that legitimately repeat every iteration
         "flush",
         "todo_write",

@@ -1,137 +1,112 @@
-# Security Mode
+# Security mode
 
-A security audit workflow gated on demonstrable evidence. Switch in via
-`/mode security`.
+Switch with `/mode security`. An audit records scope, reviewed attack surface, hypotheses,
+executed proofs, fixes, regression checks and observations. The active scan belongs to the
+session and reopens after a restart; sharing a workspace does not silently select another
+session's scan.
 
-The hard contract: a finding is a hypothesis until its proof-of-concept
-executes and the declared markers literally appear in the output. A
-remediation is proposed until the same PoC is re-run against the
-patched code and the markers no longer appear. No "potentially
-vulnerable" findings get approved.
+## Start and resume
 
-For non-security debugging use [debug](debug_mode.md). For multi-week
-hardening campaigns put security mode inside [loop](loop_mode.md).
+```text
+/security scan API audit
+/security status
+/security list
+/security open <scan_id>
+/security scope
+/security coverage
+/security report
+```
 
-> See also [security_controls.md](security_controls.md) — that doc
-> covers the always-on harness-level protections (secret-path denylist,
-> bash guard, output scrubber) that keep the harness itself from
-> leaking secrets. Distinct from this mode, which looks for
-> vulnerabilities *in the workspace*.
+Ask the agent to set the scope before reviewing: in-scope paths, entry points, trust boundaries,
+assets and attacker. `/security scope <JSON>` also accepts these fields directly. Scope is
+frozen once surface review or findings exist; start another scan to expand it.
 
-## Engine tools
+Scans live in `documentation/security_scan_<id>/`. Session mode state stores the active scan
+pointer and revision. `open_security_report` and `list_security_reports` provide explicit
+agent access. The browser API always resolves the requested session.
 
-The security engine is the only source of truth for the audit. The
-audit trail records every hypothesis — including refuted ones.
+## Host and container execution
 
-| Tool | Role |
+Both are supported. On a host workspace, Docker is the default: the `mucli-job-runtime:latest`
+image runs against a disposable copy with network disabled, dropped capabilities, no new
+privileges, CPU/memory/process limits and a timeout. VCS metadata and protected files are
+excluded. Use `mucli jobs setup` to prepare the runtime image.
+
+The user may explicitly choose host execution **for the current scan**:
+
+```text
+/security runner host
+/security runner docker
+/security runner auto
+```
+
+The Risk tab also exposes this choice. `auto` selects Docker and revokes host consent; there
+is no silent fallback when Docker is unavailable. Host runs can change the real workspace and
+use the host network. The host choice is session-owned, persists across restart, and does not
+carry into another scan or another session that opens the same scan. It is not a model tool.
+For container sessions, commands execute in the existing session container under that
+container's filesystem and network policy.
+
+Every PoC and remediation execution requires human approval, including under YOLO. The
+preview shows the runner, working directory, command, PoC file contents and hashes, and the
+patch and regression commands for remediation. Changed preview inputs require another
+approval. Mobile can approve/refute findings, but PoC execution approval requires desktop
+command review; it can still cancel a pending run.
+
+The shared `run_check` runner uses `bash -c`, removes credential-shaped environment variables
+and shell startup/loader hooks, applies the bash secret guard, redacts output, and bounds run
+time. The guard checks directly invoked scripts as well as the command. This is a static
+check, not a sandbox for host code: use fabricated data, declare every PoC dependency and
+review scripts before running them. Commands should use workspace-relative paths; Docker's
+workspace root is `/workspace`.
+
+## Audit workflow
+
+| Tool | Contract |
 | --- | --- |
-| `create_security_report` | Open the audit. Sets up `documentation/security_scan_<id>/`. |
-| `add_security_finding` | Record a hypothesis: title, vulnerability class, severity, affected paths, exploit path. |
-| `attach_security_proof` | Attach a shell PoC + `expected_markers` that uniquely identify success. |
-| `verify_security_proof` | Engine runs the PoC and verifies markers appear literally. |
-| `attach_remediation_patch` | Attach the fix as a unified diff + a description of the defensive principle. |
-| `verify_remediation` | Engine re-runs the same PoC against the patched code; markers must no longer appear. |
-| `approve_security_finding` | Finalize. Refuses unless both verifications passed. |
-| `refute_security_finding` | Abandon a failed hypothesis. Recorded in the appendix. |
-| `get_security_state` | Snapshot of the audit: counts by severity, approved vs refuted. |
+| `create_security_report`, `open_security_report`, `list_security_reports` | Create, select or discover scans. |
+| `set_security_scope` | Record paths and threat model before review. |
+| `scan_attack_surface` | Discover entry points and common sinks; optional patterns are literal substrings. |
+| `review_surface_item` | Record reviewed-clean, finding or observation with a note. |
+| `add_observation` | Record hardening advice without claiming an exploit. |
+| `add_security_finding` | Require exploit path, CWE, valid affected `path:line` locations, CVSS 3.1 base vector and rationale. Reuse duplicate CWE/sink locations. |
+| `attach_security_proof` | Declare command, expected exit, exploit markers, a distinct probe-ran marker and all PoC files/dependencies. |
+| `verify_security_proof` | Execute the probe; expected exit and all markers must match. Timeouts and self-modifying PoCs fail. |
+| `confirm_security_severity` | Reconfirm the vector against the proof's demonstrated impact. |
+| `attach_remediation_patch` | Attach a unified diff and regression check commands after a verified proof. Apply it separately with the usual editing tools. |
+| `verify_remediation` | Check patch hunks against the working-tree diff from HEAD; frozen PoC must execute, every exploit marker must be absent, and all regressions must pass. |
+| `approve_security_finding` | Require both verifications and severity confirmation; recheck PoC and patched-file integrity. |
+| `refute_security_finding` | Record why an unapproved hypothesis was rejected. Approved/refuted records are final. |
+| `get_security_state`, `security_report` | Inspect the ledger or generate its Markdown report. |
 
-## Phases
+CVSS scores are computed from the eight base metrics rather than an independently chosen
+severity. CVSS is owned by FIRST and used by permission; see the
+[CVSS 3.1 specification](https://www.first.org/cvss/v3.1/specification-document).
 
-### Phase 1 — Discovery
+Surface discovery is not exhaustive. Read surrounding code and follow attacker-controlled
+input across trust boundaries. Changed surface snippets lose their old reviewed mark. The
+report shows coverage gaps and unsettled hypotheses separately from approved findings.
 
-1. `create_security_report` with a clear title (e.g. "Initial audit of
-   acme-api").
-2. Scan in parallel:
-   - `retrieve_relevant_context` for queries like `authentication`,
-     `deserialization`, `SQL queries`, `user input handlers`,
-     `command construction`, `secrets`.
-   - `search_for_string` for known-bad patterns: `eval(`, `exec(`,
-     `subprocess.*shell=True`, `pickle.loads(`, `os.system(`,
-     `SELECT.*\+`, `innerHTML.*=`, `request.args`, `request.form`,
-     hardcoded credentials.
-   - `read_file` candidates fully — bugs are usually three calls away
-     from the suspicious line.
-3. For each plausible vulnerability, `add_security_finding` with
-   title, `vulnerability_class`, severity
-   (`info | low | medium | high | critical`), `affected_paths`, and a
-   concrete `exploit_path` describing how an attacker triggers it.
+Reattaching or rerunning a proof clears the old remediation and severity confirmation.
+Changing a frozen PoC forces re-proof. A patch that merely crashes the program, removes the
+probe marker, leaves even one exploit marker, or fails regressions is not a verified fix.
+Patch verification requires a Git workspace with a HEAD commit and the proposed changes
+still represented in the working-tree/index diff.
 
-### Phase 2 — Per-finding proof-and-patch loop
+## Evidence and surfaces
 
-Run for **every** finding.
+Every run has its own directory under `proofs/<finding_id>/<run>/`, with redacted output,
+`CheckRun` metadata and a hashed script bundle. Earlier runs are retained. The shared result
+store also keeps full output; context excerpts stay bounded. Patches live in `patches/`.
+`security_report` writes `REPORT.md` and `findings/<id>.md`, with scope, coverage, approved
+findings, refuted hypotheses, observations and evidence links. Scan status advances from
+scanning through verifying to complete when findings are settled and discovered items reviewed.
 
-1. **Build the PoC.** `attach_security_proof` with a shell command
-   that reproduces the vulnerability deterministically from the
-   workspace root. Declare `expected_markers` — unique strings that
-   appear only when the exploit succeeded (e.g. `PWNED`, a file path
-   that shouldn't exist, a stolen secret).
-2. **Verify the PoC.** `verify_security_proof`. The engine runs the
-   command and confirms the markers literally appear.
-   - If false: revise the PoC and retry.
-   - After 2–3 failed revisions: `refute_security_finding` with a
-     reason. Don't silently drop it — the audit trail must show the
-     failed hypothesis.
-3. **Engineer the patch.** Read the file, write the corrected code.
-   `attach_remediation_patch` with the unified diff and a description
-   of the defensive principle (parameterized queries / context-aware
-   escaping / safe deserializer / input validation). Apply the patch
-   to the working tree via `apply_diff`.
-4. **Verify the patch.** `verify_remediation`. The engine re-runs the
-   same PoC against the now-patched code; the exploit must no longer
-   trigger.
-   - If false: the patch doesn't actually fix the vulnerability.
-     Revise.
-5. **Approve.** `approve_security_finding` only when both
-   verifications passed. Then move to the next finding.
+The web panel has Risk, Findings, Coverage and Report tabs, finding sheets, run history and
+expanded report/diff views. Android shows findings, CVSS, coverage, observations and run
+sheets; decisions use the same engine gates. All security writes and command runs are blocked
+in plan mode; state and discovery reads remain available.
 
-### Phase 3 — Final report
-
-- `get_security_state` for the summary: total findings, severity
-  breakdown, approved vs refuted.
-- Surface every approved finding with a one-paragraph "exploit → fix"
-  narrative pointing at the persisted proof + patch artifacts under
-  `documentation/security_scan_<id>/`.
-- Findings that didn't pass PoC verification go in a "refuted
-  hypotheses" appendix — show the work.
-
-## Operating principles
-
-- **Real exploits only.** "Could potentially be vulnerable" is not a
-  finding. If you can't write a PoC that triggers, it's a code-quality
-  observation — file it separately.
-- **Read full files.** Don't reason about snippets.
-- **Reason about trust boundaries.** The same code is safe inside a
-  process and unsafe at the HTTP edge. Identify where untrusted input
-  enters and trace it through.
-- **Memory discipline.** `save_memory` durable findings about the
-  codebase ("this project uses parameterized queries consistently
-  except in `legacy/`"). Future scans benefit.
-- **Don't patch what you can't exploit.** Approved findings = verified
-  attacks + verified defenses. Anything else is noise.
-
-## Severity guidance
-
-| Severity | When |
-| --- | --- |
-| `critical` | Remote unauthenticated RCE; full credential exfiltration; auth bypass with privilege escalation. |
-| `high` | Authenticated RCE; data exfiltration; auth bypass without escalation; persistent XSS on auth surfaces. |
-| `medium` | Stored / reflected XSS without auth bypass; SSRF to internal services; CSRF on sensitive actions. |
-| `low` | Information disclosure with no direct exploit chain; weak crypto in non-secret contexts. |
-| `info` | Hardening recommendations that aren't exploitable as-is. |
-
-If you'd refute the PoC at this severity ("nobody can actually trigger
-this in production"), downgrade or refute.
-
-## Output artifacts
-
-Everything lives under `documentation/security_scan_<id>/`:
-
-- `report.json` — engine state (findings, proofs, patches, decisions).
-- `README.md` — human-readable index of the scan.
-- `findings/<id>.md` — per-finding write-up with the exploit narrative.
-- `proofs/<id>/` — directory holding the captured stdout/stderr from
-  each PoC run (one run per verification attempt).
-- `patches/<id>.diff` — the applied remediation.
-
-These are the deliverables. The conversation transcript is incidental;
-the directory is the audit.
+Existing prompt overrides remain user-owned. If an override still describes the old workflow,
+review it with the prompt settings before resetting it to the bundled security template.
+See [security_controls.md](security_controls.md) for always-on harness protections.

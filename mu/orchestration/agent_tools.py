@@ -50,6 +50,15 @@ def _cmd(context, ctype: str, **args) -> Dict[str, Any]:
     return dispatch(_orch(), {"type": ctype, "args": args}, actor=_actor(context)).data
 
 
+def _seen(orch, run) -> None:
+    """The agent read a finished run's outcome: the automatic continuation skips it."""
+    from .continuation import mark_seen
+    try:
+        mark_seen(orch.store, [run])
+    except Exception:  # noqa: BLE001 - reading results must never fail on bookkeeping
+        pass
+
+
 def _brief(tv) -> Dict[str, Any]:
     m = tv.manifest
     props = ((m.get("inputs") or {}).get("properties") or {})
@@ -298,6 +307,7 @@ def orch_run_status(args, context):
         run = orch.store.get_run(str(args["run_id"]))
         if run is None:
             raise ValueError("unknown run")
+        _seen(orch, run)
         detail = vm.run_detail(orch.store, run)
         grid = [{"node": row["name"], "progress": row["progress"], "failed": row["failed"],
                  "steps": [{"step": c["name"], "state": (c["exec"] or {}).get("state", "not started")} for c in row["cells"]]}
@@ -323,6 +333,7 @@ def orch_run_results(args, context):
         run = orch.store.get_run(str(args.get("run_id") or ""))
         if run is None:
             raise ValueError("unknown run")
+        _seen(orch, run)
         names = {n.id: n.name for n in orch.store.list_nodes()}
         execs = orch.store.list_executions(run_id=run.id, node_id=str(args.get("node_id") or "") or None)
         out = []

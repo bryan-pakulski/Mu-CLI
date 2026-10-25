@@ -123,3 +123,14 @@ it('off the chat, a needs-you banner opens the chat', async () => {
   act(() => usePromptStore.getState().setChatVisible(true));
   expect(ui.queryByTestId('needs-you-banner')).toBeNull();
 });
+
+it('PoC approvals remain on desktop even with auto-approve enabled', async () => {
+  useConnectionStore.setState({ yolo: true });
+  api.listPending.mockResolvedValue({ pending: [{ ...write, tool_name: 'verify_security_proof', approval_policy: 'always_human', requires_desktop: true }] });
+  const ui = wrap(<><PromptHost /><Chat /></>);
+  await waitFor(() => expect(ui.getByText('Review this PoC on desktop')).toBeTruthy());
+  expect(ui.queryByTestId('tool-approval-allow')).toBeNull();
+  expect(api.answer).not.toHaveBeenCalled();
+  await act(async () => { fireEvent.press(ui.getByText('Cancel')); });
+  expect(api.cancel).toHaveBeenCalledWith('p1');
+});

@@ -2122,6 +2122,7 @@ ${problem.text}`, "error", 14000);
                 // mode.load() refreshes the active mode's panel store
                 // via panelModes — no explicit teacher/feature call needed.
                 Alpine.store("mode").load();
+                Alpine.store("workPlan").load();
                 // Session-scoped safety state: approvals + plan mode.
                 Alpine.store("yolo").load();
                 Alpine.store("planMode").load();
@@ -2149,6 +2150,7 @@ ${problem.text}`, "error", 16000);
             Alpine.store("chat").focus(name);
             await Alpine.store("chat").loadHistory(name);
             await Alpine.store("mode").load();
+            Alpine.store("workPlan").load();
             Alpine.store("yolo").load();
             Alpine.store("planMode").load();
             // Refresh model selector for the newly-loaded session.
@@ -2676,8 +2678,9 @@ ${problem.text}`, "error", 16000);
             "/verbose":       { subs: ["on", "off", "toggle"] },
             "/show-thinking": { subs: ["on", "off", "toggle"] },
             "/goal":          { subs: ["set", "clear", "show", "help"] },
-            "/research":      { subs: ["status", "sources", "show", "bibliography",
-                                       "biblio", "bib", "stats", "topic", "topics", "clear"] },
+            "/research":      { subs: ["status", "questions", "claims", "gaps", "sources", "show",
+                                       "bibliography", "biblio", "bib", "stats", "topic", "topics",
+                                       "export", "clear", "new"] },
             "/memory":        { subs: ["status", "list", "clear"],
                                 nested: {
                                     list:  { dynamic: { "": "memory_targets" } },
@@ -2923,6 +2926,16 @@ ${problem.text}`, "error", 16000);
                 ? Alpine.store(this.active)
                 : null;
             if (store && typeof store.load === "function") store.load();
+            // The composer foot shows the real mode's one-word state (Mu §6.1).
+            const real = this.realMode !== this.active && this.panelModes.includes(this.realMode)
+                ? Alpine.store(this.realMode) : null;
+            if (real && typeof real.load === "function") real.load();
+        },
+        // " · reproduced" / " · t3 of 9" / " · paused" for the composer foot.
+        footWord() {
+            const store = this.panelModes.includes(this.realMode) ? Alpine.store(this.realMode) : null;
+            const word = store && typeof store.footWord === "function" && store.loaded ? store.footWord() : "";
+            return word ? ` · ${word}` : "";
         },
         defaultView() {
             const layout = Alpine.store("layout");
@@ -3329,6 +3342,7 @@ ${problem.text}`, "error", 16000);
             if (!currentName) return;
             const pending = prompts.queue.filter(item => {
                 if (!item.prompt || item.prompt.shape !== "tool_approval") return false;
+                if (item.prompt.approval_policy === "always_human" || item.prompt.requires_desktop) return false;
                 return item.session_name === currentName;
             });
             for (const item of pending) {
@@ -3619,658 +3633,172 @@ ${problem.text}`, "error", 16000);
         },
     });
 
-    Alpine.store("teacher", {
-        // Active course payload from /api/teacher/state. Loaded on demand
-        // when the user is in teacher mode AND a session is active.
-        course: null,
-        courses: [],
-        active: false,
-        loaded: false,
-        coursePath: null,    // debugging breadcrumb: where the data was read
-        workspace: null,
-        openSections: {
-            profile: true,
-            curriculum: true,
-            current: true,
-            assignments: true,
-            reviews: false,
-        },
-
-        async load() {
-            try {
-                const r = await fetch("/api/teacher/state");
-                const d = await r.json();
-                this.active = !!d.active;
-                this.course = d.course || null;
-                this.courses = d.courses || [];
-                this.coursePath = d.course_path || null;
-                this.workspace = d.workspace || null;
-                this.loaded = true;
-                if (window.__mucliTeacherDebug) {
-                    console.log("teacher.load", {
-                        active_course_id: d.active_course_id,
-                        raw_teacher_state_present: d.raw_teacher_state_present,
-                        registry_size: d.registry_size,
-                        course_path: d.course_path,
-                        course: d.course,
-                        courses: d.courses,
-                    });
-                }
-            } catch (e) {
-                console.error("teacher.load", e);
-            }
-        },
-        toggleSection(name) {
-            this.openSections[name] = !this.openSections[name];
-        },
-
-        // ---- view helpers ----
-        statusGlyph(status) {
-            switch ((status || "").toLowerCase()) {
-                case "completed":     return "✓";
-                case "graded":        return "✓";
-                case "lecturing":
-                case "presenting":
-                case "assigned":      return "◐";
-                case "remediating":   return "⚠";
-                case "pending":       return "○";
-                default:              return "·";
-            }
-        },
-        // Diagnostic: flip this in the browser console to log every
-        // teacher state refresh: `window.__mucliTeacherDebug = true`.
-        currentLesson() {
-            if (!this.course || !this.course.current_lesson_id) return null;
-            return (this.course.lessons || []).find(
-                l => l.lesson_id === this.course.current_lesson_id
-            ) || null;
-        },
-        currentModule() {
-            if (!this.course || !this.course.current_module_id) return null;
-            return (this.course.modules || []).find(
-                m => m.module_id === this.course.current_module_id
-            ) || null;
-        },
-        gradedAssignments() {
-            if (!this.course) return [];
-            return (this.course.assignments || []).filter(a => a.grade);
-        },
-        allAssignments() {
-            if (!this.course) return [];
-            return (this.course.assignments || []).filter(a =>
-                Alpine.store("modeWorkspace").matches(
-                    a.assignment_id, a.kind, a.status, a.prompt, a.rubric,
-                    a.grade && a.grade.feedback
-                )
-            );
-        },
-        scheduledReviews() {
-            if (!this.course) return [];
-            return (this.course.scheduled_reviews || []).filter(r =>
-                Alpine.store("modeWorkspace").matches(
-                    r.source_lesson_id, r.source_lesson_title, r.status, r.notes
-                )
-            );
-        },
-        filteredModules() {
-            if (!this.course) return [];
-            const ws = Alpine.store("modeWorkspace");
-            return (this.course.modules || []).map(module => {
-                if (ws.matches(module.title, module.goal, module.module_id)) return module;
-                const lessons = (module.lessons || []).filter(lesson => ws.matches(
-                    lesson.title, lesson.lesson_id, lesson.concept_brief,
-                    lesson.learning_objectives, lesson.lecture_gaps
-                ));
-                return { ...module, lessons };
-            }).filter(module => module.lessons.length || ws.matches(
-                module.title, module.goal, module.module_id
-            ));
-        },
-        // Map learner_profile keys → which fields are array-of-tags
-        // versus solo-text. Surfacing both shapes in one helper keeps
-        // the template lean.
-        profileTagFields() {
-            return ["strengths", "gaps", "goals", "modality",
-                    "background", "anchors", "stumbling_blocks"];
-        },
-        profileTextFields() {
-            return ["pace", "jargon_tolerance", "motivation",
-                    "personality", "notes"];
-        },
-        // Per-module completion: how many lessons inside this module
-        // have status==='completed'? Used for the curriculum progress bar.
-        moduleProgress(m) {
-            if (!m || !m.lessons || !m.lessons.length) {
-                return { done: 0, total: 0, pct: 0 };
-            }
-            const done = m.lessons.filter(l => (l.status || "") === "completed").length;
-            const total = m.lessons.length;
-            return { done, total, pct: total ? Math.round((done * 100) / total) : 0 };
-        },
-        // ISO-ish timestamp from a unix float. Used for learner-profile
-        // recorded_at + course updated_at.
-        formatTimestamp(unix) {
-            if (!unix || typeof unix !== "number") return "";
-            try {
-                return new Date(unix * 1000).toLocaleString();
-            } catch (e) {
-                return "";
-            }
-        },
-        async switchCourse(courseId) {
-            // Sends a /teach load <id> via chat so the agent's command
-            // dispatch handles it (keeping registry/state in sync).
-            if (!courseId) return;
-            await Alpine.store("chat").send(`/teach load ${courseId}`);
-        },
-    });
-
-    Alpine.store("feature", {
-        // Active feature plan summary from /api/feature/state. Same load
-        // triggers as the teacher store: page boot, mode flip, turn_complete
-        // SSE, session_updated SSE.
-        plan: null,
-        features: [],
-        active: false,
-        loaded: false,
-        metadataPath: null,
-        workspace: null,
-        openSections: {
-            events: false,
-            reviews: false,
-        },
-        // Per-phase collapse state. Defaults open for the in-progress
-        // phase, closed otherwise; the load() hook sets initial values.
-        openPhases: {},
-        // The task whose drill-down is currently expanded (one at a time).
-        expandedTaskId: null,
-        // Drag-and-drop transfer state.
-        dragTaskId: null,
-        // Search/filter query for the feature list.
-        searchQuery: '',
-        showFeatureBrowser: false,
-        previewMode: false,
-        previewArchived: false,
-        previewingFeatureId: null,
-        planIdentity: null,
-        sessionName: null,
-        loadRevision: 0,
-        navigationRevision: 0,
-
-        _currentSessionName() {
-            const chat = Alpine.store("chat");
-            return String((chat && chat.currentName) || "");
-        },
-        _applyPlan(plan, { preview = false, archived = false } = {}) {
-            const nextIdentity = String((plan && plan.feature_id) || "");
-            if (nextIdentity !== this.planIdentity) {
-                // Phase/task ids start at one for most feature plans. Reset
-                // view-local expansion state when the plan changes so Alpine
-                // cannot carry a similarly-numbered task from another feature
-                // into the newly-rendered detail view.
-                this.openPhases = {};
-                this.expandedTaskId = null;
-                this.dragTaskId = null;
-                this.planIdentity = nextIdentity || null;
-            }
-            this.plan = plan || null;
-            this.previewMode = !!preview;
-            this.previewArchived = !!(preview && archived);
-
-            const phases = (this.plan && this.plan.phase_columns) || [];
-            phases.forEach((phase, index) => {
-                const key = String(phase.id);
-                if (this.openPhases[key] !== undefined) return;
-                const status = (phase.status || "").toLowerCase();
-                this.openPhases[key] = status === "in_progress"
-                    || status === "blocked"
-                    || (!!preview && index === 0);
-            });
-        },
-        async load({ forcePlan = false, resetView = false } = {}) {
-            const currentSession = this._currentSessionName();
-            const sessionChanged = this.sessionName !== null
-                && this.sessionName !== currentSession;
-            if (sessionChanged || resetView) {
-                this.navigationRevision += 1;
-                this.showFeatureBrowser = false;
-                this.previewMode = false;
-                this.previewArchived = false;
-                this.previewingFeatureId = null;
-                this._applyPlan(null);
-            }
-            this.sessionName = currentSession;
-            if (forcePlan) {
-                this.navigationRevision += 1;
-                this.previewMode = false;
-                this.previewArchived = false;
-                this.previewingFeatureId = null;
-            }
-
-            const loadId = ++this.loadRevision;
-            const navigationAtStart = this.navigationRevision;
-            try {
-                const r = await fetch("/api/feature/state");
-                const d = await r.json();
-                if (loadId !== this.loadRevision) return;
-                this.active = !!d.active;
-                this.features = d.features || [];
-                const navigationIsStable = navigationAtStart === this.navigationRevision;
-                if (forcePlan || (
-                    navigationIsStable
-                    && !this.previewMode
-                    && !this.previewingFeatureId
-                )) {
-                    this.metadataPath = d.metadata_path || null;
-                    this.workspace = d.workspace || null;
-                    this._applyPlan(d.plan || null);
-                }
-                this.loaded = true;
-            } catch (e) {
-                console.error("feature.load", e);
-            }
-        },
-        toggleSection(name) {
-            this.openSections[name] = !this.openSections[name];
-        },
-        togglePhase(id) {
-            const key = String(id);
-            this.openPhases[key] = !this.openPhases[key];
-        },
-        isPhaseOpen(id) {
-            return !!this.openPhases[String(id)];
-        },
-        toggleTask(id) {
-            this.expandedTaskId = this.expandedTaskId === id ? null : id;
-        },
-        isTaskExpanded(id) {
-            return this.expandedTaskId === id;
-        },
-        isBrowserView() {
-            return this.showFeatureBrowser || !this.plan;
-        },
-        isDetailView() {
-            return !!this.plan && !this.showFeatureBrowser;
-        },
-        activePlanAvailable() {
-            if (!this.plan || this.previewMode) return false;
-            const id = String(this.plan.feature_id || "");
-            return (this.features || []).some(feature =>
-                String(feature.feature_id || "") === id && feature.is_active
-            );
-        },
-        planRenderKey() {
-            return String((this.plan && this.plan.feature_id) || "feature");
-        },
-        phaseRenderKey(phase) {
-            return `${this.planRenderKey()}:phase:${phase && phase.id}`;
-        },
-        taskRenderKey(phase, task) {
-            return `${this.phaseRenderKey(phase)}:task:${task && task.id}`;
-        },
-
-        // ---- view helpers ----
-        statusGlyph(status) {
-            switch ((status || "").toLowerCase()) {
-                case "completed":   return "✓";
-                case "in_progress": return "◐";
-                case "blocked":     return "⚠";
-                case "archived":    return "✕";
-                case "pending":
-                case "not_started": return "○";
-                default:            return "·";
-            }
-        },
-        formatTimestamp(unix) {
-            if (!unix || typeof unix !== "number") return "";
-            try { return new Date(unix * 1000).toLocaleString(); }
-            catch (e) { return ""; }
-        },
-        // The agent's "current" task is the in_progress one (if any), else
-        // the next actionable. summarize_feature_plan ships this as
-        // `execution.next_task`; surface both via one accessor.
-        currentTask() {
-            if (!this.plan) return null;
-            const exec = this.plan.execution || {};
-            if (exec.next_task) return exec.next_task;
-            const active = this.plan.active_tasks || [];
-            return active.length ? active[0] : null;
-        },
-        phaseColumns() {
-            const phases = (this.plan && this.plan.phase_columns) || [];
-            const ws = Alpine.store("modeWorkspace");
-            return phases.map(phase => {
-                if (ws.matches(phase.title, phase.goal, phase.status)) return phase;
-                const tasks = (phase.tasks || []).filter(task => ws.matches(
-                    task.title, task.status, task.objectives, task.action_points,
-                    task.exit_criteria, task.blocked_reason, task.notes
-                ));
-                return { ...phase, tasks };
-            }).filter(phase => phase.tasks.length || ws.matches(
-                phase.title, phase.goal, phase.status
-            ));
-        },
-        progressPct() {
-            if (!this.plan || !this.plan.task_count) return 0;
-            return Math.round(
-                (this.tasksCompletedCount() /
-                    (this.plan.task_count || 1)) * 100
-            );
-        },
-        // The backend's summary uses `tasks_completed` as a bool; derive
-        // the count from the task list so the progress bar makes sense.
-        tasksCompletedCount() {
-            if (!this.plan) return 0;
-            return (this.plan.phases || []).filter(
-                t => (t.status || "").toLowerCase() === "completed"
-            ).length;
-        },
-        recentEvents(limit = 5) {
-            if (!this.plan || !this.plan.event_log) return [];
-            return this.plan.event_log.slice().reverse().filter(ev =>
-                Alpine.store("modeWorkspace").matches(
-                    ev.kind, ev.entity, ev.entity_id, ev.actor, ev.payload
-                )
-            ).slice(0, limit);
-        },
-        reviews() {
-            if (!this.plan) return [];
-            return (this.plan.review_records || []).filter(review =>
-                Alpine.store("modeWorkspace").matches(
-                    review.task_id, review.summary, review.limitations, review.issues
-                )
-            );
-        },
-        // ---- mutating actions ----
-        async transitionTask(taskId, toStatus) {
-            if (!taskId || !toStatus) return;
-            try {
-                const r = await fetch(
-                    `/api/feature/tasks/${taskId}/transition`,
-                    {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ to_status: toStatus }),
-                    }
-                );
-                if (!r.ok) {
-                    const data = await r.json().catch(() => ({}));
-                    Alpine.store("chat").addInfo(
-                        `feature: cannot move task #${taskId} to ${toStatus} — ${data.detail || r.status}`
-                    );
-                }
-            } catch (e) {
-                console.error("feature.transitionTask", e);
-            } finally {
-                await this.load();
-            }
-        },
-        async toggleExitCriterion(taskId, idx) {
-            if (!taskId && taskId !== 0) return;
-            try {
-                const r = await fetch(
-                    `/api/feature/tasks/${taskId}/exit-criteria/${idx}/toggle`,
-                    { method: "POST" }
-                );
-                if (!r.ok) {
-                    const data = await r.json().catch(() => ({}));
-                    console.warn("toggleExitCriterion", r.status, data.detail);
-                }
-            } catch (e) {
-                console.error("feature.toggleExitCriterion", e);
-            } finally {
-                await this.load();
-            }
-        },
-        isVerified(task, criterion) {
-            return (task.verified_exit_criteria || []).includes(criterion);
-        },
-        showArchived: false,
-        filteredFeatures() {
-            const q = (this.searchQuery || '').toLowerCase().trim();
-            const all = this.features || [];
-            const visible = all.filter(f => this.showArchived ? f.archived : !f.archived);
-            if (!q) return visible;
-            return visible.filter(f =>
-                (f.feature_id || '').toLowerCase().includes(q) ||
-                (f.feature_name || '').toLowerCase().includes(q) ||
-                (f.status || '').toLowerCase().includes(q)
-            );
-        },
-        archivedCount() {
-            return (this.features || []).filter(f => f.archived).length;
-        },
-        currentCount() {
-            return (this.features || []).filter(f => !f.archived).length;
-        },
-        openFeatureBrowser() {
-            this.navigationRevision += 1;
-            this.previewingFeatureId = null;
-            this.showFeatureBrowser = true;
-        },
-        closeFeatureBrowser() {
-            if (this.activePlanAvailable()) this.showFeatureBrowser = false;
-        },
-        async _action(featureId, path, method, verb) {
-            if (!featureId) return false;
-            try {
-                const r = await fetch(`/api/feature/${encodeURIComponent(featureId)}${path}`, { method });
-                if (!r.ok) {
-                    const data = await r.json().catch(() => ({}));
-                    Alpine.store("toast").show(data.detail || `${verb} failed (${r.status})`, "error");
-                    return false;
-                }
-                Alpine.store("toast").show(`Feature '${featureId}': ${verb.toLowerCase()} complete`, "success");
-                await this.load({ forcePlan: true });
-                return true;
-            } catch (e) {
-                console.error(`feature.${verb}`, e);
-                Alpine.store("toast").show(`${verb} failed — network error`, "error");
-                return false;
-            }
-        },
-        async deleteFeature(id)    { return this._action(id, "",           "DELETE", "Delete");    },
-        async unloadFeature(id)    { return this._action(id, "/unload",    "POST",   "Unload");    },
-        async loadFeature(id)      {
-            if (!id) return;
-            // If a loop session is active, warn the user before switching features
-            if (Alpine.store('loop').loopActive) {
-                let confirmed = false;
-                await new Promise(resolve => {
-                    Alpine.store('confirm').ask(
-                        'A session is running. Switching features will pause it. Continue?',
-                        null,
-                        () => { confirmed = true; resolve(); },
-                        { danger: true }
-                    );
-                    // Fallback: if confirm popover is dismissed without action (cancel),
-                    // resolve immediately so we don't hang.
-                    const watch = setInterval(() => {
-                        if (!Alpine.store('confirm').open) {
-                            clearInterval(watch);
-                            resolve();
-                        }
-                    }, 150);
-                });
-                if (!confirmed) return;
-            }
-            return this._action(id, "/load", "POST", "Load");
-        },
-        async archiveFeature(id)   { return this._action(id, "/archive",   "POST",   "Archive");   },
-        async unarchiveFeature(id) { return this._action(id, "/unarchive", "POST",   "Unarchive"); },
-        async approveFeature(id)   { return this._action(id, "/approve",   "POST",   "Approve");   },
-        async switchFeature(featureId) {
-            if (!featureId) return;
-            const loaded = await this.loadFeature(featureId);
-            if (loaded) this.showFeatureBrowser = false;
-        },
-        async previewFeature(id) {
-            if (!id) return;
-            const navigationId = ++this.navigationRevision;
-            this.previewingFeatureId = id;
-            try {
-                const r = await fetch(`/api/feature/${encodeURIComponent(id)}/preview`);
-                if (!r.ok) {
-                    const data = await r.json().catch(() => ({}));
-                    Alpine.store("toast").show(data.detail || `Preview failed (${r.status})`, "error");
-                    return;
-                }
-                const d = await r.json();
-                if (navigationId !== this.navigationRevision) return;
-                this.active = !!d.active;
-                this.features = d.features || this.features;
-                this.metadataPath = d.metadata_path || null;
-                this.workspace = d.workspace || this.workspace;
-                const item = (this.features || []).find(feature =>
-                    String(feature.feature_id || "") === String(id)
-                );
-                this._applyPlan(d.plan || null, {
-                    preview: true,
-                    archived: !!(item && item.archived),
-                });
-                // A preview is a peer view, not another layer beneath the
-                // feature browser. Closing the browser here guarantees that
-                // only one Mode OS surface is mounted at a time.
-                this.showFeatureBrowser = false;
-            } catch (e) {
-                console.error("feature.previewFeature", e);
-                Alpine.store("toast").show("Preview failed — network error", "error");
-            } finally {
-                if (navigationId === this.navigationRevision) {
-                    this.previewingFeatureId = null;
-                }
-            }
-        },
-        async exitPreview() {
-            this.navigationRevision += 1;
-            this.previewMode = false;
-            this.previewArchived = false;
-            this.previewingFeatureId = null;
-            this.showFeatureBrowser = true;
-            await this.load({ forcePlan: true });
-        },
-
-        showCreateModal: false,
-        createForm: { name: '', request: '', directory: '', phases: [] },
-        openCreateModal() {
-            this.showCreateModal = true;
-            this.createForm = { name: '', request: '', directory: '', phases: [] };
-        },
-        closeCreateModal() {
-            this.showCreateModal = false;
-            this.createForm = { name: '', request: '', directory: '', phases: [] };
-        },
-        addPhase() {
-            if (!this.createForm) return;
-            this.createForm.phases.push({ title: '', goal: '', tasks: [] });
-        },
-        removePhase(idx) {
-            if (!this.createForm) return;
-            this.createForm.phases.splice(idx, 1);
-        },
-        addTask(phaseIdx) {
-            if (!this.createForm) return;
-            this.createForm.phases[phaseIdx].tasks.push({
-                title: '', objectives: [''], exit_criteria: [''],
-            });
-        },
-        removeTask(phaseIdx, taskIdx) {
-            if (!this.createForm) return;
-            this.createForm.phases[phaseIdx].tasks.splice(taskIdx, 1);
-        },
-        addListItem(phaseIdx, taskIdx, field) {
-            if (!this.createForm) return;
-            this.createForm.phases[phaseIdx].tasks[taskIdx][field].push('');
-        },
-        removeListItem(phaseIdx, taskIdx, field, itemIdx) {
-            if (!this.createForm) return;
-            this.createForm.phases[phaseIdx].tasks[taskIdx][field].splice(itemIdx, 1);
-        },
-        async submitCreateFeature() {
-            const form = this.createForm;
-            if (!form || !(form.name || '').trim()) {
-                Alpine.store('toast').show('Feature name is required', 'error');
-                return;
-            }
-            const payload = {
-                feature_name: form.name.trim(),
-                feature_request: (form.request || '').trim(),
-                directory: (form.directory || '').trim(),
-                phases: (form.phases || []).filter(p => (p.title || '').trim()).map(p => ({
-                    title: p.title.trim(),
-                    goal: (p.goal || '').trim(),
-                    tasks: (p.tasks || []).filter(t => (t.title || '').trim()).map(t => ({
-                        title: t.title.trim(),
-                        objectives: (t.objectives || []).map(o => o.trim()).filter(Boolean),
-                        exit_criteria: (t.exit_criteria || []).map(c => c.trim()).filter(Boolean),
-                    })),
-                })),
-            };
-            try {
-                const r = await fetch('/api/feature/create', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                });
-                if (!r.ok) {
-                    const d = await r.json().catch(() => ({}));
-                    Alpine.store('toast').show(d.detail || `Create failed (${r.status})`, 'error');
-                    return;
-                }
-                const d = await r.json();
-                Alpine.store('toast').show(`Feature '${d.feature_id}' created`, 'success');
-                this.closeCreateModal();
-                await this.load();
-            } catch (e) {
-                Alpine.store('toast').show('Create failed — network error', 'error');
-            }
-        },
-    });
-
+    // Research ledger panel (fragments/research_panel.html): questions → claims → quoted
+    // evidence → sources, from GET /api/research/state. Pure helpers live in
+    // research_ledger.js (window.MuResearch).
     Alpine.store("research", {
+        questions: [],
+        claims: [],
         sources: [],
+        candidates: [],
         sourceCount: 0,
+        candidateCount: 0,
         bibliography: "",
-        currentTopic: "general",
-        topics: [],
-        topicFilter: "",
-        findings: [],
-        findingCount: 0,
+        currentQuestion: null,
+        coverage: null,
         active: false,
         loaded: false,
         workspace: null,
+        // The question whose claims are listed (null = the current one, else all).
+        selectedQuestion: null,
+        // Sources tab filter: "" = read and cited, or one state.
+        sourceState: "",
         openSections: {
+            questions: true,
+            claims: true,
+            matrix: false,
             sources: true,
             bibliography: false,
-            findings: true,
         },
-        // Client-side filter: selected source types (empty = show all).
         typeFilter: [],
-        // Client-side credibility threshold slider (0 = no filter).
-        credibilityMin: 0,
-        // Which source row is expanded for detail.
         expandedSourceId: null,
+        // The shared shell (mode_shell.html): title, sentence, tabs, Now.
+        title: "Research",
+        tab: "Questions",
+        blockers: [],
+        _shellState() {
+            return { questions: this.questions, claims: this.claims, coverage: this.coverage,
+                     source_count: this.sourceCount, blockers: this.blockers };
+        },
+        tabs() { return window.MuModeModels.research.tabs; },
+        setTab(tab) { this.tab = tab; },
+        sentence() { return window.MuModes.sentence(window.MuModeModels.research.sentence(this._shellState())); },
+        sentenceHtml() { return window.MuModes.sentenceHtml(window.MuModeModels.research.sentence(this._shellState())); },
+        now() { return window.MuModeModels.research.now(this._shellState()); },
+        primary() { return null; },
+        footWord() { return window.MuModeModels.research.footWord(this._shellState()); },
+        async act(row, action) {
+            if (action.id !== "resolve") return;
+            const answer = await Alpine.store("modeAsk").ask({ title: "Answer the blocker",
+                label: "Your answer — the agent sees it on its next turn", confirm: "Answer" });
+            if (answer === null) return;
+            const r = await fetch(`/api/mode-state/blockers/${encodeURIComponent(row.ref)}/resolve`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ resolution: answer }) });
+            if (r.ok) await this.load();
+        },
+        runPrimary() {},
+        openSource(source, event) {
+            if (!window.WashSheet || !source) return;
+            const st = this.vstyle("research_source_state", source.state);
+            window.WashSheet.open({
+                title: source.title,
+                state: window.MuModes.sentenceHtml([st.label, source.origin || ""]),
+                body: window.MuModeModels.research.sourceSheet(source, this.claims),
+                param: { key: "open", value: source.id ? `s${source.id}` : source.source_id },
+                from: event && event.currentTarget,
+            });
+        },
+        async openCitation(n, event) {
+            if (!this.loaded) await this.load();
+            const src = this.sources.find(s => String(s.id) === String(n));
+            if (src) this.openSource(src, event);
+        },
+        async openReport() {
+            const r = await fetch("/api/research/report");
+            const d = r.ok ? await r.json() : { markdown: "" };
+            Alpine.store("modeExpand").open("research", "report", { title: "Report", markdown: d.markdown || "" });
+        },
+        citationPreview(n) {
+            for (const c of this.claims) {
+                const ev = (c.evidence || []).find(e => String(e.citation_id) === String(n));
+                if (ev) return ev.excerpt;
+            }
+            const src = this.sources.find(s => String(s.id) === String(n));
+            return src ? src.title : "";
+        },
 
         async load() {
             try {
                 const r = await fetch("/api/research/state");
                 const d = await r.json();
                 this.active = !!d.active;
+                this.questions = d.questions || [];
+                this.claims = d.claims || [];
                 this.sources = d.sources || [];
+                this.candidates = d.candidates || [];
                 this.sourceCount = d.source_count || 0;
+                this.candidateCount = d.candidate_count || 0;
                 this.bibliography = d.bibliography || "";
-                this.currentTopic = d.current_topic || "general";
-                this.topics = d.topics || [];
-                this.findings = d.findings || [];
-                this.findingCount = d.finding_count || 0;
+                this.currentQuestion = d.current_question || null;
+                this.coverage = d.coverage || null;
                 this.workspace = d.workspace || null;
+                this.blockers = d.blockers || [];
+                if (this.selectedQuestion && !this.questions.some(q => q.id === this.selectedQuestion)) {
+                    this.selectedQuestion = null;
+                }
                 this.loaded = true;
             } catch (e) {
                 console.error("research.load", e);
             }
         },
+        isEmpty() {
+            return !this.questions.length && !this.sourceCount && !this.candidateCount;
+        },
         toggleSection(name) {
             this.openSections[name] = !this.openSections[name];
+        },
+        vstyle(table, key) {
+            return window.MuResearch.vstyle(table, key);
+        },
+        questionRows() {
+            const ws = Alpine.store("modeWorkspace");
+            return window.MuResearch.tree(this.questions).filter(q => ws.matches(q.text, q.id, q.status));
+        },
+        focusQuestion() {
+            return this.selectedQuestion || this.currentQuestion || null;
+        },
+        selectQuestion(id) {
+            this.selectedQuestion = this.selectedQuestion === id ? null : id;
+        },
+        questionText(id) {
+            const q = this.questions.find(item => item.id === id);
+            return q ? q.text : "";
+        },
+        claimsHeading() {
+            const id = this.focusQuestion();
+            return id ? this.questionText(id) : "All claims";
+        },
+        visibleClaims() {
+            const ws = Alpine.store("modeWorkspace");
+            return window.MuResearch.claimsFor(this.claims, this.focusQuestion())
+                .filter(c => ws.matches(c.text, c.question_id, c.confidence, c.kind));
+        },
+        claimSources(claim) {
+            return (claim.evidence || []).map(e => `[^${e.citation_id}]` + (e.stance === "contradicts" ? "✗" : "")).join(" ");
+        },
+        sourcesById() {
+            return Object.fromEntries(this.sources.map(s => [s.id, s]));
+        },
+        openClaim(claim, event) {
+            if (!window.WashSheet) return;
+            const conf = this.vstyle("research_confidence", claim.confidence);
+            window.WashSheet.open({
+                title: claim.text,
+                state: `<span class="w-state__part">${window.MuResearch.esc(conf.label)}</span>` +
+                    (claim.contested ? `<span class="w-state__part" data-tone="attention">contested</span>` : ""),
+                body: window.MuResearch.claimSheet(claim, this.sourcesById()),
+                from: event && event.currentTarget,
+            });
+        },
+        matrix() {
+            return window.MuResearch.matrix(window.MuResearch.claimsFor(this.claims, this.focusQuestion()), this.sources);
+        },
+        stanceGlyphs(cell) {
+            return (cell || []).map(stance => this.vstyle("research_stance", stance).glyph).join("");
+        },
+        stanceWords(cell) {
+            return (cell || []).map(stance => this.vstyle("research_stance", stance).label).join(", ");
         },
         toggleType(type) {
             const i = this.typeFilter.indexOf(type);
@@ -4286,24 +3814,25 @@ ${problem.text}`, "error", 16000);
         isSourceExpanded(id) {
             return this.expandedSourceId === id;
         },
+        stateSources() {
+            if (this.sourceState === "candidate") return this.candidates;
+            if (this.sourceState) return this.sources.filter(s => s.state === this.sourceState);
+            return this.sources;
+        },
         filteredSources() {
-            return this.sources.filter(s => {
-                if (this.topicFilter && !(s.topic || "general").toLowerCase().includes(this.topicFilter.toLowerCase())) return false;
+            return this.stateSources().filter(s => {
                 if (this.typeFilter.length && !this.typeFilter.includes(s.source_type)) return false;
-                if (this.credibilityMin > 0 && (s.credibility_score || 0) < this.credibilityMin) return false;
                 if (!Alpine.store("modeWorkspace").matches(
-                    s.title, s.url, s.source_type, s.authors, Object.keys(s.metadata || {})
+                    s.title, s.url, s.source_type, s.origin, s.authors, s.topic
                 )) return false;
                 return true;
             });
         },
-        // Sources grouped by topic for the grouped-sources view.
-        // Returns [{ topic, sources }] in first-seen order.
+        // Sources grouped by question (or legacy topic), in first-seen order.
         groupedSources() {
-            const filtered = this.filteredSources();
             const order = [];
             const buckets = {};
-            for (const s of filtered) {
+            for (const s of this.filteredSources()) {
                 const t = s.topic || "general";
                 if (!(t in buckets)) {
                     buckets[t] = [];
@@ -4313,25 +3842,19 @@ ${problem.text}`, "error", 16000);
             }
             return order.map(t => ({ topic: t, sources: buckets[t] }));
         },
-        sourceCountForTopic(topic) {
-            return this.sources.filter(s => (s.topic || "general") === topic).length;
-        },
-        filteredFindings() {
-            return this.findings.filter(f => Alpine.store("modeWorkspace").matches(
-                f.content, f.tags, f.source
-            ));
+        sourceKey(s) {
+            return s.id ? `[^${s.id}]` : s.source_id;
         },
         sourceTypes() {
-            const types = new Set(this.sources.map(s => s.source_type));
-            return [...types].sort();
+            return [...new Set(this.stateSources().map(s => s.source_type))].sort();
+        },
+        stateCount(state) {
+            const counts = (this.coverage && this.coverage.sources) || {};
+            if (!state) return this.sourceCount;
+            return counts[state] || 0;
         },
         credibilityPct(score) {
             return Math.round((score || 0) * 100);
-        },
-        formatTimestamp(unix) {
-            if (!unix || typeof unix !== "number") return "";
-            try { return new Date(unix * 1000).toLocaleString(); }
-            catch (e) { return ""; }
         },
         async copyBibliography() {
             try {
@@ -4339,290 +3862,6 @@ ${problem.text}`, "error", 16000);
             } catch (e) {
                 console.warn("clipboard write failed", e);
             }
-        },
-    });
-
-    Alpine.store("security", {
-        report: null,
-        findings: [],
-        summary: null,
-        active: false,
-        loaded: false,
-        workspace: null,
-        openSections: {
-            findings: true,
-            stats: false,
-        },
-        severityFilter: [],
-        expandedFindingId: null,
-
-        async load() {
-            try {
-                const r = await fetch("/api/security/state");
-                const d = await r.json();
-                this.active = !!d.active;
-                this.report = d.report || null;
-                this.findings = d.findings || [];
-                this.summary = d.summary || null;
-                this.workspace = d.workspace || null;
-                this.loaded = true;
-            } catch (e) {
-                console.error("security.load", e);
-            }
-        },
-        toggleSection(name) {
-            this.openSections[name] = !this.openSections[name];
-        },
-        toggleSeverity(sev) {
-            const i = this.severityFilter.indexOf(sev);
-            if (i >= 0) this.severityFilter.splice(i, 1);
-            else this.severityFilter.push(sev);
-        },
-        isSeverityActive(sev) {
-            return this.severityFilter.length === 0 || this.severityFilter.includes(sev);
-        },
-        toggleFinding(id) {
-            this.expandedFindingId = this.expandedFindingId === id ? null : id;
-        },
-        isFindingExpanded(id) {
-            return this.expandedFindingId === id;
-        },
-        filteredFindings() {
-            return this.findings.filter(f => {
-                if (this.severityFilter.length && !this.severityFilter.includes(f.severity)) return false;
-                return Alpine.store("modeWorkspace").matches(
-                    f.title, f.summary, f.vulnerability_class, f.affected_paths,
-                    f.exploit_path, f.references, f.status
-                );
-            });
-        },
-        severities() {
-            const s = new Set(this.findings.map(f => f.severity));
-            const order = ["critical", "high", "medium", "low", "info"];
-            return order.filter(sev => s.has(sev));
-        },
-        statusGlyph(status) {
-            switch ((status || "").toLowerCase()) {
-                case "approved":              return "✓";
-                case "exploit_verified":
-                case "remediation_verified":  return "◐";
-                case "refuted":               return "✕";
-                case "proof_attached":
-                case "remediation_attached":  return "◔";
-                case "new":                   return "○";
-                default:                      return "·";
-            }
-        },
-        severityColor(sev) {
-            switch ((sev || "").toLowerCase()) {
-                case "critical": return "var(--wash-danger-ink)";
-                case "high":     return "color-mix(in srgb, var(--wash-danger-ink) 60%, var(--wash-attention-ink))";
-                case "medium":   return "var(--wash-attention-ink)";
-                case "low":      return "var(--wash-ok-ink)";
-                case "info":     return "var(--wash-ink-3)";
-                default:         return "var(--wash-ink-3)";
-            }
-        },
-        formatTimestamp(unix) {
-            if (!unix || typeof unix !== "number") return "";
-            try { return new Date(unix * 1000).toLocaleString(); }
-            catch (e) { return ""; }
-        },
-        async approveFinding(findingId) {
-            try {
-                const r = await fetch(
-                    `/api/security/findings/${findingId}/approve`,
-                    { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
-                );
-                if (!r.ok) {
-                    const d = await r.json().catch(() => ({}));
-                    Alpine.store("chat").addInfo(`security: cannot approve ${findingId} — ${d.detail || r.status}`);
-                }
-            } catch (e) {
-                console.error("security.approve", e);
-            } finally {
-                await this.load();
-            }
-        },
-        async refuteFinding(findingId, reason) {
-            try {
-                const r = await fetch(
-                    `/api/security/findings/${findingId}/refute`,
-                    {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ reason: reason || "" }),
-                    }
-                );
-                if (!r.ok) {
-                    const d = await r.json().catch(() => ({}));
-                    Alpine.store("chat").addInfo(`security: cannot refute ${findingId} — ${d.detail || r.status}`);
-                }
-            } catch (e) {
-                console.error("security.refute", e);
-            } finally {
-                await this.load();
-            }
-        },
-    });
-
-    Alpine.store("loop", {
-        loopGoal: "",
-        loopActive: false,
-        loopFeatures: [],
-        backlog: [],
-        memory: [],
-        active: false,
-        loaded: false,
-        workspace: null,
-        openSections: { backlog: true, features: false, memory: false },
-
-        async load() {
-            try {
-                const r = await fetch("/api/loop/state");
-                const d = await r.json();
-                this.active = !!d.active;
-                this.loopGoal = d.loop_goal || "";
-                this.loopActive = !!d.loop_active;
-                this.loopFeatures = d.loop_features || [];
-                this.backlog = d.backlog || [];
-                this.memory = d.memory || [];
-                this.workspace = d.workspace || null;
-                this.loaded = true;
-            } catch (e) { console.error("loop.load", e); }
-        },
-        toggleSection(name) { this.openSections[name] = !this.openSections[name]; },
-        statusGlyph(status) {
-            switch ((status || "").toLowerCase()) {
-                case "completed": return "✓";
-                case "in_progress": return "◐";
-                case "blocked": return "⚠";
-                default: return "○";
-            }
-        },
-        formatTimestamp(unix) {
-            if (!unix || typeof unix !== "number") return "";
-            try { return new Date(unix * 1000).toLocaleString(); }
-            catch (e) { return ""; }
-        },
-
-        expandedItemId: null,
-        toggleItem(id) { this.expandedItemId = this.expandedItemId === id ? null : id; },
-        isItemExpanded(id) { return this.expandedItemId === id; },
-        filteredBacklog() {
-            return this.backlog.filter(item => Alpine.store("modeWorkspace").matches(
-                item.content, item.tags, item.source, item.status
-            ));
-        },
-        filteredMemory() {
-            return this.memory.filter(item => Alpine.store("modeWorkspace").matches(
-                item.content, item.tags, item.source, item.kind
-            ));
-        },
-        async setActive(active) {
-            try {
-                const r = await fetch('/api/loop/control', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ active: !!active, goal: this.loopGoal || '' }),
-                });
-                if (!r.ok) {
-                    const d = await r.json().catch(() => ({}));
-                    Alpine.store('toast').show(d.detail || `Loop control failed (${r.status})`, 'error');
-                    return;
-                }
-                await this.load();
-                Alpine.store('toast').show(active ? 'Loop resumed' : 'Loop paused', 'success');
-            } catch (e) {
-                Alpine.store('toast').show('Loop control failed — network error', 'error');
-            }
-        },
-
-        showAddItem: false,
-        newItemContent: '',
-        newItemStatus: 'pending',
-        openAddItem() {
-            this.showAddItem = true;
-            this.newItemContent = '';
-            this.newItemStatus = 'pending';
-        },
-        closeAddItem() { this.showAddItem = false; },
-        async addBacklogItem() {
-            const content = (this.newItemContent || '').trim();
-            if (!content) return;
-            try {
-                const r = await fetch('/api/loop/backlog', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content, status: this.newItemStatus }),
-                });
-                if (!r.ok) {
-                    const d = await r.json().catch(() => ({}));
-                    Alpine.store('toast').show(d.detail || `Add failed (${r.status})`, 'error');
-                    return;
-                }
-                Alpine.store('toast').show('Backlog item added', 'success');
-                this.closeAddItem();
-                await this.load();
-            } catch (e) {
-                Alpine.store('toast').show('Add failed — network error', 'error');
-            }
-        },
-    });
-
-    Alpine.store("debug", {
-        debugTarget: "",
-        hypotheses: [],
-        suspects: [],
-        notes: [],
-        findings: [],
-        scratchpadCount: 0,
-        active: false,
-        loaded: false,
-        workspace: null,
-        openSections: { hypotheses: true, suspects: true, notes: true, findings: false },
-        expandedHypothesisId: null,
-
-        async load() {
-            try {
-                const r = await fetch("/api/debug/state");
-                const d = await r.json();
-                this.active = !!d.active;
-                this.debugTarget = d.debug_target || "";
-                this.hypotheses = d.hypotheses || [];
-                this.suspects = d.suspects || [];
-                this.notes = d.notes || [];
-                this.findings = d.findings || [];
-                this.scratchpadCount = d.scratchpad_count || 0;
-                this.workspace = d.workspace || null;
-                this.loaded = true;
-            } catch (e) { console.error("debug.load", e); }
-        },
-        toggleSection(name) { this.openSections[name] = !this.openSections[name]; },
-        toggleHypothesis(id) {
-            this.expandedHypothesisId = this.expandedHypothesisId === id ? null : id;
-        },
-        isHypothesisExpanded(id) {
-            return this.expandedHypothesisId === id;
-        },
-        filtered(items) {
-            return (items || []).filter(item => Alpine.store("modeWorkspace").matches(
-                item.content, item.tags, item.source, item.kind, item.status
-            ));
-        },
-        statusGlyph(status) {
-            switch ((status || "").toLowerCase()) {
-                case "confirmed": return "✓";
-                case "supported": return "◐";
-                case "disproved": return "✕";
-                case "untested":  return "○";
-                default:          return "·";
-            }
-        },
-        formatTimestamp(unix) {
-            if (!unix || typeof unix !== "number") return "";
-            try { return new Date(unix * 1000).toLocaleString(); }
-            catch (e) { return ""; }
         },
     });
 
@@ -6661,7 +5900,10 @@ function renderMarkdown(text) {
         if (clean === null) return escapeHtml(text);
         // x-html content is not compiled by Alpine, so a delegated listener
         // handles the copy controls after each re-render.
-        return wrapCodeBlocks(clean);
+        const wrapped = wrapCodeBlocks(clean);
+        // [^n] research citations become links to the source sheet (digits only, so
+        // nothing unsanitised is introduced after sanitizeHtml).
+        return window.MuModeModels ? window.MuModeModels.research.linkFootnotes(wrapped) : wrapped;
     } catch {
         return escapeHtml(text);
     }
@@ -6685,6 +5927,20 @@ async function copyToClipboard(text) {
         return false;
     }
 }
+
+// Research footnotes in the conversation open the source sheet; hovering previews the quote.
+document.addEventListener("click", (event) => {
+    const cite = event.target.closest("a.mode-cite");
+    if (!cite) return;
+    event.preventDefault();
+    Alpine.store("research").openCitation(cite.dataset.cite, event);
+});
+document.addEventListener("mouseover", (event) => {
+    const cite = event.target.closest && event.target.closest("a.mode-cite");
+    if (!cite || cite.title) return;
+    const preview = Alpine.store("research").citationPreview(cite.dataset.cite);
+    if (preview) cite.title = preview;
+});
 
 document.addEventListener("click", async (event) => {
     const button = event.target.closest(".code-copy-btn");
@@ -7003,9 +6259,12 @@ function bootSSE() {
 // mode has no panel store.
 function refreshActivePanel() {
     const mode = Alpine.store("mode");
-    if (!mode || !mode.panelModes || !mode.panelModes.includes(mode.active)) return;
-    const store = Alpine.store(mode.active);
-    if (store && typeof store.load === "function") store.load();
+    if (!mode || !mode.panelModes) return;
+    for (const name of new Set([mode.active, mode.realMode])) {
+        if (!mode.panelModes.includes(name)) continue;
+        const store = Alpine.store(name);
+        if (store && typeof store.load === "function") store.load();
+    }
 }
 
 function routeEvent(ev) {
@@ -7069,6 +6328,16 @@ function routeEvent(ev) {
         case "thread_created":
         case "thread_wake_started":
             Alpine.store("threads").load();
+            break;
+        case "orch_continuation_started":
+            // A run this orchestration chat proposed finished; the server resumes the chat.
+            slot.busy = true;
+            break;
+        case "orch_continuation_finished":
+            slot.busy = false;
+            chat.finishTurn(name);
+            chat.loadHistory(name, { force: true });
+            if (isFocused) refreshActivePanel();
             break;
         case "plan_mode_changed":
             if (isFocused) Alpine.store("planMode").apply(ev.plan_mode);
@@ -7231,7 +6500,15 @@ function routeEvent(ev) {
             }
             // Refresh the active panel store so kanban/curriculum/etc.
             // reflect whatever the just-finished turn changed.
-            if (isFocused) refreshActivePanel();
+            if (isFocused) {
+                refreshActivePanel();
+                Alpine.store("workPlan").load();
+            }
+            break;
+        case "turn_receipt":
+            // Default mode's turn receipt (mode_stores.js): a quiet row under the
+            // turn's last assistant message.
+            if (window.MuModeReceipts) window.MuModeReceipts.attach(chat, slot, ev.receipt || {}, ev.line || "");
             break;
         case "history_refresh":
             chat.loadHistory(name, { force: true });
@@ -7255,6 +6532,7 @@ function routeEvent(ev) {
                     // mode_changed event. Reload the execution boundary and
                     // the matching Mode OS workspace immediately.
                     Alpine.store("mode").load();
+                Alpine.store("workPlan").load();
                 }
                 refreshActivePanel();
                 Alpine.store("yolo").load();
@@ -7944,10 +7222,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // the panel populates the instant the user lands in a panel mode,
     // no extra mode-flip round-trip needed.
     Alpine.store("mode").load();
-    // Todos are a cross-mode visualisation, not loop-mode-only state. Load
-    // them independently so the header field is populated in research,
-    // teacher, feature, and every other view.
-    Alpine.store("loop").load();
+    // The plan (work items) is shown above the composer in every mode.
+    Alpine.store("workPlan").load();
     Alpine.store("yolo").load();
     Alpine.store("planMode").load();
     Alpine.store("effort").load();

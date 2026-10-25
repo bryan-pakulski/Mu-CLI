@@ -1,28 +1,34 @@
-"""Research workflow command — exposes the CitationManager engine.
+"""Research workflow command — the session's research ledger.
 
 Subcommands:
 
     /research                       — status snapshot
     /research <query>               — run a research query (flips to research mode)
-    /research sources [filters]     — list every registered source w/ credibility
-    /research show <id>             — full record for one source
-    /research bibliography [topic]  — emit the compiled markdown bibliography
+    /research questions             — the question tree with status and claim counts
+    /research claims [qid]          — recorded claims with confidence and evidence
+    /research gaps                  — questions without claims, contested claims, unread leads
+    /research sources [filters]     — list sources w/ state and credibility
+    /research show <id|sN>          — full record for one source
+    /research bibliography [--cited] [qid] — the compiled markdown bibliography
     /research stats                 — counts by source type + averages
-    /research topic [name]          — show or set the active research topic
-    /research topics                — list all topics that have sources
+    /research topic [name]          — show or select the current root question
+    /research topics                — list the groups that have read sources
+    /research export <dir>          — write source_register / evidence_log / questions .md
     /research clear                 — wipe the current research trail
     /research new <query>           — start a fresh research trail
 
 Filters for `/research sources`:
+    --state <candidate|read|cited>  default: read and cited
     --type <web|academic|social|forum|news|documentation|other>
-    --min <0.0..1.0>                 minimum credibility score
-    --query <substring>              case-insensitive match on title/url
-    --topic <substring>              case-insensitive match on topic
+    --min <0.0..1.0>                minimum credibility score
+    --query <substring>             case-insensitive match on title/url
+    --topic <substring>             case-insensitive match on question/topic
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+import os
+from typing import Any, Dict, List, Optional
 
 from . import CommandResult, command
 
@@ -40,28 +46,18 @@ def _refresh_hud(session: Any) -> None:
 
 
 def _engine(session: Any = None):
-    """The global CitationManager singleton. Lazy-imported so the
-    command module doesn't pull in `utils.citation_manager` at module
-    load (it's heavier than it needs to be for /help generation)."""
-    from utils.citation_manager import SourceType, get_citation_manager
+    """This session's ResearchState (a private default when there is none)."""
+    from mu.research import ResearchState, get_citation_manager
 
-    if session is not None:
-        manager = getattr(session, "session_manager", None)
-        if (
-            manager is not None
-            and getattr(manager, "current_session_name", "")
-            and hasattr(manager, "restore_research_sources")
-        ):
-            manager.restore_research_sources()
-    return get_citation_manager(), SourceType
+    state = getattr(getattr(session, "session_manager", None), "research", None)
+    return state if isinstance(state, ResearchState) else get_citation_manager()
 
 
-def _save_sources(session: Any) -> None:
-    """Persist explicit research-engine mutations immediately."""
+def _save(session: Any) -> None:
+    """Persist explicit research mutations immediately."""
     manager = getattr(session, "session_manager", None)
-    if manager is None or not hasattr(manager, "snapshot_research_sources"):
+    if manager is None or not hasattr(manager, "save_history"):
         return
-    manager.snapshot_research_sources()
     manager.save_history(getattr(session, "folder_context", None))
 
 
@@ -82,100 +78,113 @@ def _console(session: Any):
     return getattr(ui, "console", None) if ui is not None else None
 
 
+def _table(title: str, columns, rows, session: Any) -> None:
+    console = _console(session)
+    if console is None or not rows:
+        return
+    try:
+        from rich import box
+        from rich.table import Table
+        from rich.text import Text
+
+        table = Table(title=title, box=box.SIMPLE_HEAD)
+        for name, style, justify in columns:
+            table.add_column(name, style=style, justify=justify)
+        for row in rows:
+            table.add_row(*(Text(str(cell)) for cell in row))
+        console.print(table)
+    except Exception:
+        pass
+
+
 def _research_tool_names() -> List[str]:
     return [
+        "research_question",
         "web_search",
-        "url_grounding",
         "arxiv_search",
         "doi_resolve",
         "reddit_search",
         "stackoverflow_search",
         "hackernews_search",
+        "url_grounding",
+        "research_fetch",
         "read_document",
+        "assess_source",
+        "record_claim",
+        "add_evidence",
+        "research_status",
+        "research_report",
+        "research_export",
     ]
 
 
-def _source_to_dict(source) -> Dict[str, Any]:
-    """Project a Source dataclass into the JSON-friendly shape every
-    subcommand returns in `data`.
-
-    Defensive on `source_type`: historically some call sites passed
-    plain strings ("web"). Newer code coerces at registration but
-    existing in-memory sources (this session, or pickled state) may
-    still carry strings — handle both shapes so /research never
-    crashes on legacy data."""
-    raw_type = source.source_type
-    type_value = getattr(raw_type, "value", None) or str(raw_type)
+def _source_to_dict(state, source) -> Dict[str, Any]:
     return {
-        "id": source.id,
+        "id": source.citation_id,
+        "source_id": source.candidate_id,
+        "state": source.state,
         "title": source.title,
         "url": source.url,
-        "type": type_value,
-        "topic": source.topic,
+        "type": source.source_type.value,
+        "origin": source.origin,
+        "topic": state.group_label(source),
+        "question_ids": list(source.question_ids),
         "credibility": round(source.credibility_score, 3),
+        "assessed": source.assessed,
         "authors": list(source.authors),
         "date": source.date,
+        "site": source.site,
         "accessed": source.accessed_date,
+        "snippet": source.snippet,
         "metadata": dict(source.metadata or {}),
     }
 
 
-def _parse_source_filters(rest: str) -> Tuple[Optional[str], Optional[float], Optional[str], Optional[str]]:
-    """Parse `--type X --min 0.6 --query foo --topic bar` style flags. Returns
-    (type_filter, min_credibility, query_substring, topic_filter, error). The error
-    string is populated when parsing fails — caller short-circuits."""
+def _parse_source_filters(rest: str):
+    """`--state S --type X --min 0.6 --query foo --topic bar` → (filters, error)."""
     tokens = rest.split() if rest else []
-    type_filter: Optional[str] = None
-    min_credibility: Optional[float] = None
-    query: Optional[str] = None
-    topic_filter: Optional[str] = None
+    filters: Dict[str, Any] = {"state": None, "type": None, "min": None, "query": None, "topic": None}
     i = 0
     while i < len(tokens):
         tok = tokens[i]
-        if tok == "--type" and i + 1 < len(tokens):
-            type_filter = tokens[i + 1].lower()
-            i += 2
-        elif tok == "--min" and i + 1 < len(tokens):
-            try:
-                min_credibility = float(tokens[i + 1])
-            except ValueError:
-                return None, None, None, None, f"--min must be a number, got {tokens[i + 1]!r}"
-            i += 2
-        elif tok == "--query" and i + 1 < len(tokens):
-            query = tokens[i + 1].lower()
-            i += 2
-        elif tok == "--topic" and i + 1 < len(tokens):
-            topic_filter = tokens[i + 1].lower()
+        key = tok[2:] if tok.startswith("--") else ""
+        if key in filters and i + 1 < len(tokens):
+            value = tokens[i + 1]
+            if key == "min":
+                try:
+                    filters["min"] = float(value)
+                except ValueError:
+                    return None, f"--min must be a number, got {value!r}"
+            else:
+                filters[key] = value.lower()
             i += 2
         else:
-            return None, None, None, None, f"unknown flag {tok!r} — use --type/--min/--query"
-    return type_filter, min_credibility, query, topic_filter, None
+            return None, f"unknown flag {tok!r} — use --state/--type/--min/--query/--topic"
+    if filters["state"] and filters["state"] not in ("candidate", "read", "cited"):
+        return None, "--state must be candidate, read or cited"
+    return filters, None
 
 
 # ----------------------------------------------- subcommands
 
 
 def _status(session: Any, allow_prompt: bool) -> CommandResult:
-    engine, SourceType = _engine(session)
-    sources = engine.get_all_sources()
+    state = _engine(session)
+    coverage = state.coverage()
+    sources = state.numbered_sources()
     by_type: Dict[str, int] = {}
     for src in sources:
         by_type[src.source_type.value] = by_type.get(src.source_type.value, 0) + 1
-    avg_cred = (
-        sum(s.credibility_score for s in sources) / len(sources) if sources else 0.0
-    )
+    avg_cred = sum(s.credibility_score for s in sources) / len(sources) if sources else 0.0
     active_mode = str(session.variables.get("agent_mode", "default"))
-    current_topic = engine.get_current_topic()
-    topics = engine.list_topics()
-    by_topic: Dict[str, int] = {}
-    for src in sources:
-        by_topic[src.topic] = by_topic.get(src.topic, 0) + 1
-
+    counts = coverage["sources"]
+    statuses: Dict[str, int] = {}
+    for row in coverage["questions"]:
+        statuses[row["status"]] = statuses.get(row["status"], 0) + 1
     msg = (
-        f"Research mode: {active_mode} · "
-        f"{len(sources)} source(s) collected · "
-        f"avg credibility {avg_cred:.2f} · "
-        f"topic: {current_topic}"
+        f"Research mode: {active_mode} · {len(coverage['questions'])} question(s) · "
+        f"{coverage['claims']} claim(s) · sources {counts['candidate']} candidate / "
+        f"{counts['read']} read / {counts['cited']} cited · current: {state.get_current_topic()}"
     )
     _emit(session, msg, allow_prompt)
     return CommandResult(
@@ -183,164 +192,207 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
         message=msg,
         data={
             "current_mode": active_mode,
-            "current_topic": current_topic,
+            "current_topic": state.get_current_topic(),
+            "current_question": coverage["current_question"],
             "available_tools": _research_tool_names(),
             "source_count": len(sources),
+            "sources_by_state": counts,
+            "question_count": len(coverage["questions"]),
+            "question_statuses": statuses,
+            "claim_count": coverage["claims"],
+            "gaps": coverage["open_without_claims"],
             "by_type": by_type,
-            "by_topic": by_topic,
-            "topics": topics,
             "avg_credibility": round(avg_cred, 3),
-            "citation_policy": (
-                "Cite external claims with [^n] footnotes; end with "
-                "compile_bibliography(). Use set_research_topic() before "
-                "a new rabbit hole so sources stay grouped by ask; call "
-                "assess_source() for each source you add to the bibliography."
-            ),
         },
+    )
+
+
+def _questions(session: Any, allow_prompt: bool) -> CommandResult:
+    state = _engine(session)
+    rows = state.coverage()["questions"]
+    if allow_prompt:
+        _table(
+            f"Research questions ({len(rows)})",
+            [("ID", "wash.muted", "left"), ("Status", "wash.accent", "left"),
+             ("Claims", "wash.ink", "right"), ("Origins", "wash.ink", "right"),
+             ("Question", "wash.ink", "left")],
+            [(r["id"], r["status"], r["claims"], r["origins"], ("  " * r["id"].count(".")) + r["text"])
+             for r in rows],
+            session,
+        )
+        if not rows:
+            _emit(session, "No research questions yet.", allow_prompt)
+    return CommandResult(ok=True, message=f"{len(rows)} question(s).", data={"questions": rows})
+
+
+def _claim_dict(state, claim) -> Dict[str, Any]:
+    return {
+        "id": claim.id,
+        "question_id": claim.question_id,
+        "text": claim.text,
+        "kind": claim.kind,
+        "confidence": state.claim_confidence(claim),
+        "contested": state.claim_contested(claim),
+        "origins": state.claim_origins(claim),
+        "evidence": [ev.to_dict() for ev in claim.evidence],
+    }
+
+
+def _claims(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
+    state = _engine(session)
+    qid = rest.strip() or None
+    if qid and state.get_question(qid) is None:
+        msg = f"No question {qid!r}."
+        _emit(session, msg, allow_prompt, error=True)
+        return CommandResult(ok=False, message=msg)
+    claims = [
+        c for c in state.claims()
+        if not qid or c.question_id == qid or c.question_id.startswith(qid + ".")
+    ]
+    items = [_claim_dict(state, c) for c in claims]
+    if allow_prompt:
+        _table(
+            f"Claims ({len(items)})",
+            [("ID", "wash.muted", "left"), ("Q", "wash.muted", "left"),
+             ("Confidence", "wash.accent", "left"), ("Sources", "wash.info", "left"),
+             ("Claim", "wash.ink", "left")],
+            [(c["id"], c["question_id"],
+              c["confidence"] + (" · contested" if c["contested"] else ""),
+              " ".join(f"[^{e['citation_id']}]{'✗' if e['stance'] == 'contradicts' else ''}"
+                       for e in c["evidence"]),
+              c["text"]) for c in items],
+            session,
+        )
+        if not items:
+            _emit(session, "No claims recorded yet.", allow_prompt)
+    return CommandResult(ok=True, message=f"{len(items)} claim(s).", data={"question_id": qid, "claims": items})
+
+
+def _gaps(session: Any, allow_prompt: bool) -> CommandResult:
+    state = _engine(session)
+    coverage = state.coverage()
+    by_id = {r["id"]: r for r in coverage["questions"]}
+    no_claims = [by_id[q] for q in coverage["open_without_claims"]]
+    contested = [_claim_dict(state, c) for c in state.claims() if state.claim_contested(c)]
+    weak = [_claim_dict(state, c) for c in state.claims() if state.claim_confidence(c) == "low"]
+    leads = [
+        {"question_id": r["id"], **cand}
+        for r in coverage["questions"] if r["status"] != "dropped"
+        for cand in r["unread_candidates"]
+    ]
+    if allow_prompt:
+        lines = []
+        for r in no_claims:
+            lines.append(f"no claims: {r['id']} {r['text']}")
+        for c in contested:
+            lines.append(f"contested: {c['id']} {c['text']}")
+        for c in weak:
+            lines.append(f"low confidence: {c['id']} {c['text']}")
+        for lead in leads[:10]:
+            lines.append(f"unread lead for {lead['question_id']}: {lead['id']} {lead['title']}")
+        _emit(session, "\n".join(lines) or "No gaps: every question has claims at medium or better.",
+              allow_prompt)
+    total = len(no_claims) + len(contested) + len(weak)
+    return CommandResult(
+        ok=True,
+        message=f"{total} gap(s).",
+        data={"questions_without_claims": no_claims, "contested": contested,
+              "low_confidence": weak, "unread_leads": leads},
     )
 
 
 def _list_sources(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
-    engine, SourceType = _engine(session)
+    from mu.research import SourceType
 
-    type_filter, min_cred, query, topic_filter, err = _parse_source_filters(rest)
+    state = _engine(session)
+    filters, err = _parse_source_filters(rest)
     if err:
         _emit(session, err, allow_prompt, error=True)
         return CommandResult(ok=False, message=err)
 
-    sources = engine.get_all_sources()
-
-    # Apply filters.
-    if topic_filter:
-        sources = [s for s in sources if topic_filter in (s.topic or "").lower()]
-    if type_filter:
+    if filters["state"]:
+        sources = state.all_sources(filters["state"])
+    else:
+        sources = state.numbered_sources()
+    if filters["topic"]:
+        sources = [s for s in sources if filters["topic"] in state.group_label(s).lower()]
+    if filters["type"]:
         try:
-            target = SourceType(type_filter)
+            target = SourceType(filters["type"])
         except ValueError:
             valid = ", ".join(t.value for t in SourceType)
-            msg = f"unknown --type {type_filter!r}. Valid: {valid}"
+            msg = f"unknown --type {filters['type']!r}. Valid: {valid}"
             _emit(session, msg, allow_prompt, error=True)
             return CommandResult(ok=False, message=msg)
         sources = [s for s in sources if s.source_type == target]
-    if min_cred is not None:
-        sources = [s for s in sources if s.credibility_score >= min_cred]
-    if query:
-        sources = [
-            s
-            for s in sources
-            if query in (s.title or "").lower() or query in (s.url or "").lower()
-        ]
-
-    # Sort by credibility desc, then id asc for stability.
-    sources.sort(key=lambda s: (-s.credibility_score, s.id))
+    if filters["min"] is not None:
+        sources = [s for s in sources if s.credibility_score >= filters["min"]]
+    if filters["query"]:
+        q = filters["query"]
+        sources = [s for s in sources if q in (s.title or "").lower() or q in (s.url or "").lower()]
+    sources.sort(key=lambda s: (-s.credibility_score, s.citation_id or 10**9, s.sid))
 
     if allow_prompt:
-        console = _console(session)
-        if console is not None and sources:
-            try:
-                from rich import box
-                from rich.table import Table
-
-                table = Table(
-                    title=f"Citation sources ({len(sources)})",
-                    box=box.SIMPLE_HEAD,
-                )
-                table.add_column("ID", style="wash.muted", justify="right")
-                table.add_column("Type", style="wash.accent")
-                table.add_column("Cred", style="wash.ok", justify="right")
-                table.add_column("Title", style="wash.ink")
-                table.add_column("URL", style="wash.info")
-                from rich.text import Text
-
-                for src in sources[:50]:  # cap table render; data field has everything
-                    stars = "★" * int(round(src.credibility_score * 5))
-                    cred = f"{stars} {src.credibility_score:.2f}"
-                    title = (src.title or "")[:60]
-                    url = (src.url or "")[:60]
-                    table.add_row(
-                        f"#{src.id}",
-                        Text(src.source_type.value),
-                        cred,
-                        Text(title),
-                        Text(url),
-                    )
-                console.print(table)
-                if len(sources) > 50:
-                    console.print(f"[wash.muted]…and {len(sources) - 50:d} more (see data payload).[/wash.muted]")
-            except Exception:
-                pass
-        elif console is not None:
+        _table(
+            f"Research sources ({len(sources)})",
+            [("ID", "wash.muted", "right"), ("State", "wash.accent", "left"),
+             ("Type", "wash.accent", "left"), ("Cred", "wash.ok", "right"),
+             ("Title", "wash.ink", "left"), ("URL", "wash.info", "left")],
+            [(f"#{s.citation_id}" if s.citation_id else s.candidate_id, s.state, s.source_type.value,
+              f"{s.credibility_score:.2f}", (s.title or "")[:60], (s.url or "")[:60])
+             for s in sources[:50]],
+            session,
+        )
+        if not sources:
             _emit(session, "No sources match those filters.", allow_prompt)
-
     return CommandResult(
         ok=True,
         message=f"{len(sources)} source(s).",
-        data={
-            "filters": {"type": type_filter, "min_credibility": min_cred, "query": query, "topic": topic_filter},
-            "count": len(sources),
-            "sources": [_source_to_dict(s) for s in sources],
-        },
+        data={"filters": filters, "count": len(sources),
+              "sources": [_source_to_dict(state, s) for s in sources]},
     )
 
 
 def _show_source(session: Any, raw_id: str, allow_prompt: bool) -> CommandResult:
-    engine, _ = _engine(session)
-    raw_id = (raw_id or "").lstrip("#").strip()
+    state = _engine(session)
+    raw_id = (raw_id or "").strip()
     if not raw_id:
-        msg = "Usage: /research show <id>"
+        msg = "Usage: /research show <id|sN>"
         _emit(session, msg, allow_prompt, error=True)
         return CommandResult(ok=False, message=msg)
-    try:
-        cid = int(raw_id)
-    except ValueError:
-        msg = f"Source id must be an integer, got {raw_id!r}"
-        _emit(session, msg, allow_prompt, error=True)
-        return CommandResult(ok=False, message=msg)
-
-    source = engine.get_source(cid)
+    source = state.find(raw_id)
     if source is None:
-        msg = f"No source with id #{cid}."
+        msg = f"No source {raw_id!r}."
         _emit(session, msg, allow_prompt, error=True)
-        return CommandResult(ok=False, message=msg, data={"id": cid})
-
-    body = _source_to_dict(source)
+        return CommandResult(ok=False, message=msg, data={"id": raw_id})
+    body = _source_to_dict(state, source)
     if allow_prompt:
-        console = _console(session)
-        if console is not None:
-            try:
-                from rich import box
-                from rich.table import Table
-
-                from rich.text import Text
-
-                tbl = Table(show_header=False, box=box.SIMPLE_HEAD)
-                tbl.add_column("k", style="wash.accent")
-                tbl.add_column("v")
-                for label, value in (
-                    ("ID", f"#{body['id']}"),
-                    ("Title", body["title"]),
-                    ("URL", body["url"]),
-                    ("Type", body["type"]),
-                    ("Credibility", f"{body['credibility']:.2f}"),
-                    ("Authors", ", ".join(body["authors"]) or "—"),
-                    ("Published", body["date"] or "—"),
-                    ("Accessed", body["accessed"]),
-                ):
-                    tbl.add_row(label, Text(str(value)))
-                console.print(tbl)
-                if body["metadata"]:
-                    from utils.helpers import safe_markup
-
-                    console.print(f"[wash.muted]metadata:[/wash.muted] {safe_markup(body['metadata'])}")
-            except Exception:
-                pass
-    return CommandResult(ok=True, message=f"Source #{cid}.", data=body)
+        _table(
+            source.ref,
+            [("k", "wash.accent", "left"), ("v", "wash.ink", "left")],
+            [(label, value) for label, value in (
+                ("Title", body["title"]), ("URL", body["url"]), ("State", body["state"]),
+                ("Type", body["type"]), ("Origin", body["origin"]),
+                ("Credibility", f"{body['credibility']:.2f}" + ("" if body["assessed"] else " (prior)")),
+                ("Authors", ", ".join(body["authors"]) or "—"), ("Published", body["date"] or "—"),
+                ("Accessed", body["accessed"]), ("Questions", ", ".join(body["question_ids"]) or "—"),
+            )],
+            session,
+        )
+    return CommandResult(ok=True, message=f"Source {source.ref}.", data=body)
 
 
 def _bibliography(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
-    engine, _ = _engine(session)
-    topic = rest.strip() or None
-    body = engine.compile_bibliography(topic=topic) or ""
+    state = _engine(session)
+    tokens = rest.split()
+    include = "cited" if "--cited" in tokens else "read"
+    rest_tokens = [t for t in tokens if t != "--cited"]
+    qid = rest_tokens[0] if rest_tokens else None
+    if qid and state.get_question(qid) is None:
+        # A free-text argument names a root question by its text.
+        match = next((q for q in state.questions() if q.text.lower() == " ".join(rest_tokens).lower()), None)
+        qid = match.id if match else qid
+    body = state.compile_bibliography(include=include, question_id=qid) or ""
     if allow_prompt:
         console = _console(session)
         if console is not None and body:
@@ -355,138 +407,120 @@ def _bibliography(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
                 except Exception:
                     pass
         elif not body:
-            _emit(session, "Bibliography is empty — no sources registered yet.", allow_prompt)
+            _emit(session, "Bibliography is empty — no sources read yet.", allow_prompt)
     return CommandResult(
         ok=True,
         message=("ok" if body else "empty"),
-        data={"bibliography": body, "topic": topic, "source_count": engine.source_count},
+        data={"bibliography": body, "question_id": qid, "include": include,
+              "source_count": state.source_count},
     )
 
 
 def _stats(session: Any, allow_prompt: bool) -> CommandResult:
-    engine, _ = _engine(session)
-    sources = engine.get_all_sources()
+    state = _engine(session)
+    sources = state.numbered_sources()
     by_type: Dict[str, int] = {}
-    cred_buckets = {"★★★★★": 0, "★★★★": 0, "★★★": 0, "★★": 0, "★": 0, "☆": 0}
     total_cred = 0.0
     for src in sources:
         by_type[src.source_type.value] = by_type.get(src.source_type.value, 0) + 1
         total_cred += src.credibility_score
-        score = int(round(src.credibility_score * 5))
-        key = "★" * max(1, score) if score >= 1 else "☆"
-        cred_buckets[key] = cred_buckets.get(key, 0) + 1
     avg = (total_cred / len(sources)) if sources else 0.0
-    by_topic: Dict[str, int] = {}
-    for src in sources:
-        by_topic[src.topic] = by_topic.get(src.topic, 0) + 1
-
+    by_state = {st: len(state.all_sources(st)) for st in ("candidate", "read", "cited")}
+    levels = {"high": 0, "medium": 0, "low": 0}
+    for c in state.claims():
+        levels[state.claim_confidence(c)] += 1
+    origins = {s.origin for s in sources}
     if allow_prompt:
-        console = _console(session)
-        if console is not None:
-            try:
-                from rich import box
-                from rich.table import Table
-
-                from rich.text import Text
-
-                t = Table(title="Research engine stats", box=box.SIMPLE_HEAD)
-                t.add_column("Metric", style="wash.accent")
-                t.add_column("Value", style="wash.ink")
-                t.add_row("Sources collected", Text(str(len(sources))))
-                t.add_row("Average credibility", Text(f"{avg:.2f}"))
-                t.add_row(
-                    "By type",
-                    Text(", ".join(f"{k}={v}" for k, v in sorted(by_type.items())) or "—"),
-                )
-                t.add_row(
-                    "Credibility tiers",
-                    Text(", ".join(f"{k}={v}" for k, v in cred_buckets.items() if v > 0) or "—"),
-                )
-                console.print(t)
-            except Exception:
-                pass
-
+        _table(
+            "Research stats",
+            [("Metric", "wash.accent", "left"), ("Value", "wash.ink", "left")],
+            [("Sources read", len(sources)), ("Independent origins", len(origins)),
+             ("Average credibility", f"{avg:.2f}"),
+             ("By state", ", ".join(f"{k}={v}" for k, v in by_state.items())),
+             ("By type", ", ".join(f"{k}={v}" for k, v in sorted(by_type.items())) or "—"),
+             ("Claim confidence", ", ".join(f"{k}={v}" for k, v in levels.items()))],
+            session,
+        )
     return CommandResult(
         ok=True,
         message=f"{len(sources)} source(s), avg credibility {avg:.2f}.",
-        data={
-            "count": len(sources),
-            "by_type": by_type,
-            "credibility_tiers": cred_buckets,
-            "avg_credibility": round(avg, 3),
-        },
+        data={"count": len(sources), "by_type": by_type, "by_state": by_state,
+              "origins": len(origins), "claim_confidence": levels, "avg_credibility": round(avg, 3)},
     )
 
 
 def _topic(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
-    engine, _ = _engine(session)
+    state = _engine(session)
     name = rest.strip()
     if not name:
-        current = engine.get_current_topic()
-        topics = engine.list_topics()
-        msg = f"Active research topic: {current}"
+        current = state.get_current_topic()
+        msg = f"Current research question: {current}"
         _emit(session, msg, allow_prompt)
-        return CommandResult(
-            ok=True,
-            message=msg,
-            data={"current_topic": current, "topics": topics},
-        )
-    previous = engine.get_current_topic()
-    engine.set_topic(name)
-    _save_sources(session)
-    msg = f"Research topic: {previous!r} -> {name!r}"
+        return CommandResult(ok=True, message=msg,
+                             data={"current_topic": current, "topics": state.list_topics()})
+    previous = state.get_current_topic()
+    state.set_topic(name)
+    _save(session)
+    msg = f"Research question: {previous!r} -> {name!r}"
     _emit(session, msg, allow_prompt)
-    return CommandResult(
-        ok=True,
-        message=msg,
-        data={"previous_topic": previous, "current_topic": name},
-    )
+    q = state.current_question()
+    return CommandResult(ok=True, message=msg,
+                         data={"previous_topic": previous, "current_topic": name,
+                               "question_id": q.id if q else None})
 
 
 def _topics(session: Any, allow_prompt: bool) -> CommandResult:
-    engine, _ = _engine(session)
-    topics = engine.list_topics()
+    state = _engine(session)
+    topics = state.list_topics()
     counts: Dict[str, int] = {}
-    for src in engine.get_all_sources():
-        counts[src.topic] = counts.get(src.topic, 0) + 1
+    for src in state.numbered_sources():
+        label = state.group_label(src)
+        counts[label] = counts.get(label, 0) + 1
     if allow_prompt:
-        console = _console(session)
-        if console is not None:
-            try:
-                from rich import box
-                from rich.table import Table
-                from rich.text import Text
+        _table("Research topics", [("Topic", "wash.accent", "left"), ("Sources", "wash.ink", "right")],
+               [(t, counts.get(t, 0)) for t in topics], session)
+    return CommandResult(ok=True, message=f"{len(topics)} topic(s).",
+                         data={"topics": topics, "counts": counts,
+                               "current_topic": state.get_current_topic()})
 
-                t = Table(title="Research topics", box=box.SIMPLE_HEAD)
-                t.add_column("Topic", style="wash.accent")
-                t.add_column("Sources", style="wash.ink", justify="right")
-                for topic in topics:
-                    t.add_row(Text(topic), Text(str(counts.get(topic, 0))))
-                console.print(t)
-            except Exception:
-                pass
-    return CommandResult(
-        ok=True,
-        message=f"{len(topics)} topic(s).",
-        data={"topics": topics, "counts": counts, "current_topic": engine.get_current_topic()},
-    )
+
+def _export(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
+    from mu.research.report import export_files
+    from mu.tools.capabilities import session_type_from_context
+    from mu.tools.file.handlers import write_file
+
+    directory = rest.strip()
+    if not directory:
+        msg = "Usage: /research export <dir>"
+        _emit(session, msg, allow_prompt, error=True)
+        return CommandResult(ok=False, message=msg)
+    session_type = session_type_from_context(session)
+    if session_type in ("chat", "orchestration"):
+        msg = "Export needs a workspace or container session (chat sessions have no filesystem)."
+        _emit(session, msg, allow_prompt, error=True)
+        return CommandResult(ok=False, message=msg)
+    folder_context = getattr(session, "folder_context", None)
+    written: List[str] = []
+    for name, body in export_files(_engine(session)).items():
+        result = write_file(os.path.join(directory, name), body, folder_context, session_type=session_type)
+        if not str(result).startswith("Successfully"):
+            _emit(session, str(result), allow_prompt, error=True)
+            return CommandResult(ok=False, message=str(result), data={"written": written})
+        written.append(name)
+    msg = f"Exported {', '.join(written)} to {directory}"
+    _emit(session, msg, allow_prompt)
+    return CommandResult(ok=True, message=msg, data={"dir": directory, "written": written})
 
 
 def _clear(session: Any, allow_prompt: bool) -> CommandResult:
-    engine, _ = _engine(session)
-    prev = engine.source_count
-    engine.clear()
-    _save_sources(session)
-    _emit(
-        session,
-        f"Citation engine cleared — dropped {prev} source(s).",
-        allow_prompt,
-    )
-    return CommandResult(
-        ok=True,
-        message=f"Cleared {prev} source(s).",
-        data={"cleared": prev},
-    )
+    state = _engine(session)
+    prev = len(state.all_sources())
+    claims = len(state.claims())
+    state.clear()
+    _save(session)
+    _emit(session, f"Research trail cleared — dropped {prev} source(s) and {claims} claim(s).", allow_prompt)
+    return CommandResult(ok=True, message=f"Cleared {prev} source(s).",
+                         data={"cleared": prev, "claims": claims})
 
 
 def _run_query(session: Any, query: str, allow_prompt: bool) -> CommandResult:
@@ -500,7 +534,7 @@ def _run_query(session: Any, query: str, allow_prompt: bool) -> CommandResult:
         f"{query}\n\n"
         "Requirements:\n"
         "- Prefer primary/official sources when possible.\n"
-        "- Include explicit source URLs.\n"
+        "- Read sources before citing them and record claims with quoted evidence.\n"
         "- Clearly separate facts vs inference.\n"
     )
     send_result = session.send_message(prompt)
@@ -514,19 +548,20 @@ def _run_query(session: Any, query: str, allow_prompt: bool) -> CommandResult:
 # ----------------------------------------------- dispatch
 
 
-SUBCOMMANDS = ("sources", "show", "bibliography", "stats", "topic", "topics", "clear", "new", "status")
+SUBCOMMANDS = ("questions", "claims", "gaps", "sources", "show", "bibliography", "stats",
+               "topic", "topics", "export", "clear", "new", "status")
 
 
 @command(
     "/research",
     help=(
-        "Research workflow / citation engine. "
-        "Subcommands: status, sources [--type X --min N --query Q --topic T], "
-        "show <id>, bibliography [topic], stats, topic [name], topics, "
+        "Research ledger. Subcommands: status, questions, claims [qid], gaps, "
+        "sources [--state S --type X --min N --query Q --topic T], show <id|sN>, "
+        "bibliography [--cited] [qid], stats, topic [name], topics, export <dir>, "
         "clear, new <query>. Anything else is treated as a query."
     ),
 )
-def research_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
+def research_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Optional[CommandResult]:
     raw = (args or "").strip()
 
     if not raw:
@@ -538,6 +573,12 @@ def research_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
 
     if sub == "status":
         return _status(session, allow_prompt)
+    if sub == "questions":
+        return _questions(session, allow_prompt)
+    if sub == "claims":
+        return _claims(session, rest, allow_prompt)
+    if sub == "gaps":
+        return _gaps(session, allow_prompt)
     if sub == "sources":
         return _list_sources(session, rest, allow_prompt)
     if sub == "show":
@@ -550,6 +591,8 @@ def research_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
         return _topic(session, rest, allow_prompt)
     if sub == "topics":
         return _topics(session, allow_prompt)
+    if sub == "export":
+        return _export(session, rest, allow_prompt)
     if sub == "clear":
         return _clear(session, allow_prompt)
     if sub == "new":

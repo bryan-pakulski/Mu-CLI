@@ -10,13 +10,13 @@ import { spacing } from '../theme/tokens';
 import { Banner, Chip, Row, Text } from '../ui';
 
 const MODE_SURFACES: Record<string, { title: string; lenses: string[]; purpose: string }> = {
-  default: { title: 'General workspace', lenses: ['plan', 'tools', 'verification'], purpose: 'Flexible coding and codebase assistance.' },
+  default: { title: 'General workspace', lenses: ['plan', 'tools', 'turn receipts'], purpose: 'Flexible coding and codebase assistance; each turn says what changed and whether a check passed after the edit.' },
   research: { title: 'Evidence desk', lenses: ['claims', 'sources', 'citations'], purpose: 'Build source-backed conclusions and expose coverage gaps.' },
   security: { title: 'Verification bench', lenses: ['risk', 'proof', 'fixes'], purpose: 'Gate security findings on reproducible proof and verified remediation.' },
-  debug: { title: 'Investigation board', lenses: ['hypotheses', 'observations', 'root cause'], purpose: 'Test competing explanations and track what changes belief.' },
-  loop: { title: 'Mission control', lenses: ['queue', 'workstreams', 'checkpoints'], purpose: 'Keep autonomous work oriented, inspectable, and stoppable.' },
-  feature: { title: 'Delivery workspace', lenses: ['tasks', 'criteria', 'reviews'], purpose: 'Drive an approved plan through acceptance evidence.' },
-  teacher: { title: 'Learning studio', lenses: ['curriculum', 'mastery', 'reviews'], purpose: 'Separate course progress from demonstrated understanding.' },
+  debug: { title: 'Investigation board', lenses: ['case', 'hypotheses', 'runs', 'root causes'], purpose: 'Reproduce first, test competing explanations, and close a case only on a verified fix.' },
+  loop: { title: 'Mission control', lenses: ['mission', 'timeline', 'backlog'], purpose: 'A goal, what done looks like and a budget; autonomous increments you can pause, resume or stop.' },
+  feature: { title: 'Delivery workspace', lenses: ['plan', 'tasks', 'reviews'], purpose: 'You approve the plan; each task completes on criterion evidence.' },
+  teacher: { title: 'Learning studio', lenses: ['path', 'mastery', 'reviews'], purpose: 'You approve the curriculum; lessons pass on demonstrated understanding, with spaced reviews.' },
 };
 
 export function ModesScreen() {

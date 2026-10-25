@@ -1,0 +1,44 @@
+{#- The shared mode shell (documentation/plans/modes_v2.md §5.2): one header bar — the mode's
+    name, its state sentence (zeros dropped), text tabs (no counts) and at most one primary
+    action — then "Now" when something waits for you, each row with its decisive action
+    visible. Each mode panel includes it inside a `with shell_mode="<mode>"` block; the
+    bindings come from $store.<mode> (static/js/mode_stores.js). -#}
+<header class="mode-shell" x-data="{ s: $store.{{ shell_mode }} }">
+    <div class="mode-shell__bar">
+        <h2 class="mode-shell__title" x-text="s.title"></h2>
+        <template x-if="s.primary()">
+            <button type="button" class="w-btn" data-variant="primary" data-size="sm"
+                    @click="s.runPrimary()" x-text="s.primary().label"></button>
+        </template>
+    </div>
+    <p class="w-state mode-shell__state" x-show="s.sentence().length" x-html="s.sentenceHtml()"></p>
+    <nav class="w-tabs mode-shell__tabs" role="tablist" aria-label="{{ shell_mode|capitalize }} views" x-show="s.tabs().length">
+        <template x-for="tab in s.tabs()" :key="tab">
+            <button type="button" class="w-tabs__tab" role="tab"
+                    :class="{ active: s.tab === tab }"
+                    :aria-selected="s.tab === tab ? 'true' : 'false'"
+                    @click="s.setTab(tab)" x-text="tab"></button>
+        </template>
+    </nav>
+</header>
+
+<section class="w-group mode-now" data-group="now" x-show="$store.{{ shell_mode }}.now().length">
+    <h3 class="w-group__title">Now</h3>
+    <ul class="w-rows">
+        <template x-for="row in $store.{{ shell_mode }}.now()" :key="row.id">
+            <li class="w-row" data-pinned>
+                <span class="w-sign" :data-status="row.status" aria-hidden="true" x-text="row.glyph"></span>
+                <div class="w-row__main">
+                    <span class="w-row__title" x-text="row.title"></span>
+                    <span class="w-row__sub" x-text="row.sub"></span>
+                </div>
+                <span class="w-row__actions">
+                    <template x-for="action in row.actions" :key="action.id">
+                        <button type="button" class="w-textbtn" :data-tone="action.primary ? null : 'quiet'"
+                                @click.stop="$store.{{ shell_mode }}.act(row, action)" x-text="action.label"></button>
+                    </template>
+                </span>
+            </li>
+        </template>
+    </ul>
+</section>

@@ -271,6 +271,15 @@ def bash_command(
                 ),
                 "default": 12000,
             },
+            "purpose": {
+                "type": "string",
+                "enum": ["verify", "repro", "explore"],
+                "description": (
+                    "Optional: 'verify' when the run checks your change (it becomes "
+                    "turn evidence), 'repro' to reproduce a bug, 'explore' otherwise. "
+                    "Common test/lint commands are recognised automatically."
+                ),
+            },
         },
         "required": ["command"],
     },

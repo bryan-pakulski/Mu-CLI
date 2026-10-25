@@ -24,13 +24,7 @@ from utils.helpers import safe_markup
 from rich.markup import escape as esc
 from utils.logger import logger
 from providers.openai import OpenAIProvider
-from mu.session.session import SessionManager, Session, derive_feature_state_status
-from mu.feature.engine import (
-    load_feature_plan,
-    refresh_and_persist_feature_plan,
-    save_feature_plan,
-    summarize_feature_plan,
-)
+from mu.session.session import SessionManager, Session
 from mu.tools._dispatcher import execute_tool
 from mu.ui.rich_ui import RichUI
 from mu.ui.choice_picker import prompt_choice, prompt_confirm
@@ -180,12 +174,6 @@ from mu.cli.feature import (  # noqa: F401
     get_current_feature_task_label,
     get_feature_prompt_context,
     build_feature_markdown,
-    _feature_three_option_prompt,
-    _log_feature_cli_event,
-    _feature_prompt_with_logging,
-    _feature_confirm_deny_edit_loop,
-    _monitor_compact_line,
-    _execute_feature_tool,
 )
 
 # Stats/help/splash rendering moved to mu/cli/display.py — re-exported

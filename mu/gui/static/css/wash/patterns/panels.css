@@ -3710,3 +3710,78 @@
 .CodeMirror-line > span > span::selection { background: var(--wash-accent-wash); }
 .CodeMirror-activeline-background { background: var(--w-glass-fill-subtle); }
 .CodeMirror-matchingbracket { color: var(--wash-accent-ink); }
+
+/* ------------------------------------------------------------ research ledger (fragments/research_panel.html) */
+/* Rows sit in the narrow stage panel: a smaller gutter than the leaf's, no bleed past the panel padding. */
+.mode-panel .rs-questions .w-row,
+.mode-panel .rs-claims .w-row {
+    --w-row-gutter: calc(var(--wash-space-3) + 18px);
+    margin: 0;
+    padding: var(--wash-space-2) var(--wash-space-2) var(--wash-space-2) var(--w-row-gutter);
+    column-gap: var(--wash-space-3);
+}
+.mode-panel .rs-questions .w-row > .w-sign,
+.mode-panel .rs-claims .w-row > .w-sign { left: var(--wash-space-2); top: calc(var(--wash-space-2) + 1px); }
+/* Sub-questions indent under their parent. */
+.mode-panel .rs-questions .rs-question { padding-left: calc(var(--w-row-gutter) + var(--rs-depth, 0) * var(--wash-space-4)); }
+.mode-panel .rs-questions .rs-question > .w-sign { margin-left: calc(var(--rs-depth, 0) * var(--wash-space-4)); }
+.mode-panel .rs-question .w-row__title,
+.mode-panel .rs-claim__text { white-space: normal; overflow-wrap: anywhere; }
+.rs-claims-for {
+    margin: 0 0 var(--wash-space-1);
+    color: var(--wash-ink-3);
+    font-size: var(--wash-type-caption-size);
+}
+.rs-source-key { flex: none; font-size: var(--wash-type-caption-size); }
+.rs-source-facts { margin: var(--wash-space-2) 0 0; }
+.rs-fact { display: contents; }
+
+.rs-matrix { margin-top: var(--wash-space-3); }
+.rs-matrix__scroll { overflow-x: auto; }
+.rs-matrix__table {
+    border-collapse: collapse;
+    font-size: var(--wash-type-caption-size);
+    color: var(--wash-ink-2);
+}
+.rs-matrix__table th,
+.rs-matrix__table td {
+    padding: var(--wash-space-1) var(--wash-space-2);
+    border-bottom: 1px solid var(--wash-hairline);
+    text-align: left;
+    font-weight: 400;
+}
+.rs-matrix__origin {
+    max-width: 9em;
+    overflow: hidden;
+    color: var(--wash-ink-3);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.rs-matrix__claim {
+    max-width: 18em;
+    overflow: hidden;
+    color: var(--wash-ink);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.rs-matrix__cell { text-align: center; }
+.rs-matrix__cell[data-stance~="supports"] { color: var(--wash-ok-ink); }
+.rs-matrix__cell[data-stance~="contradicts"] { color: var(--wash-danger-ink); }
+
+/* The claim's sheet (WashSheet body from research_ledger.js). */
+.rs-sheet__title {
+    margin: var(--wash-space-5) 0 var(--wash-space-2);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-label-size);
+    font-weight: var(--wash-type-label-weight);
+}
+.rs-evidence-list .w-row { grid-template-areas: "main main"; }
+.rs-evidence__quote {
+    margin: 0 0 var(--wash-space-1);
+    color: var(--wash-ink);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+}
+.rs-evidence__quote::before { content: "“"; }
+.rs-evidence__quote::after { content: "”"; }
+.rs-evidence .w-row__sub { white-space: normal; }

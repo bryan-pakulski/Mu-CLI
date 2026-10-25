@@ -14,8 +14,8 @@ The control flow:
 
   1. Reset per-turn state (paused_execution_text, hook abort flag,
      loop blocker flag).
-  2. Build the new user message (apply feature/loop mode prompt
-     transforms; attach staged files).
+  2. Build the new user message (the user's text verbatim plus staged
+     files; mode state rides in the request-only turn context).
   3. Compose the system prompt: agentic harness + mode-specific text
      + workspace context (retrieval-first when available) + L1–L5
      hierarchical layers.
@@ -54,7 +54,6 @@ from mu.agent.approval import (
 from mu.ui.markup import esc, show_markup, show_renderable
 from mu.agent.hooks import HookContext
 from mu.agent.retry import is_context_overflow_error, parse_overflow_token_counts
-from mu.feature.engine import refresh_and_persist_feature_plan, summarize_feature_plan
 from mu.tools._dispatcher import execute_tool
 from mu.tools._envelope import infer_tool_error_code
 from mu.tools.capabilities import (
@@ -109,7 +108,6 @@ from mu.agent.context_guard import (  # noqa: F401
     _maybe_nudge_context_pressure,
 )
 from mu.agent.teacher_watcher import (
-    _render_learner_profile_block,
     _run_teacher_watcher_assistant,
     _run_teacher_watcher_user,
 )
@@ -345,10 +343,85 @@ def _fold_turn_context(session, turn_start_index, iteration) -> dict | None:
         return None
 
 
+def _attach_learner_reply(session, text) -> None:
+    """Attach the learner's chat message to the open teach_check of the lesson."""
+    try:
+        from mu.teacher.engine import load_course
+        from mu.teacher.gates import active_course_path, attach_learner_message
+
+        path = active_course_path(session)
+        course = load_course(path) if path else None
+        if course is None:
+            return
+        if attach_learner_message(course, text) is not None:
+            from mu.teacher.engine import save_course
+
+            save_course(course)
+    except Exception:  # noqa: BLE001 — never block the turn
+        logger.debug("teacher answer attach failed", exc_info=True)
+
+
+def _inline_choice_nudge(session, active_mode, assistant_text) -> str:
+    """Teacher mode: answer options typed inline (A) … B) …) belong in the picker."""
+    if active_mode != "teacher" or getattr(session, "_inline_choice_nudged", False):
+        return ""
+    try:
+        from mu.teacher.gates import inline_choices
+    except Exception:  # noqa: BLE001
+        return ""
+    if not inline_choices(assistant_text):
+        return ""
+    session._inline_choice_nudged = True
+    return ("Your message lists answer options inline. Comprehension checks with options go through "
+            "teach_check(kind='choice', options=[...]) so the learner picks in the picker and the answer is "
+            "recorded exactly. Re-ask this check that way (do not repeat the explanation).")
+
+
+_ANNOUNCED_STALE_PROMPTS: set = set()
+
+
+def _announce_stale_prompts(session, mode) -> None:
+    """Once per process, tell the user when their prompt override for the base
+    or the active mode is older than the bundled prompt (keep / diff / reset)."""
+    if not getattr(session, "ui", None):
+        return
+    try:
+        from mu.prompts import stale_notice, stale_overrides
+
+        for item in stale_overrides(["base", mode]):
+            key = (item["name"], item["bundled_version"])
+            if item["acknowledged"] or key in _ANNOUNCED_STALE_PROMPTS:
+                continue
+            _ANNOUNCED_STALE_PROMPTS.add(key)
+            session.ui.show_info(stale_notice(item))
+    except Exception:  # noqa: BLE001
+        logger.debug("stale prompt check failed", exc_info=True)
+
+
+def _resolve_blockers_from_message(session, text) -> None:
+    """The user's reply answers any open blocker (modes v2 §3.4)."""
+    try:
+        manager = getattr(session, "session_manager", None)
+        if manager is None or getattr(manager, "mode_state", None) is None:
+            return
+        state = manager.mode_state.peek("blockers")
+        if state is not None and state.open_blockers():
+            state.resolve_all(str(text)[:2000], actor="user:chat")
+    except Exception:  # noqa: BLE001 — never block the turn
+        logger.debug("blocker resolution failed", exc_info=True)
+
+
 def run_turn(session, text, *, origin="user"):
     logger.info(f"Sending message: {text[:100]}...")
     session.paused_execution_text = None
     session._loop_blocker_raised = False  # fresh turn — last turn's pause doesn't apply
+    # The loop watchdog's nudge budget is per turn: a run that used it up must
+    # not leave the watchdog off for the rest of the session.
+    session._watchdog_nudge_count = 0
+    session._watchdog_ineffective_count = 0
+    session._inline_choice_nudged = False
+    session._verify_nudged = False
+    session._turn_started_at = time.time()
     session._hook_abort_requested = False
     session._hook_abort_reason = None
     # Fix #13: reset the consolidation guard each turn so a max-iterations
@@ -438,6 +511,8 @@ def run_turn(session, text, *, origin="user"):
     # Compute the active agent mode once — reused by scratchpad handling
     # below and by the mode-specific prompt builders that follow.
     active_mode = str(session.variables.get("agent_mode", "default")).lower()
+    if origin == "user":
+        _announce_stale_prompts(session, active_mode)
     active_tool_phases = resolve_active_tool_phases(
         session.variables,
         [
@@ -458,34 +533,20 @@ def run_turn(session, text, *, origin="user"):
                 )
             ),
         )
-        # Scratchpad persistence (R12, FM-12): in loop/feature modes the
-        # scratchpad defaults to persisting across turns so cross-turn
-        # plans survive. In default/teacher modes it is cleared at turn
-        # start unless the user explicitly set the persist flag. An
-        # explicit True always persists; loop/feature always persists
-        # (mode wins). Default mode with entries present emits a clear
-        # notice so the human knows the plan was wiped.
-        _explicit_persist = bool(
+        # The scratchpad is cleared at turn start in every mode unless the
+        # user set scratchpad_persist_across_turns: cross-turn plans live in
+        # work items and mode records in typed mode state (modes v2 §3.8).
+        _should_persist = bool(
             session.variables.get("scratchpad_persist_across_turns", False)
         )
-        _should_persist = _explicit_persist or active_mode in ("loop", "feature")
         if not _should_persist:
-            _had_entries = len(session.turn_scratchpad.entries) > 0
-            # Carve out the `todo`-tagged ledger — it is the agent's persistent
-            # self-managed task plan and must survive the turn-start wipe so
-            # the agent can reconcile/prune it across turns (the Claude-Code
-            # "clean up the stale task list" move). Only ephemeral notes are
-            # cleared; todos persist for the session.
-            _removed = session.turn_scratchpad.clear_excluding({"todo"})
-            if _had_entries:
-                _notice = (
-                    "Turn scratchpad auto-cleared at turn start "
-                    "(scratchpad_persist_across_turns is off in default mode); "
-                    "todo ledger retained."
-                )
-                logger.info(_notice)
-                if session.ui and _removed:
-                    session.ui.show_info(_notice)
+            # The scratchpad is a per-turn notepad: plans live in work items
+            # and mode records in typed mode state (mu.modes), so nothing a
+            # panel depends on is lost here.
+            _removed = len(session.turn_scratchpad.entries)
+            session.turn_scratchpad.clear()
+            if _removed:
+                logger.info("Turn scratchpad cleared at turn start (%d notes).", _removed)
 
     # Dual-registry contract (documented, not a bug): staged_files carries
     # THIS-turn provider-native payloads (image_input bytes, file_refs —
@@ -495,13 +556,11 @@ def run_turn(session, text, *, origin="user"):
     # intentionally lands in both: the model sees the content now AND
     # retains a durable handle after compaction.
     parts = list(session.staged_files) + list(getattr(session, "staged_attachments", []) or [])
+    # The user's text is saved verbatim: mode guidance lives in the mode prompt
+    # and volatile mode state in the request-only turn context (mode capsule).
     effective_text = text
-    if text and active_mode == "feature":
-        effective_text = session._build_feature_mode_prompt(text)
-    elif text and active_mode == "loop":
-        effective_text = session._build_loop_mode_prompt(text)
-    if active_mode == "loop":
-        session._ensure_loop_goal_persistence()
+    if origin == "user" and text:
+        _resolve_blockers_from_message(session, text)
     # Auto-pin session_goal if unset and text is a substantial user
     # message (not a slash command, not empty, >10 chars).
     # This ensures L3 always has a goal anchor from the first meaningful
@@ -529,13 +588,13 @@ def run_turn(session, text, *, origin="user"):
     if getattr(session, "_thread_turn_id", None):
         new_user_message["timeline_id"] = session._thread_turn_id
 
-    # Teacher watcher: classify the user's message as a learner reply
-    # against the active lesson's most recent check, BEFORE the agent
-    # runs. The watcher records learner_response/learner_question turns
-    # into the engine so the transcript reflects what the user actually
-    # said — not what the agent later narrates about it.
+    # Teacher mode: the learner's message answers the open comprehension check
+    # (teach_check). The LLM lecture watcher is the opt-in legacy path.
     if origin == "user" and active_mode == "teacher" and text:
-        _run_teacher_watcher_user(session, text)
+        if session.variables.get("teacher_watcher", False):
+            _run_teacher_watcher_user(session, text)
+        else:
+            _attach_learner_reply(session, text)
 
     if origin == "user" and text and session.ui and session.variables.get("verbose", False):
         session.ui.render_message("user", text)
@@ -624,40 +683,6 @@ def run_turn(session, text, *, origin="user"):
             # demand via list_dir/read_file/search_for_string instead.
 
     base_system_prompt = session.system_instruction
-    if active_mode == "feature":
-        base_system_prompt += (
-            "\n\nFEATURE MODE SYSTEM PROMPT\n"
-            "You are in Feature Plan Engine mode. "
-            "Use the staged feature-task engine for this request. Start with create_feature, then create_phases, then create_task for each ticket. "
-            "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
-            "Every task must include explicit EXIT CRITERIA and tasks can be marked completed only after all exit criteria are verified. "
-            "Continuously update verified_exit_criteria via update_task_status as each criterion is met so progress remains explicit. "
-            "Step through one task at a time until completion; never work multiple tasks simultaneously. "
-            "Use get_execution_state to choose the next actionable phase/task, use block_task if external input is required, and resume_task when user unblock context arrives. "
-            "Use review_all_completed_tasks/review_completed_tasks/propose_task_diff/decide_task_diff/archive_task for review-and-archive flow after implementation completes. "
-            "gather read-only context first, use save_scratchpad for temporary phase notes, call flush only after a tool result reported \"Stored ... in collation buffer\", and call raise_blocker when blocked on user input. In subagent sessions read-only results always deliver inline — never call flush there. "
-            "You must use save_memory for durable facts/decisions and reuse search_memory/list_memory before re-deriving context in long loops. "
-            "You must use save_scratchpad/list_scratchpad within each turn to track in-flight plans as context grows. "
-            "Do not stall on status-only updates: unless blocked or awaiting explicit approval/decision, continue implementation autonomously until all phases and tasks are completed."
-        )
-    elif active_mode == "loop":
-        loop_goal = str(session.variables.get("loop_goal", "") or "").strip()
-        base_system_prompt += (
-            "\n\nLOOP MODE SYSTEM PROMPT\n"
-            "You are executing a long-horizon autonomous loop. "
-            "Work continuously in increments (plan -> execute -> verify -> continue) until stopped by the user. "
-            "Maintain a visible task list via `todo_write` and `todo_set_status` so the user can see your plan at any time. "
-            "Exactly one todo should be in_progress at a time. "
-            "At each increment, provide a concise timeline update: attempted action, outcome, evidence, and next step. "
-            "Use save_memory for durable findings and save_scratchpad for short-lived planning. "
-            "For focused side-quests that would clutter loop context (deep research, isolated refactors), delegate via `spawn_agent` with a tight tools whitelist."
-        )
-        if loop_goal:
-            base_system_prompt += f"\nLocked loop goal: {loop_goal}"
-    elif active_mode == "teacher":
-        profile_block = _render_learner_profile_block(session)
-        if profile_block:
-            base_system_prompt += profile_block
     if workspace_context:
         base_system_prompt += f"\n\n{workspace_context}"
     from mu.session.budgets import (
@@ -917,6 +942,19 @@ def run_turn(session, text, *, origin="user"):
         _recall = str(getattr(session, "_turn_durable_recall_block", "") or "").strip()
         if _recall:
             _turn_blocks.append("LAYER 2M — Durable cross-session recall:\n" + _recall)
+    # Mode capsule (mu.modes.capsule): the active mode's live records — never
+    # persisted; request-only like the rest of the turn context.
+    try:
+        from mu.modes.capsule import build_capsule
+
+        _capsule = build_capsule(session, active_mode)
+    except Exception:  # noqa: BLE001 — never block prompt assembly
+        _capsule = ""
+    if _capsule:
+        if _turn_prefix_stable:
+            _turn_blocks.append(_capsule)
+        else:
+            base_system_prompt = f"{base_system_prompt}\n\n{_capsule}"
     from mu.session.runtime_state import render_turn_context
     session._turn_context_block = render_turn_context(_turn_blocks)
     # The pre-injection persona text (system_instruction + mode prompt +
@@ -1046,7 +1084,28 @@ def run_turn(session, text, *, origin="user"):
     if getattr(session, "_recoverage_last_nudge_iter", None) is None:
         session._recoverage_last_nudge_iter = -10_000
 
+    _mission_was_running = False
+    _mission_halted = False
+    if active_mode == "loop":
+        try:
+            from mu.loop.engine import may_continue as _mission_running_now
+
+            _mission_was_running = _mission_running_now(session)
+        except Exception:  # noqa: BLE001
+            _mission_was_running = False
     while iteration < max_iterations:
+        # Pause / stop / an exhausted budget take effect at the next iteration
+        # boundary of a mission turn (mu.loop.engine).
+        if _mission_was_running and iteration > 0:
+            try:
+                if not _mission_running_now(session):
+                    if session.ui:
+                        session.ui.show_info("Loop mission is no longer running; stopping at this boundary.")
+                    logger.info("Loop mission left 'running' mid-turn; ending the turn.")
+                    _mission_halted = True
+                    break
+            except Exception:  # noqa: BLE001
+                pass
         iteration += 1
         session._trace_current_iter = iteration  # run tracer: compaction-kind iter
         _trace_iter_start = time.monotonic()  # run tracer: per-iter wall clock
@@ -1125,8 +1184,6 @@ def run_turn(session, text, *, origin="user"):
             logger.info(
                 f"Agentic loop exiting on hook abort: {session._hook_abort_reason}"
             )
-            if session.session_manager.get_feature_state():
-                session._set_feature_state(status="hook_aborted")
             return session._collect_turn_response(
                 initial_history_len,
                 status="hook_aborted",
@@ -1523,7 +1580,7 @@ def run_turn(session, text, *, origin="user"):
                 # The hard cap (1 explanation + 1 check per message) is
                 # enforced inside the classifier's contract and the
                 # apply_assistant_classification function.
-                if active_mode == "teacher":
+                if active_mode == "teacher" and session.variables.get("teacher_watcher", False):
                     assistant_text = "\n".join(
                         p["text"]
                         for p in ai_parts_archive
@@ -1829,8 +1886,61 @@ def run_turn(session, text, *, origin="user"):
                     )[:-1]
                     continue
 
+                if active_mode == "default" and iteration < max_iterations:
+                    try:
+                        from mu.modes.receipt import verify_nudge
+
+                        _verify_text = verify_nudge(session, active_mode)
+                    except Exception:  # noqa: BLE001
+                        _verify_text = ""
+                    if _verify_text:
+                        session.session_manager.history.append({
+                            "role": "user",
+                            "parts": [{"type": "text", "text": _verify_text}],
+                            "synthetic": True,
+                        })
+                        emit_nudge(session, "verify_nudge", iteration)
+                        messages = session._build_messages_from_history(
+                            session._prepare_runtime_history(),
+                            {"role": "system", "parts": []},
+                        )[:-1]
+                        continue
+
+                if active_mode == "teacher" and iteration < max_iterations:
+                    _choice_nudge = _inline_choice_nudge(
+                        session,
+                        active_mode,
+                        "\n".join(
+                            str(getattr(p, "text", "") or "")
+                            for p in (getattr(response, "parts", None) or [])
+                            if getattr(p, "type", "") == "text"
+                        ),
+                    )
+                    if _choice_nudge:
+                        session.session_manager.history.append({
+                            "role": "user",
+                            "parts": [{"type": "text", "text": _choice_nudge}],
+                            "synthetic": True,
+                        })
+                        emit_nudge(session, "inline_choices", iteration)
+                        messages = session._build_messages_from_history(
+                            session._prepare_runtime_history(),
+                            {"role": "system", "parts": []},
+                        )[:-1]
+                        continue
+
                 if active_mode == "loop" and iteration < max_iterations:
-                    if session._loop_blocker_raised:
+                    try:
+                        from mu.loop.engine import may_continue
+
+                        _mission_running = may_continue(session)
+                    except Exception:  # noqa: BLE001
+                        _mission_running = False
+                    if not _mission_running and not session._loop_blocker_raised:
+                        # No running mission (none started, paused, stopped, done or
+                        # out of budget): the watchdog stands down and the turn ends.
+                        logger.info("Loop mode: mission not running; watchdog idle.")
+                    elif session._loop_blocker_raised:
                         # The agent already raised a blocker this
                         # turn — pausing intentionally. Don't poke
                         # it; let the loop finalize so the user can
@@ -1897,7 +2007,6 @@ def run_turn(session, text, *, origin="user"):
                                     iteration,
                                     ineffective=_wd_ineffective,
                                 )
-                                session._watchdog_paused = True
                             elif _wd_ineffective >= 3:
                                 # Ladder rung 1: structured re-plan demand.
                                 _watchdog_text = (
@@ -1914,7 +2023,6 @@ def run_turn(session, text, *, origin="user"):
                                     iteration,
                                     ineffective=_wd_ineffective,
                                 )
-                                session._watchdog_escalated = True
                             watchdog_msg = {
                                 "role": "user",
                                 "parts": [
@@ -1940,13 +2048,12 @@ def run_turn(session, text, *, origin="user"):
                     )
 
                 logger.info("Agentic loop finished (no tool calls).")
+                try:
+                    from mu.modes.receipt import finalize as _finalize_receipt
 
-                if (
-                    str(session.variables.get("agent_mode", "default")).lower()
-                    == "feature"
-                    and session.session_manager.get_feature_state()
-                ):
-                    session._set_feature_state()
+                    _finalize_receipt(session, active_mode)
+                except Exception:  # noqa: BLE001
+                    logger.debug("turn receipt failed", exc_info=True)
 
                 # context_packaging_v2 P2: turn-boundary fold. The turn is
                 # over, so its completed tool results are no longer live
@@ -2113,6 +2220,16 @@ def run_turn(session, text, *, origin="user"):
 
                     # Shorten args for display
                     display_args = _shorten_tool_args(part.tool_args)
+                    # Tools that run a stored command (security PoCs, debug repros)
+                    # show the exact command / script being approved.
+                    try:
+                        from mu.modes.preview import approval_preview
+
+                        _preview = approval_preview(part.tool_name, part.tool_args, session)
+                        if _preview:
+                            display_args = {**display_args, **_preview}
+                    except Exception:  # noqa: BLE001
+                        logger.debug("approval preview failed", exc_info=True)
 
                     # Add count info to prompt if multiple
                     count_info = (
@@ -2667,13 +2784,6 @@ def run_turn(session, text, *, origin="user"):
                 else:
                     result = raw_result
 
-                session._sync_feature_state_for_tool(
-                    part.tool_name,
-                    part.tool_args,
-                    source_result,
-                    result,
-                )
-
                 # Efficiency metrics (spec #12): fold this result's telemetry
                 # into the per-turn accumulators, and count retrieval-tool
                 # calls (recall + result_* family) for the retrieval rate.
@@ -3146,8 +3256,6 @@ def run_turn(session, text, *, origin="user"):
             # the turn cleanly without surfacing an "API Error" banner.
             reason = abort_exc.reason or "Hook requested abort"
             logger.info(f"Agentic loop aborted by hook: {reason}")
-            if session.session_manager.get_feature_state():
-                session._set_feature_state(status="hook_aborted")
             return session._collect_turn_response(
                 initial_history_len,
                 status="hook_aborted",
@@ -3174,8 +3282,6 @@ def run_turn(session, text, *, origin="user"):
                 }
             )
             session.session_manager.save_history_turn(session.folder_context)
-            if session.session_manager.get_feature_state():
-                session._set_feature_state(status="interrupted")
             return session._collect_turn_response(
                 initial_history_len,
                 status="interrupted",
@@ -3210,8 +3316,6 @@ def run_turn(session, text, *, origin="user"):
                         "is saved; run /compact or start a new session to continue."
                     )
                 session.session_manager.save_history_turn(session.folder_context)
-                if session.session_manager.get_feature_state():
-                    session._set_feature_state(status="error")
                 return session._collect_turn_response(
                     initial_history_len,
                     status="context_overflow",
@@ -3287,8 +3391,6 @@ def run_turn(session, text, *, origin="user"):
                 continue
 
             session.session_manager.save_history_turn(session.folder_context)
-            if session.session_manager.get_feature_state():
-                session._set_feature_state(status="error")
             return session._collect_turn_response(
                 initial_history_len,
                 status="error",
@@ -3300,6 +3402,16 @@ def run_turn(session, text, *, origin="user"):
 
     session.session_manager.save_history_turn(session.folder_context)
     session.paused_execution_text = None
+
+    if _mission_halted:
+        _fold_turn_context(session, turn_start_index, iteration)
+        return session._collect_turn_response(
+            initial_history_len,
+            status="mission_paused",
+            total_in=total_in,
+            total_out=total_out,
+            total_cost=total_cost,
+        )
 
     # Fix #13: instead of silently stopping at max_iterations mid-work,
     # run ONE final consolidation turn — inject a user message telling the
@@ -3411,8 +3523,6 @@ def run_turn(session, text, *, origin="user"):
         except Exception:
             logger.debug("consolidation turn failed", exc_info=True)
 
-    if session.session_manager.get_feature_state():
-        session._set_feature_state(status="max_iterations_reached")
     return session._collect_turn_response(
         initial_history_len,
         status="max_iterations_reached",

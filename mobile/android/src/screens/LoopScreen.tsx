@@ -1,20 +1,35 @@
-// Loop mode (web loop_panel.html): the mission's execution queue, workstreams and checkpoints.
+// Loop mode (modes_v2.md §4.4, §5.3 Loop, §5.4 Android): the mission — goal, done-when criteria
+// with evidence marks, the tightest budget's meter — the timeline of increments, and the backlog
+// of work items. Pause / Resume is the page's one primary action (the watchdog obeys it); Stop
+// mission sits in ⋯ and asks first. Now holds blockers, a reached budget and a finished mission.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { ModeWorkspaceIntro, useModeWorkspaceView, workspaceState, workspaceTabs } from '../components';
-import { EntryRow, PanelPage, PanelSection } from '../components/chat/PanelPage';
-import { loopApi, type LoopEntry, type LoopState } from '../api/loop';
+import { PanelPage, PanelSection, Fact } from '../components/chat/PanelPage';
+import {
+  CheckRunRow, NowBoard, loopCriterionKey, loopNow, loopSentence, resolveBlockerAction, useCheckRunSheet, useModeActions,
+  type NowItem,
+} from '../components/modes';
+import { loopApi, type LoopBudgetMeter, type LoopIncrement, type LoopState } from '../api/loop';
+import { modeStateApi } from '../api/modeState';
+import { duration, modeState, money } from '../theme/status';
 import { spacing } from '../theme/tokens';
-import { Button, ProgressBar, Text } from '../ui';
+import { Banner, Button, Meter, Row, Sheet, Text, type ServerAction } from '../ui';
 
-/** Queue item status → the shared status vocabulary. */
-export function loopItemStatus(status: string | undefined): string {
-  if (status === 'completed') return 'done';
-  if (status === 'blocked') return 'failed';
-  if (status === 'in_progress') return 'active';
-  return 'pending';
+const TABS = [
+  { key: 'mission', label: 'Mission' },
+  { key: 'timeline', label: 'Timeline' },
+  { key: 'backlog', label: 'Backlog' },
+];
+
+const STOP: ServerAction = { id: 'stop', label: 'Stop mission', danger: true, confirm: 'Stop the mission? The agent stops working on it; the record stays.' };
+
+/** "cost $3.40 of $10" / "increments 12 of 20" / "runtime 1h 5m of 2h". */
+export function meterText(meter: LoopBudgetMeter): string {
+  if (meter.kind === 'cost_usd') return `cost ${money(meter.used)} of ${money(meter.cap)}`;
+  if (meter.kind === 'runtime_s') return `runtime ${duration(meter.used * 1000)} of ${duration(meter.cap * 1000)}`;
+  return `${meter.kind} ${meter.used} of ${meter.cap}`;
 }
 
 export function LoopScreen() {
@@ -22,7 +37,8 @@ export function LoopScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const workspaceView = useModeWorkspaceView(state?.workspace);
+  const [tab, setTab] = useState('mission');
+  const [openInc, setOpenInc] = useState<LoopIncrement | null>(null);
 
   const load = useCallback(async () => {
     try { setError(null); setState(await loopApi.getState()); }
@@ -31,61 +47,111 @@ export function LoopScreen() {
   }, []);
   useFocusEffect(useCallback(() => { setLoading(true); void load(); }, [load]));
 
-  const workspace = state?.workspace;
-  const completed = state ? state.backlog.filter(item => item.status === 'completed').length : 0;
-  const total = state?.backlog.length || 0;
+  const actions = useModeActions(load);
+  const sheet = useCheckRunSheet(state?.runs);
+  const now = useMemo(() => loopNow(state), [state]);
+  const mission = state?.mission || null;
+  const live = mission && (mission.status === 'running' || mission.status === 'paused' || mission.status === 'blocked');
+
+  const control = (action: 'pause' | 'resume') => actions.run({ id: action, label: action === 'pause' ? 'Pause' : 'Resume' }, () => loopApi.control(action));
+  const stop = () => actions.run(STOP, () => loopApi.control('stop'));
+
+  const actionsFor = (item: NowItem) => {
+    if (item.kind === 'blocker') {
+      return <Button label="Answer" variant="primary" testID={`now-answer-${item.ref}`}
+        onPress={() => void actions.run(resolveBlockerAction(item), args => modeStateApi.resolveBlocker(item.ref, String(args.resolution || '')))} />;
+    }
+    if (item.kind === 'mission_paused') return <Button label="Resume" variant="primary" onPress={() => void control('resume')} testID="now-resume" />;
+    if (item.kind === 'budget_exhausted') return <Button label="Stop mission" variant="danger" onPress={() => void stop()} testID="now-stop" />;
+    return null;
+  };
+
+  const right = live ? (
+    mission!.status === 'running'
+      ? <Button label="Pause" variant="secondary" icon="pause" onPress={() => void control('pause')} loading={actions.busy === 'pause'} testID="loop-pause" />
+      : <Button label="Resume" variant="primary" icon="play" onPress={() => void control('resume')} loading={actions.busy === 'resume'} testID="loop-resume" />
+  ) : undefined;
 
   return (
-    <PanelPage testID="loop-screen" title={workspace?.title || 'Loop'} state={workspaceState(workspace)}
-      tabs={workspaceTabs(workspace)} tab={workspaceView.selectedView} onTab={workspaceView.selectView}
-      right={state?.loop_goal ? (
-        <Button label={state.loop_active ? 'Pause' : 'Resume'} variant={state.loop_active ? 'secondary' : 'primary'}
-          onPress={async () => { await loopApi.setActive(!state.loop_active, state.loop_goal); void load(); }} testID="loop-toggle" />
-      ) : undefined}
+    <PanelPage testID="loop-screen" title="Loop" state={loopSentence(mission)}
+      tabs={TABS} tab={tab} onTab={setTab} right={right}
+      menu={live ? [{ key: 'stop', label: 'Stop mission', icon: 'square', tone: 'danger', onPress: () => void stop() }] : undefined}
       loading={loading} error={error} onRetry={() => void load()}
-      empty={!loading && !error && (!state || !state.active) ? { title: 'No loop active', message: 'Set a goal to open autonomous mission control.' } : null}
-      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }}>
-      {state && workspace ? (
+      empty={!loading && !error && !mission ? { title: 'No mission', message: 'Start a mission in the chat in loop mode: a goal, what done looks like, and a budget.' } : null}
+      refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }}
+      overlay={<>{actions.element}{sheet.element}</>}>
+      {actions.error ? <Banner tone="danger" title="That didn't go through" testID="loop-error">{actions.error}</Banner> : null}
+      <NowBoard items={now} actionsFor={actionsFor} />
+
+      {mission && tab === 'mission' ? (
         <>
-          <ModeWorkspaceIntro workspace={workspace} />
-          {workspaceView.shows('backlog') ? (
-            <PanelSection title="Backlog" count={total} empty="No queue items yet.">
-              {total ? (
-                <View style={styles.progress}>
-                  <View style={styles.progressHead}>
-                    <Text variant="caption" tone="ink3">Reported queue progress</Text>
-                    <Text variant="caption" tone="ink2" numeric>{completed}/{total}</Text>
-                  </View>
-                  <ProgressBar value={completed / total} tone="accent" accessibilityLabel={`${completed} of ${total} queue items complete`} />
-                  <Text variant="caption" tone="ink3">Completion state is visible; correctness still requires verification evidence.</Text>
-                </View>
-              ) : null}
-              {state.backlog.map((item: LoopEntry) => (
-                <EntryRow key={item.id} status={loopItemStatus(item.status)} content={item.content} source={item.source}
-                  testID={`loop-item-${item.id}`} />
-              ))}
-            </PanelSection>
-          ) : null}
-          {workspaceView.shows('features') ? (
-            <PanelSection title="Spawned features" count={state.loop_features.length} empty="No feature workstreams spawned.">
-              {state.loop_features.map((feature, index) => {
-                const record = feature && typeof feature === 'object' ? feature as Record<string, unknown> : null;
-                return <EntryRow key={String(record?.id || index)} content={String(record?.id || feature)} source={record?.timestamp != null ? String(record.timestamp) : null} />;
-              })}
-            </PanelSection>
-          ) : null}
-          {workspaceView.shows('memory') ? (
-            <PanelSection title="Memory" count={state.memory.length} empty="No durable checkpoints recorded.">
-              {state.memory.map(item => <EntryRow key={item.id} content={item.content} source={item.source} tags={item.tags} />)}
+          <PanelSection title="Goal" testID="loop-goal">
+            <Text variant="body" style={styles.para}>{mission.goal}</Text>
+            {state?.budget_meter ? (
+              <View style={styles.meter}>
+                <Meter value={state.budget_meter.ratio} accessibilityLabel={meterText(state.budget_meter)} />
+                <Text variant="caption" tone="ink3" numeric>{meterText(state.budget_meter)}</Text>
+              </View>
+            ) : null}
+          </PanelSection>
+          <PanelSection title="Done when" empty="No done-when criteria.">
+            {mission.done_when.map(c => {
+              const mark = modeState('criterion', loopCriterionKey(c));
+              return <Row key={c.id} status={mark.status} title={c.text} when={mark.label}
+                sub={c.evidence.length ? `evidence ${c.evidence.join(', ')}` : c.attested_by ? `attested by ${c.attested_by}${c.note ? `: ${c.note}` : ''}` : c.check?.command}
+                onPress={c.evidence.length ? () => sheet.open(c.evidence[c.evidence.length - 1]) : undefined} testID={`criterion-${c.id}`} />;
+            })}
+          </PanelSection>
+          {state?.runs.length ? (
+            <PanelSection title="Evidence runs">
+              {state.runs.map(run => <CheckRunRow key={run.id} run={run} onOpen={sheet.open} />)}
             </PanelSection>
           ) : null}
         </>
       ) : null}
+
+      {mission && tab === 'timeline' ? (
+        <PanelSection title="Increments" empty="No increments recorded yet.">
+          {[...mission.increments].reverse().map(inc => {
+            const mark = modeState('loop_increment', inc.result);
+            return <Row key={inc.n} status={mark.status} title={`${inc.n}  ${inc.objective}`} when={mark.label}
+              sub={inc.next ? `next: ${inc.next}` : inc.decision || undefined} onPress={() => setOpenInc(inc)} testID={`increment-${inc.n}`} />;
+          })}
+        </PanelSection>
+      ) : null}
+
+      {mission && tab === 'backlog' ? (
+        <PanelSection title="Backlog" empty="No backlog items.">
+          {(state?.backlog || []).map(item => {
+            const mark = modeState('work_item', item.status);
+            return <Row key={item.id} status={mark.status} title={item.title} when={mark.label} sub={item.note || undefined}
+              selected={item.id === state?.current_item} testID={`work-${item.id}`} />;
+          })}
+        </PanelSection>
+      ) : null}
+
+      <Sheet visible={openInc !== null} onClose={() => setOpenInc(null)} title={openInc ? `Increment ${openInc.n}` : ''} testID="increment-sheet">
+        {openInc ? (
+          <View style={styles.sheet}>
+            <Row status={modeState('loop_increment', openInc.result).status} title={openInc.objective} when={modeState('loop_increment', openInc.result).label} />
+            {openInc.decision ? <Fact label="Decision" value={openInc.decision} /> : null}
+            {openInc.next ? <Fact label="Next" value={openInc.next} /> : null}
+            {openInc.actions.length ? <Fact label="Actions" value={openInc.actions.join('\n')} /> : null}
+            {openInc.evidence.map(id => {
+              const run = state?.runs.find(r => r.id === id);
+              return run
+                ? <CheckRunRow key={id} run={run} onOpen={r => { setOpenInc(null); sheet.open(r); }} />
+                : <Row key={id} title={`Run ${id}`} onPress={() => { setOpenInc(null); sheet.open(id); }} />;
+            })}
+          </View>
+        ) : null}
+      </Sheet>
     </PanelPage>
   );
 }
 
 const styles = StyleSheet.create({
-  progress: { gap: spacing.xs, paddingVertical: spacing.sm },
-  progressHead: { flexDirection: 'row', justifyContent: 'space-between' },
+  para: { marginVertical: spacing.sm },
+  meter: { gap: spacing.xs, paddingVertical: spacing.sm },
+  sheet: { gap: spacing.sm },
 });

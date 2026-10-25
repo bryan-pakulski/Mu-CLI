@@ -203,6 +203,7 @@
         <section class="chat-column w-chat__column" aria-label="Chat">
             {% include "fragments/session_header.html" %}
             {% include "fragments/chat.html" %}
+            {% include "fragments/mode_expand.html" %}
         </section>
         <div class="resize-handle w-chat__resize"
              x-show="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen"
@@ -229,6 +230,7 @@
         </aside>
     </div>
 
+    {% include "fragments/mode_ask.html" %}
     {% include "fragments/inspector.html" %}
     {% include "fragments/file_browser.html" %}
     {% include "fragments/memory_layer_modal.html" %}

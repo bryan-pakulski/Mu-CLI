@@ -148,6 +148,15 @@ def _check_command(command: str) -> Optional[str]:
     return None
 
 
+def command_refusal(command: str, variables: Optional[dict] = None) -> Optional[str]:
+    """Refusal reason for a command the harness itself is about to run
+    (``mu.modes.evidence.run_check``), honouring the same session override as
+    the ``bash`` hook; None when it may run."""
+    if _override_active(HookContext(point="pre_tool", variables=dict(variables or {}))):
+        return None
+    return _check_command(str(command or ""))
+
+
 def _guard(ctx: HookContext) -> Optional[HookResult]:
     tool_name = ctx.tool_name or ""
     if tool_name not in GUARDED_TOOLS:
@@ -188,4 +197,4 @@ def install(registry: Optional[HookRegistry] = None) -> None:
 install()
 
 
-__all__ = ["install", "GUARDED_TOOLS"]
+__all__ = ["install", "command_refusal", "GUARDED_TOOLS"]

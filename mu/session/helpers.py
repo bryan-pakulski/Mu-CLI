@@ -59,39 +59,6 @@ def _slugify_feature_id(value: str) -> str:
     return slug or "feature"
 
 
-def derive_feature_state_status(feature_plan: dict | None) -> str:
-    """Derive the feature status from the feature plan summary dict.
-
-    Canonical state machine for feature status:
-      * awaiting_approval — not yet approved
-      * in_progress — approved and has active tasks
-      * running — approved but no task activity detected
-      * completed — all phases done / tasks completed/archived / review_status == "completed"
-    """
-    if not isinstance(feature_plan, dict):
-        return "running"
-    if not feature_plan.get("approved", False):
-        return "awaiting_approval"
-    if feature_plan.get("review_status") == "completed":
-        return "completed"
-    tasks = feature_plan.get("tasks") or []
-    if isinstance(tasks, list):
-        for task in tasks:
-            if isinstance(task, dict) and task.get("status") in ("in_progress", "blocked"):
-                return "in_progress"
-    if (
-        feature_plan.get("phases_completed")
-        and feature_plan.get("next_phase") is None
-    ):
-        return "completed"
-    active_tasks = [
-        t for t in tasks if isinstance(t, dict) and t.get("status") not in ("archived", None)
-    ]
-    if active_tasks:
-        return "in_progress"
-    return "running"
-
-
 # ============================================================ hook abort
 
 
@@ -130,5 +97,4 @@ __all__ = [
     "_sanitize_for_log",
     "_shorten_tool_args",
     "_slugify_feature_id",
-    "derive_feature_state_status",
 ]

@@ -23,8 +23,9 @@ export interface ResearchState {
   workspace: ModeWorkspaceContract;
 }
 
+// The server's recorded claims (research ledger), in the earlier findings shape; id is the claim id ("c3").
 export interface ResearchFinding {
-  id: number;
+  id: number | string;
   content: string;
   tags: string[];
   source: string;

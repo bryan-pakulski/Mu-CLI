@@ -101,6 +101,10 @@ class VerificationSpec:
     use_live_quiz_ui: bool = False
 
 
+GRADE_GRADED = "graded"
+GRADE_AWAITING = "awaiting_judgement"
+
+
 @dataclass
 class Grade:
     score_pct: int = 0
@@ -109,6 +113,10 @@ class Grade:
     verification_result: dict[str, Any] = field(default_factory=dict)
     feedback: str = ""
     graded_at: float = field(default_factory=time.time)
+    # "awaiting_judgement" is its own state: the keyword gate passed and the
+    # rubric judgement is pending — never a 0% fail.
+    status: str = GRADE_GRADED
+    check_run: str = ""
 
 
 @dataclass
@@ -162,6 +170,28 @@ class Assignment:
     dialog_turns: list[DialogTurn] = field(default_factory=list)
     pass_threshold: int = 70
     created_at: float = field(default_factory=time.time)
+    objectives: list[str] = field(default_factory=list)
+    review_id: str = ""
+    precheck_run: str = ""
+
+
+@dataclass
+class ComprehensionCheck:
+    """A comprehension check asked during a lecture (``teach_check``). Choice
+    checks capture the learner's pick exactly; open checks take the learner's
+    next chat message. ``assess_response`` records the tutor's signal."""
+
+    check_id: str
+    lesson_id: str
+    question: str
+    kind: str = "open"                      # open | choice
+    options: list[str] = field(default_factory=list)
+    objective: str = ""
+    answer: str | None = None
+    answered_at: float | None = None
+    signal: str | None = None               # on_track | partial | confused
+    note: str = ""
+    asked_at: float = field(default_factory=time.time)
 
 
 @dataclass
@@ -194,6 +224,12 @@ class Lesson:
     # lesson lifecycle.
     lecture_transcript_path: str | None = None
     exercise_file_paths: list[str] = field(default_factory=list)
+    # Skipping the lecture needs a reason tied to the diagnostic (a concept the
+    # learner already knows): {concept, reason, actor, at}.
+    known_concept_skip: dict[str, Any] | None = None
+    # Research-ledger citation numbers backing the lesson (teach_sources).
+    citations: list[int] = field(default_factory=list)
+    override: dict[str, Any] | None = None
 
 
 @dataclass
@@ -235,12 +271,19 @@ class ScheduledReview:
 
     review_id: str
     source_lesson_id: str
-    due_at_lesson_count: int
+    due_at_lesson_count: int = 0
     status: str = REVIEW_PENDING
     score_pct: int | None = None
     completed_at: float | None = None
     notes: str = ""
     created_at: float = field(default_factory=time.time)
+    # SM-2 schedule by date (mu.teacher.gates.schedule_after_grade).
+    objective: str = ""
+    due_at: float = 0.0
+    interval_days: float = 1.0
+    ease: float = 2.5
+    repetitions: int = 0
+    assignment_id: str = ""
 
 
 @dataclass
@@ -265,6 +308,10 @@ class Course:
     # the ones whose `due_at_lesson_count` is <= the current counter.
     lessons_completed_count: int = 0
     scheduled_reviews: list[ScheduledReview] = field(default_factory=list)
+    checks: list[ComprehensionCheck] = field(default_factory=list)
+    curriculum_approval: dict[str, Any] | None = None
+    curriculum_revision: int = 0
+    early_exit: dict[str, Any] | None = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -325,11 +372,16 @@ def create_course(
 
 
 def save_course(course: Course) -> Course:
+    from mu.modes.state import invalidate_cached
+
     course.updated_at = time.time()
     path = os.path.join(course.directory, "course.json")
     os.makedirs(course.directory, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(asdict(course), handle, indent=2)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(asdict(course), handle, indent=2, default=str)
+    os.replace(tmp, path)
+    invalidate_cached(path)
     return course
 
 
@@ -345,83 +397,78 @@ def load_course(course_id_or_path: str, folder_context: Any = None) -> Course | 
     return _course_from_dict(data)
 
 
+def _pick(cls, raw: Any) -> dict[str, Any]:
+    """Known fields only: unknown keys are ignored, missing ones default."""
+    if not isinstance(raw, dict):
+        return {}
+    names = set(cls.__dataclass_fields__)
+    return {k: v for k, v in raw.items() if k in names}
+
+
 def _course_from_dict(data: dict[str, Any]) -> Course:
-    course = Course(
-        course_id=data["course_id"],
-        subject=data["subject"],
-        target_level=data.get("target_level", "beginner"),
-        learner_profile=data.get("learner_profile", {}),
-        directory=data.get("directory", ""),
-        status=data.get("status", COURSE_DIAGNOSING),
-        current_module_id=data.get("current_module_id"),
-        current_lesson_id=data.get("current_lesson_id"),
-        current_assignment_id=data.get("current_assignment_id"),
-        lessons_completed_count=int(data.get("lessons_completed_count", 0) or 0),
-        created_at=data.get("created_at", time.time()),
-        updated_at=data.get("updated_at", time.time()),
-    )
-    for raw in data.get("scheduled_reviews", []):
-        course.scheduled_reviews.append(ScheduledReview(**raw))
-    for raw in data.get("modules", []):
-        course.modules.append(Module(**raw))
-    for raw in data.get("lessons", []):
-        course.lessons.append(_lesson_from_dict(raw))
-    for raw in data.get("assignments", []):
-        course.assignments.append(_assignment_from_dict(raw))
-    for raw in data.get("event_log", []):
-        course.event_log.append(CourseEvent(**raw))
+    base = _pick(Course, data)
+    for key in ("modules", "lessons", "assignments", "event_log", "scheduled_reviews", "checks"):
+        base.pop(key, None)
+    base.setdefault("course_id", data.get("course_id") or "course")
+    base.setdefault("subject", data.get("subject") or base["course_id"])
+    course = Course(**base)
+    course.lessons_completed_count = int(course.lessons_completed_count or 0)
+    course.scheduled_reviews = [ScheduledReview(**_pick(ScheduledReview, r)) for r in data.get("scheduled_reviews", [])
+                                if isinstance(r, dict) and r.get("review_id") and r.get("source_lesson_id")]
+    course.modules = [Module(**_pick(Module, r)) for r in data.get("modules", [])
+                      if isinstance(r, dict) and r.get("module_id")]
+    course.lessons = [_lesson_from_dict(r) for r in data.get("lessons", [])
+                      if isinstance(r, dict) and r.get("lesson_id") and r.get("module_id")]
+    course.assignments = [_assignment_from_dict(r) for r in data.get("assignments", [])
+                          if isinstance(r, dict) and r.get("assignment_id") and r.get("lesson_id")]
+    course.event_log = [CourseEvent(**_pick(CourseEvent, r)) for r in data.get("event_log", [])
+                        if isinstance(r, dict) and r.get("kind")]
+    course.checks = [ComprehensionCheck(**_pick(ComprehensionCheck, r)) for r in data.get("checks", [])
+                     if isinstance(r, dict) and r.get("check_id") and r.get("lesson_id")]
     return course
 
 
 def _lesson_from_dict(raw: dict[str, Any]) -> Lesson:
-    lecture_turns = [LectureTurn(**item) for item in raw.get("lecture_turns", [])]
-    return Lesson(
-        lesson_id=raw["lesson_id"],
-        module_id=raw["module_id"],
-        title=raw.get("title", raw["lesson_id"]),
-        learning_objectives=list(raw.get("learning_objectives", [])),
-        concept_brief=raw.get("concept_brief", ""),
-        sources=[
-            {str(key): str(value) for key, value in source.items()}
-            for source in raw.get("sources", [])
-            if isinstance(source, dict) and source.get("url")
-        ],
-        status=raw.get("status", LESSON_PENDING),
-        assignment_ids=list(raw.get("assignment_ids", [])),
-        remediation_count=int(raw.get("remediation_count", 0)),
-        lecture_plan=raw.get("lecture_plan", ""),
-        lecture_turns=lecture_turns,
-        lecture_comprehension_pct=raw.get("lecture_comprehension_pct"),
-        lecture_gaps=list(raw.get("lecture_gaps", [])),
-        lecture_concluded=bool(raw.get("lecture_concluded", False)),
-        min_lecture_checks=int(raw.get("min_lecture_checks", 2)),
-        lecture_comprehension_threshold=int(raw.get("lecture_comprehension_threshold", 60)),
-        lecture_transcript_path=raw.get("lecture_transcript_path"),
-        exercise_file_paths=list(raw.get("exercise_file_paths", [])),
-    )
+    base = _pick(Lesson, raw)
+    base["lecture_turns"] = [LectureTurn(**{"turn_index": i, "content": "", **_pick(LectureTurn, t)})
+                             for i, t in enumerate(raw.get("lecture_turns", []))
+                             if isinstance(t, dict) and "role" in t]
+    base["sources"] = [{str(k): str(v) for k, v in src.items()} for src in raw.get("sources", [])
+                       if isinstance(src, dict) and src.get("url")]
+    base.setdefault("title", raw["lesson_id"])
+    return Lesson(**base)
 
 
 def _assignment_from_dict(raw: dict[str, Any]) -> Assignment:
-    verification = VerificationSpec(**raw.get("verification", {}))
-    rubric = [RubricItem(**item) for item in raw.get("rubric", [])]
-    dialog_turns = [DialogTurn(**item) for item in raw.get("dialog_turns", [])]
+    base = _pick(Assignment, raw)
+    base["verification"] = VerificationSpec(**_pick(VerificationSpec, raw.get("verification") or {}))
+    base["rubric"] = [RubricItem(**_pick(RubricItem, item)) for item in raw.get("rubric", [])
+                      if isinstance(item, dict) and item.get("criterion")]
+    base["dialog_turns"] = [DialogTurn(**{"turn_index": i, "content": "", **_pick(DialogTurn, t)})
+                            for i, t in enumerate(raw.get("dialog_turns", []))
+                            if isinstance(t, dict) and "role" in t]
     grade_data = raw.get("grade")
-    grade = Grade(**grade_data) if isinstance(grade_data, dict) else None
-    return Assignment(
-        assignment_id=raw["assignment_id"],
-        lesson_id=raw["lesson_id"],
-        kind=raw["kind"],
-        prompt=raw.get("prompt", ""),
-        artifact_paths=list(raw.get("artifact_paths", [])),
-        rubric=rubric,
-        verification=verification,
-        status=raw.get("status", ASSIGNMENT_PRESENTED),
-        submission=raw.get("submission"),
-        grade=grade,
-        dialog_turns=dialog_turns,
-        pass_threshold=int(raw.get("pass_threshold", 70)),
-        created_at=raw.get("created_at", time.time()),
-    )
+    base["grade"] = Grade(**_pick(Grade, grade_data)) if isinstance(grade_data, dict) else None
+    base.setdefault("kind", "short-answer")
+    base.setdefault("prompt", "")
+    return Assignment(**base)
+
+
+def read_course(path: str) -> Course | None:
+    """Cached, read-only course view (capsule, panels). Never mutate the result."""
+    from mu.modes.state import load_cached
+
+    if not path or not os.path.isfile(path):
+        return None
+
+    def _load(real: str) -> Course:
+        with open(real, encoding="utf-8") as handle:
+            return _course_from_dict(json.load(handle))
+
+    try:
+        return load_cached(path, _load)
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
 
 
 # --- finders -------------------------------------------------------------
@@ -1142,8 +1189,11 @@ __all__ = [
     "ASSIGNMENT_PRESENTED",
     "ASSIGNMENT_SUBMITTED",
     "Assignment",
+    "ComprehensionCheck",
     "Course",
     "CourseEvent",
+    "GRADE_AWAITING",
+    "GRADE_GRADED",
     "DialogTurn",
     "Grade",
     "LESSON_ASSIGNED",
@@ -1177,6 +1227,7 @@ __all__ = [
     "find_review",
     "is_valid_lesson_transition",
     "load_course",
+    "read_course",
     "next_pending_lesson",
     "record_dialog_turn",
     "record_lecture_turn",

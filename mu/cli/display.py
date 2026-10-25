@@ -23,7 +23,6 @@ from mu.feature.engine import (
     refresh_and_persist_feature_plan,
     summarize_feature_plan,
 )
-from mu.session.session import derive_feature_state_status
 from utils.config import AGENT_MODE_METADATA, _DEFAULT_CONTEXT_TOKEN_LIMIT
 
 
@@ -122,7 +121,7 @@ _HELP_GROUPS = [
             ("/memory <status|list <target>|clear <target>>", "", "Inspect memory, scratchpad, or any layer (L1-L5)"),
             ("/tool <enable|disable|list>", "", "Enable/disable tools or list all"),
             (
-                "/feature <list|new|load|delete|status|phases|create|show|move|block|review|archive|monitor>",
+                "/feature <list|new|load|delete|status|approve|start|move|attest|done|diff|review|complete>",
                 "",
                 "Manage feature-mode plans",
             ),

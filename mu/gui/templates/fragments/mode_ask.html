@@ -1,0 +1,26 @@
+<!-- The mode shell's one-field dialog ($store.modeAsk, static/js/mode_stores.js): answers to
+     blockers, override reasons, a root cause, a mission goal; or a plain confirmation. -->
+<div class="w-modal" x-dialog="$store.modeAsk.visible" x-show="$store.modeAsk.visible" x-cloak
+     @dialog-close="$store.modeAsk.cancel()">
+    <form class="w-modal__dialog" data-size="sm" @click.stop role="dialog" aria-modal="true"
+          aria-labelledby="mode-ask-title" @submit.prevent="$store.modeAsk.submit()">
+        <header class="w-modal__head">
+            <h2 class="w-modal__title" id="mode-ask-title" x-text="$store.modeAsk.title"></h2>
+        </header>
+        <div class="w-modal__body">
+            <p x-show="$store.modeAsk.body" x-text="$store.modeAsk.body"></p>
+            <label class="w-field" x-show="$store.modeAsk.label">
+                <span class="w-field__label" x-text="$store.modeAsk.label"></span>
+                <textarea class="w-input" rows="3" x-model="$store.modeAsk.value"
+                          @keydown.enter.meta.prevent="$store.modeAsk.submit()"
+                          @keydown.enter.ctrl.prevent="$store.modeAsk.submit()"></textarea>
+            </label>
+        </div>
+        <footer class="w-modal__foot">
+            <button type="button" class="w-btn" data-variant="ghost" @click="$store.modeAsk.cancel()">Cancel</button>
+            <button type="submit" class="w-btn" :data-variant="$store.modeAsk.danger ? 'danger' : 'primary'"
+                    :disabled="$store.modeAsk.label && !$store.modeAsk.optional && !$store.modeAsk.value.trim()"
+                    x-text="$store.modeAsk.confirmLabel"></button>
+        </footer>
+    </form>
+</div>

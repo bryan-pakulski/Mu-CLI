@@ -307,12 +307,24 @@ def _load_builtin_tools() -> None:
             "mu.tools: failed to load skill tool package: %s", exc
         )
     try:
-        from . import feature as _feature_tools  # noqa: F401 — registers create_feature, create_phases, create_task, get_execution_state, block_task, resume_task, archive_task, review_*, propose/decide_task_diff, create/update/approve_feature_task, get_current_task, get_tasks, update_task_status, raise_blocker
+        from . import feature as _feature_tools  # noqa: F401 — registers the feature plan tools (propose/revise plan, start/complete task, criteria evidence, review)
     except Exception as exc:  # pragma: no cover — defensive
         import logging
         logging.getLogger("mucli").warning(
             "mu.tools: failed to load feature tool package: %s", exc
         )
+    try:
+        from . import loop as _loop_tools  # noqa: F401 — registers loop_increment / loop_status / loop_check_done
+    except Exception:  # pragma: no cover
+        import logging
+
+        logging.getLogger(__name__).exception("failed to load loop tools")
+    try:
+        from . import debug as _debug_tools  # noqa: F401 — registers the debug case tools
+    except Exception:  # pragma: no cover
+        import logging
+
+        logging.getLogger(__name__).exception("failed to load debug tools")
     try:
         from . import security as _security_tools  # noqa: F401 — registers create_security_report + 8 audit-engine tools
     except Exception as exc:  # pragma: no cover — defensive

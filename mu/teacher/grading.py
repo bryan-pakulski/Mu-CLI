@@ -1,12 +1,10 @@
 """Verification dispatch for teacher mode assignments.
 
-Each assignment kind has a dedicated grader. The contract: a grader
-takes an Assignment and a submission payload and returns a `Grade`.
-Code-style kinds run a shell command via the same subprocess-with-
-timeout-and-markers primitive the security engine uses for PoC
-verification. Prose-style kinds use a keyword gate before an
-LLM-judge step (the LLM step lands as a feedback string supplied by
-the caller — the grader itself just enforces the structural gate).
+Each answer-style kind has a dedicated grader: a grader takes an
+Assignment and a submission payload and returns a `Grade`. Prose-style
+kinds use a keyword gate before the tutor's rubric judgement. Code kinds
+run their verifier through ``run_check`` in the assignment's work/
+directory (``mu.teacher.gates.grade_exec``).
 
 `socratic-dialog` is handled separately via `engine.close_socratic_dialog`
 because it has its own lifecycle (record_turn → close_dialog) and is
@@ -15,10 +13,7 @@ not a single-shot grade.
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
-import time
 from typing import Any
 
 from mu.teacher.engine import (
@@ -29,7 +24,6 @@ from mu.teacher.engine import (
     VerificationSpec,
 )
 
-_DEFAULT_TIMEOUT = 30
 
 
 def grade(
@@ -59,8 +53,11 @@ def grade(
     spec = assignment.verification
 
     if assignment.kind in {"fix-broken-code", "implement-from-scratch", "command-output"}:
-        grade_obj = _grade_exec(assignment, spec, payload)
-    elif assignment.kind in {"multiple-choice", "fill-blank", "predict-output"}:
+        raise ValueError(
+            "code assignments are graded by running their verifier through the engine "
+            "(mu.teacher.gates.grade_exec), not grade()"
+        )
+    if assignment.kind in {"multiple-choice", "fill-blank", "predict-output"}:
         grade_obj = _grade_match(assignment, spec, payload)
     elif assignment.kind in {"short-answer", "explain-trace"}:
         grade_obj = _grade_rubric(
@@ -76,96 +73,6 @@ def grade(
     assignment.grade = grade_obj
     assignment.status = ASSIGNMENT_PASSED if grade_obj.passed else ASSIGNMENT_FAILED
     return grade_obj
-
-
-# --- exec-and-markers ----------------------------------------------------
-
-
-def _grade_exec(
-    assignment: Assignment,
-    spec: VerificationSpec,
-    submission: dict[str, Any],
-) -> Grade:
-    if not spec.verify_cmd:
-        raise ValueError(
-            f"assignment {assignment.assignment_id!r} requires a verify_cmd"
-        )
-    cwd = spec.working_dir or submission.get("working_dir") or os.getcwd()
-    timeout = max(1, int(spec.timeout_seconds or _DEFAULT_TIMEOUT))
-    started = time.time()
-    try:
-        proc = subprocess.run(
-            ["/bin/bash", "-lc", spec.verify_cmd],
-            cwd=cwd if os.path.isdir(cwd) else None,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
-        exit_code = proc.returncode
-        timed_out = False
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        exit_code = -1
-        timed_out = True
-    elapsed = time.time() - started
-
-    combined = stdout + "\n" + stderr
-    missing = [m for m in (spec.expected_markers or []) if m not in combined]
-    forbidden_present = [m for m in (spec.forbidden_markers or []) if m in combined]
-    passed = (
-        not timed_out
-        and not missing
-        and not forbidden_present
-    )
-
-    # Score = full credit on pass, partial on missing markers proportional
-    # to fraction of markers matched (so the learner sees progress when
-    # they get half-way there).
-    if spec.expected_markers:
-        matched = len(spec.expected_markers) - len(missing)
-        ratio = matched / len(spec.expected_markers)
-    else:
-        ratio = 1.0 if passed else 0.0
-    if forbidden_present or timed_out:
-        ratio = 0.0
-    score = int(round(100 * ratio)) if not passed else 100
-
-    feedback_parts = []
-    if passed:
-        feedback_parts.append("Verification command produced every expected marker.")
-    else:
-        if missing:
-            feedback_parts.append(
-                "Missing expected markers: " + ", ".join(f"`{m}`" for m in missing)
-            )
-        if forbidden_present:
-            feedback_parts.append(
-                "Forbidden markers were emitted: "
-                + ", ".join(f"`{m}`" for m in forbidden_present)
-            )
-        if timed_out:
-            feedback_parts.append(f"Verification timed out after {timeout}s.")
-    return Grade(
-        score_pct=score,
-        passed=passed,
-        rubric_breakdown=[],
-        verification_result={
-            "method": "exec_markers",
-            "verify_cmd": spec.verify_cmd,
-            "cwd": cwd,
-            "exit_code": exit_code,
-            "timed_out": timed_out,
-            "elapsed_seconds": round(elapsed, 3),
-            "missing_markers": missing,
-            "forbidden_markers_present": forbidden_present,
-            "stdout_tail": stdout[-2000:],
-            "stderr_tail": stderr[-2000:],
-        },
-        feedback=" ".join(feedback_parts) or "Verification completed.",
-    )
 
 
 # --- exact / regex match -------------------------------------------------

@@ -151,3 +151,17 @@ test('finishing and starting another prompt keeps each exchange separate', async
     assert.equal(restored.events.length, 6);
     assert.equal(chat._activeTrace(slot).events.length, 1);
 });
+
+test('enabling YOLO leaves human-only security approvals pending', async t => {
+    const { window } = await harness(t);
+    const prompts = window.Alpine.store('prompts');
+    const answered = [];
+    prompts.answer = id => answered.push(id);
+    prompts.queue = [
+        { id: 'poc', session_name: 'mailroom', prompt: { shape: 'tool_approval', approval_policy: 'always_human', tool_name: 'verify_security_proof' } },
+        { id: 'desktop', session_name: 'mailroom', prompt: { shape: 'tool_approval', requires_desktop: true } },
+        { id: 'ordinary', session_name: 'mailroom', prompt: { shape: 'tool_approval', tool_name: 'write_file' } },
+    ];
+    window.Alpine.store('yolo')._autoApprovePending();
+    assert.deepEqual(answered, ['ordinary']);
+});

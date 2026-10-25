@@ -162,13 +162,28 @@ Blocked tools (`mu/agent/plan_mode.py:WRITE_TOOLS`):
 - File mutators: `write_file`, `apply_diff`, `search_and_replace_file`.
 - Shell: `bash`, `bash_background`, `bash_kill`.
 - Sub-agents: `spawn_agent` (so a child can't escape plan-mode).
-- Feature-mode mutators: `create_feature`, `create_phases`,
-  `create_task`, `update_task_status`, `block_task`, `resume_task`,
-  `archive_task`, `propose_task_diff`, `decide_task_diff`,
-  `create_feature_task`, `update_feature_task`, `approve_feature_task`.
+- Feature-mode mutators: `propose_feature_plan`, `revise_feature_plan`,
+  `start_task`, `check_criterion`, `cite_evidence`, `complete_task`,
+  `block_task`, `review_task`, `run_feature_suite`, `propose_task_diff`,
+  `request_feature_completion`.
+- Debug-mode runs: `record_repro`, `verify_fix`,
+  `record_regression_test`, `bisect_repro`. The case, hypotheses and
+  suspects stay editable in plan mode.
+- Loop-mode runs: `loop_check_done`.
 - Security-mode verifiers: `verify_security_proof`,
   `verify_remediation` (because the PoC executes against the
   workspace).
+- Teacher-mode mutators: `create_course`, `record_diagnostic`,
+  `update_learner_profile`, `propose_curriculum`, `start_lesson`,
+  `assign_exercise`, `submit_assignment`, `grade_assignment`,
+  `decide_next`, `record_dialog_turn`, `close_dialog`,
+  `complete_module`, `finalize_course`, `complete_review`,
+  `teach_check`, `assess_response`, `skip_lecture`, `teach_sources`,
+  `write_lecture_transcript`, `register_exercise_file`.
+- Memory lifecycle mutators: `update_memory_status`,
+  `supersede_memory`, `retire_memory`, `reactivate_memory`,
+  `archive_memory`.
+- Research export: `research_export`.
 
 Read-side tools (`read_file`, `list_dir`, `search_*`,
 `retrieve_relevant_context`, `get_workspace_details`, etc.) are **not**
@@ -184,6 +199,35 @@ Limitations:
   the envelope and retries N times will waste tokens.
 - Plan mode is per-session; it does not persist across restarts unless
   you re-issue `/plan on`.
+
+### Mode checks (`run_check`)
+
+Debug repros and fixes, feature exit criteria and suite runs, loop
+`done_when` checks and teacher verifiers run commands through one
+runner, `mu/modes/evidence.py:run_check`. It applies the `bash`
+controls and records a `CheckRun`:
+
+- plan mode refuses it (`plan_mode_blocked`), as does the bash secret
+  guard (`mu/agent/secret_guard.py:command_refusal`);
+- `bash -c`, never a login shell, with an environment scrubbed of
+  credential-shaped variables (`*KEY*`, `*TOKEN*`, `*SECRET*`, …);
+- output is redacted before it is stored; runs time out (300 s
+  default, 1800 s max) and the process group is killed;
+- the calling tools are approval-gated, and tools that run a stored
+  command (`verify_fix`, `bisect_repro`, `record_regression_test`,
+  `check_criterion`, `loop_check_done`, `assign_exercise`,
+  `grade_assignment`) register an approval preview so the user sees the
+  exact command (`mu/modes/preview.py`);
+- the excerpt kept in context is at most 2 KB; full output goes to
+  `~/.mucli/checks/<session>/` and the session's result store.
+
+In container sessions checks run inside the session container. The
+sandbox runner (`mu/modes/sandbox.py`, used for teacher verifiers when
+Docker is available) runs the command in the `mucli-job-runtime` image
+with the network off, every capability dropped, `no-new-privileges`,
+CPU / memory / process limits, as the host user, against a throwaway
+copy of the workspace that leaves out VCS metadata and secret files.
+Security-mode PoCs still use their own runner (§7).
 
 ## 5. Sub-agent isolation
 

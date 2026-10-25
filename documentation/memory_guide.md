@@ -132,15 +132,14 @@ while an action targets a different session.
 
 **Location:** `mu/memory/stores.py`
 
-**Purpose:** Turn-local temporary notes that are cleared at the start of each new user turn (subject to mode-aware persistence — see below).
+**Purpose:** A per-turn notepad, cleared at the start of each new user turn in every mode (unless `scratchpad_persist_across_turns` is set).
 
 **Key features:**
 - Same data structure as Task Memory
 - **Max entries:** effective default 24 via the `scratchpad_max_entries` config variable (class default 256)
 - **Auto-cleared** at turn start when `scratchpad_enabled` is on, *unless* persistence applies
-- **Todo carve-out:** the `todo`-tagged slice (the agent's self-managed task ledger) is preserved by the turn-start clear (`ScratchpadStore.clear_excluding({"todo"})`) so the ledger persists across turns in `default`/`teacher` modes — only ephemeral notes are wiped. See [§8 Agent self-management tools](#8-agent-self-management-tools).
-- **Mode-aware persistence (R12/FM-12):** in `loop` and `feature` modes the scratchpad defaults to persisting across turns so cross-turn plans survive; in `default`/`teacher` modes it is cleared at turn start unless the user explicitly set `scratchpad_persist_across_turns=True`. An explicit `True` always persists; `loop`/`feature` always persist (mode wins). Computed once at turn start in `mu/agent/loop_body.py`.
-- Used for short-lived plans, observations, and temporary working notes
+- **Nothing durable lives here.** Plans are typed work items (`mu/modes/work.py`, behind the `todo_*` tools) and mode records (debug cases, feature plans, loop missions, courses, blockers) are typed mode state saved with the session, so the turn-start clear loses nothing a panel or a later turn depends on.
+- Used for observations and temporary working notes within a turn
 - Included in system prompt via `render_summary()`
 
 **Why implemented:** Provides a workspace for the AI to jot down temporary thoughts without polluting the persistent memory. Useful for step-by-step reasoning within a single turn.
@@ -163,7 +162,7 @@ while an action targets a different session.
 - **Auto-truncation:** Oldest entries dropped when limit exceeded
 - **Persistence:** Saved in session JSON, survives reloads
 - **Recall path (R11/FM-4):** when a collated result is deferred, the raw payload is also stored in the `ToolResultCache` (`mu/session/tool_cache.py`) with `force=True` and the placeholder text is stamped with `[cache:KEY]`, so a result dropped by a later buffer overflow remains recoverable via `recall(cache_key)`.
-- **Collated tools:** `get_workspace_details`, `read_file`, `search_for_string`, `search_references`, `retrieve_relevant_context`, `get_chunk`, `list_dir`, `url_grounding`, `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search`, `read_document`, `get_tasks`, `get_current_task` (the canonical set lives in `mu/tools/descriptors.py:_COLLATED_TOOL_NAMES`).
+- **Collated tools:** `get_workspace_details`, `read_file`, `search_for_string`, `search_references`, `retrieve_relevant_context`, `get_chunk`, `list_dir`, `url_grounding`, `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search`, `read_document`, `research_fetch`, `read_attachment`, `search_attachments` (the canonical set lives in `mu/tools/descriptors.py:_COLLATED_TOOL_NAMES`).
 
 **Why implemented:** Prevents context window bloat during "exploration" phases. The AI can gather multiple pieces of information before deciding which to process, rather than receiving everything immediately.
 
@@ -243,7 +242,8 @@ done. The forced consolidation turns the cap into a useful handoff.
 
 **Location:** `mu/tools/session/handlers.py` (`context_status`,
 `checkpoint_progress`), `mu/tools/memory/handlers.py` (`retire_thread`),
-`mu/tools/task/todo.py` (`todo_delete`, `todo_clear`).
+`mu/tools/task/todo.py` (`todo_delete`, `todo_clear`) over the work items in
+`mu/modes/work.py`.
 
 **Purpose:** Let the agent own its context — decide what to keep and what
 to prune — instead of the harness shoehorning it with fixed rules. The
@@ -253,8 +253,8 @@ driven by the SELF-MANAGEMENT block in `AGENTIC_SYSTEM_BASE` (rule 7).
 
 **The tools:**
 
-- **`todo_delete(id)`** / **`todo_clear(status?)`** — prune the task ledger.
-  `todo_clear` with no arg (or `status='completed'`) prunes finished items;
+- **`todo_delete(id)`** / **`todo_clear(status?)`** — prune the work items.
+  `todo_clear` with no arg (or `status='completed'`) prunes done items;
   `status='all'` wipes the ledger to start fresh. Without these the agent
   could only re-status tasks, never remove them — "clean up the stale task
   list" was impossible.
@@ -263,7 +263,7 @@ driven by the SELF-MANAGEMENT block in `AGENTIC_SYSTEM_BASE` (rule 7).
   last L2 fold), `l2_stale_vs_l5` (True when ≥12 uncheckpointed entries — the
   signal to checkpoint), `todo_count` / `scratchpad_notes` / `memory_entries`,
   and the staleness signals `active_memory`, `stale_memory_count`,
-  `stale_todos` (completed todos not yet cleared), `in_progress_todos`, and
+  `stale_todos` (done or dropped work items not yet cleared), `in_progress_todos`, and
   `memory_pressure_pct` (entries vs max — curate before a silent eviction).
   Reuses `collect_context_layers` so the numbers agree with `/memory` and
   the Context Observatory. Call before big gathers or when a turn feels long.
@@ -281,23 +281,23 @@ driven by the SELF-MANAGEMENT block in `AGENTIC_SYSTEM_BASE` (rule 7).
   content/tags/source matches `topic` (so it drops out of the default
   default active+stale search and the system-prompt summary), optionally removes
   matching non-todo scratchpad notes, and writes a single archived audit
-  entry recording the drop. Todo-ledger entries are never touched here —
-  prune those with `todo_delete`/`todo_clear`.
+  entry recording the drop. Work items are never touched here — prune
+  those with `todo_delete`/`todo_clear`.
 
-**Persistent todo ledger:** the `todo`-tagged slice of the scratchpad is
-now carved out of the turn-start auto-clear (`ScratchpadStore.clear_excluding`
-in `loop_body.py`). In `default`/`teacher` modes ephemeral scratchpad notes
-are still wiped at turn start, but the todo ledger survives across turns
-for the session — so the agent can reconcile and prune it (the Claude-Code
-"clean up the stale task list" move). In `loop`/`feature` modes the whole
-scratchpad already persisted; the carve-out changes nothing there.
+**Work items, not a scratchpad ledger:** the `todo_*` tools are thin
+wrappers over the session's typed work items (`mu/modes/work.py`): saved
+with the session, never evicted, exactly one `in_progress` (starting one
+puts the previous back to `pending`), and `done` can cite passing check
+runs (required in loop mode). They survive every turn in every mode, so
+the agent can reconcile and prune them; the GUI shows them in the Plan
+disclosure above the composer.
 
 **Why implemented:** The long-horizon fixes (#9 cadenced checkpoint, #12
 stall nudge, #13 forced consolidation) were harness-decided and
 agent-ignorant — the harness managed context *for* the agent. These tools
 flip that: the agent sees its own fill (`context_status`), folds its own
 summary (`checkpoint_progress`), drops its own threads (`retire_thread`),
-and prunes its own ledger (`todo_delete`/`todo_clear`). The harness keeps
+and prunes its own work items (`todo_delete`/`todo_clear`). The harness keeps
 the hard caps as a safety net but hands the *what to keep* decision to the
 agent.
 
@@ -476,7 +476,7 @@ When `query` is empty this reproduces the original recency-only ordering exactly
 | `memory_summary_limit` | `8` | Entries to include in system prompt |
 | `scratchpad_enabled` | `True` | Enable turn-local scratchpad |
 | `scratchpad_max_entries` | `24` | Max scratchpad entries |
-| `scratchpad_persist_across_turns` | `False` | Keep scratchpad across turns. Mode-aware: `loop`/`feature` modes persist regardless; `default`/`teacher` clear at turn start unless this is `True`. |
+| `scratchpad_persist_across_turns` | `False` | Keep the scratchpad across turns. Without it the scratchpad is cleared at turn start in every mode. |
 | `collation_enabled` | `True` | Enable deferred tool results |
 | `auto_compaction_enabled` | `false` | Opt in to proactive automatic compaction; default is model-directed `compact` with provider-overflow recovery as a safety backstop |
 | `tool_result_floor` | `4` | Trailing tool-result messages compaction leaves verbatim. Mode-aware: loop/feature raise to ≥8. |

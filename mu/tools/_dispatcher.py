@@ -2,9 +2,9 @@
 
 `dispatch(tool_name, args, ...)` is the canonical entry point for
 executing a tool. It performs descriptor lookup, argument-shape
-validation, path-emptiness gating, feature-mode review-gate enforcement
-for `apply_diff`, then invokes the registered handler and wraps the
-result in the canonical envelope.
+validation and path-emptiness gating, binds the session's research and mode
+states, then invokes the registered handler and wraps the result in the
+canonical envelope.
 
 The function returns a JSON-encoded envelope string. `mu.tools.execute(...)`
 parses that back into a dict for callers that want structured access;
@@ -17,8 +17,8 @@ it directly. The canonical handler registry lives in `mu/tools/__init__.py`.
 
 from __future__ import annotations
 
+import contextlib
 import json
-import os
 import re
 import traceback
 from typing import Any, Callable, Dict, Optional
@@ -57,8 +57,11 @@ TOOL_HANDLERS: dict[str, Callable[[dict, Any], str]] = {}
 # is process-global for backwards compatibility, but its contents are
 # snapshotted on the owning SessionManager so unloaded research sessions can
 # resume with their evidence intact.
+# Tools that read or change the session's ResearchState: dispatch binds that
+# state for the call and saves the session afterwards.
 _RESEARCH_SOURCE_TOOLS = {
     "url_grounding",
+    "research_fetch",
     "web_search",
     "arxiv_search",
     "doi_resolve",
@@ -67,6 +70,9 @@ _RESEARCH_SOURCE_TOOLS = {
     "hackernews_search",
     "read_document",
     "assess_source",
+    "research_question",
+    "record_claim",
+    "add_evidence",
 }
 
 
@@ -75,103 +81,6 @@ def _path_arg_error(key: str) -> str:
         f"Error: The '{key}' argument is empty. "
         "You must provide a valid filesystem path for the active runtime."
     )
-
-
-def _apply_diff_review_gate(
-    args: Dict[str, Any], session: Any, tool_name: str
-) -> Optional[Dict[str, Any]]:
-    """If feature-mode review is active, refuse `apply_diff` unless the
-    call carries an approved `proposal_id`. Returns a failure envelope
-    when the call is blocked, or None to let it through.
-
-    The check is scoped to `apply_diff` only — every other tool returns
-    None immediately."""
-    if tool_name != "apply_diff" or session is None:
-        return None
-    from mu.tools.capabilities import normalize_session_type
-
-    variables = getattr(session, "variables", None) or {}
-    if normalize_session_type(variables.get("session_type")) == "container":
-        # Container mode intentionally removes workflow-level write gates.
-        # The Docker boundary and non-bypassable secret guard remain active.
-        return None
-    if not hasattr(session, "session_manager"):
-        return None
-
-    feature_state = session.session_manager.get_feature_state() or {}
-    if not isinstance(feature_state, dict):
-        return None
-    feature_plan = feature_state.get("feature_plan") or {}
-    if not isinstance(feature_plan, dict):
-        return None
-
-    in_review_mode = bool(feature_plan.get("tasks_completed")) and (
-        str(feature_plan.get("review_status", "")).strip().lower() != "completed"
-    )
-    if not in_review_mode:
-        return None
-
-    proposal_id = str(args.get("proposal_id", "") or "").strip()
-    if not proposal_id:
-        return _build_tool_envelope(
-            tool_name=tool_name,
-            ok=False,
-            error_code="invalid_args",
-            message=(
-                "Error: apply_diff in review mode requires proposal_id "
-                "for an approved diff proposal."
-            ),
-        )
-
-    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
-    if not metadata_path or not os.path.exists(metadata_path):
-        return _build_tool_envelope(
-            tool_name=tool_name,
-            ok=False,
-            error_code="not_found",
-            message="Error: Feature metadata not found for review-mode apply_diff.",
-        )
-
-    from mu.feature.engine import load_feature_plan
-
-    plan = load_feature_plan(metadata_path)
-    proposal = next(
-        (item for item in plan.diff_proposals if item.id == proposal_id), None
-    )
-    if proposal is None or proposal.status != "approved":
-        return _build_tool_envelope(
-            tool_name=tool_name,
-            ok=False,
-            error_code="access_denied",
-            message=(
-                "Error: apply_diff blocked in review mode. "
-                "proposal_id must reference an approved diff proposal."
-            ),
-        )
-    if getattr(proposal, "applied_at", None) is not None:
-        return _build_tool_envelope(
-            tool_name=tool_name,
-            ok=False,
-            error_code="access_denied",
-            message=(
-                "Error: apply_diff blocked in review mode. "
-                f"proposal {proposal_id} has already been applied and is single-use."
-            ),
-        )
-    # The approved proposal's diff is the ONLY diff this proposal_id
-    # authorizes - reusing the id with different content must fail.
-    submitted_diff = str(args.get("diff", "") or "")
-    if submitted_diff != proposal.diff:
-        return _build_tool_envelope(
-            tool_name=tool_name,
-            ok=False,
-            error_code="access_denied",
-            message=(
-                "Error: apply_diff blocked in review mode. "
-                f"the submitted diff does not match approved proposal {proposal_id}."
-            ),
-        )
-    return None
 
 
 def _resolve_handler(descriptor) -> Optional[Any]:
@@ -199,9 +108,8 @@ def dispatch(
 ) -> str:
     """Canonical tool dispatcher.
 
-    Resolves the tool descriptor, validates arguments, enforces the
-    feature-mode `apply_diff` review gate, invokes the handler, and
-    returns a JSON-encoded envelope string.
+    Resolves the tool descriptor, validates arguments, invokes the handler,
+    and returns a JSON-encoded envelope string.
     """
     from mu.tools.descriptors import get_tool_descriptor, build_tool_context
 
@@ -283,10 +191,6 @@ def dispatch(
                 )
             )
 
-    gate = _apply_diff_review_gate(args, session, tool_name)
-    if gate is not None:
-        return json.dumps(gate)
-
     handler = _resolve_handler(descriptor)
     if not handler:
         return json.dumps(
@@ -306,43 +210,34 @@ def dispatch(
         session=session,
     )
     try:
-        if tool_name in _RESEARCH_SOURCE_TOOLS and session is not None:
-            manager = getattr(session, "session_manager", None)
-            if (
-                manager is not None
-                and getattr(manager, "current_session_name", "")
-                and hasattr(manager, "restore_research_sources")
-            ):
-                manager.restore_research_sources()
-        raw_result = handler(args, context)
-        envelope = _envelope_from_handler_result(tool_name, raw_result)
-        # Review-mode single-use: after a SUCCESSFUL review-gated apply,
-        # mark the proposal applied so its id cannot be reused.
-        if tool_name == "apply_diff" and envelope.get("ok") and session is not None:
-            try:
-                manager = getattr(session, "session_manager", None)
-                feature_state = manager.get_feature_state() if manager else None
-                plan_meta = str(
-                    (feature_state or {}).get("metadata_path", "") or ""
-                ).strip()
-                proposal_id = str(args.get("proposal_id", "") or "").strip()
-                if plan_meta and proposal_id:
-                    from mu.feature.engine import mark_proposal_applied
+        # Bind this session's ResearchState for the handler call, so code that
+        # resolves through get_citation_manager() hits THIS session's state and
+        # never one shared with a concurrent session.
+        _research_ctx = contextlib.nullcontext()
+        _manager = getattr(session, "session_manager", None) if session is not None else None
+        _session_state = getattr(_manager, "research", None)
+        if _session_state is not None:
+            from mu.research import ResearchState, use_research_state
 
-                    mark_proposal_applied(
-                        plan_meta,
-                        proposal_id=proposal_id,
-                        applied_file=str(args.get("filename", "") or ""),
-                    )
-            except Exception as exc:
-                logger.warning(
-                    "apply_diff: could not mark proposal %s applied: %s",
-                    args.get("proposal_id"), exc,
-                )
-        if tool_name in _RESEARCH_SOURCE_TOOLS and session is not None:
+            if isinstance(_session_state, ResearchState):
+                _research_ctx = use_research_state(_session_state)
+        # Same for the session's typed mode states (mu.modes.state).
+        _mode_ctx = contextlib.nullcontext()
+        _mode_states = getattr(_manager, "mode_state", None)
+        if _mode_states is not None:
+            from mu.modes.state import ModeStates, use_mode_states
+
+            if isinstance(_mode_states, ModeStates):
+                _mode_ctx = use_mode_states(_mode_states)
+            else:
+                _mode_states = None
+        with _research_ctx, _mode_ctx:
+            raw_result = handler(args, context)
+        envelope = _envelope_from_handler_result(tool_name, raw_result)
+        _mode_dirty = _mode_states is not None and _mode_states.consume_dirty()
+        if (tool_name in _RESEARCH_SOURCE_TOOLS or _mode_dirty) and session is not None:
             manager = getattr(session, "session_manager", None)
-            if manager is not None and hasattr(manager, "snapshot_research_sources"):
-                manager.snapshot_research_sources()
+            if manager is not None and getattr(manager, "current_session_name", ""):
                 manager.save_history(getattr(session, "folder_context", None))
         if "execution_source" not in envelope.get("telemetry", {}):
             envelope.setdefault("telemetry", {})["execution_source"] = (

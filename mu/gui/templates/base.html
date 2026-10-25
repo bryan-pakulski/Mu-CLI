@@ -29,6 +29,11 @@
     <script src="/static/vendor/highlight.min.js" defer></script>
     <!-- DOMPurify sanitises every markdown render (app.js renderMarkdown). -->
     <script src="/static/vendor/purify.min.js" defer></script>
+    <!-- Research panel model (MuResearch), used by app.js's research store. -->
+    <script src="/static/js/research_ledger.js" defer></script>
+    <script src="/static/js/mode_shell.js" defer></script>
+    <script src="/static/js/mode_models.js" defer></script>
+    <script src="/static/js/mode_stores.js" defer></script>
     <script src="/static/js/app.js" defer></script>
     <script src="/static/js/dialogs.js" defer></script>
     <script src="/static/js/floating_popouts.js" defer></script>
@@ -37,8 +42,6 @@
 {% endblock %}
 {% block overlays %}
 {% include "partials/confirm_popover.html" %}
-{% include "partials/loop_add_item_modal.html" %}
-{% include "partials/feature_create_modal.html" %}
 {% include "partials/skills_modal.html" %}
 {% include "partials/tool_cache_modal.html" %}
 {% endblock %}

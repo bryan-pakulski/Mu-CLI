@@ -331,14 +331,21 @@ class WebUI(BaseUI):
         approval_policy="default",
         **_kwargs,
     ):
+        # Fields an approval preview added (the command a tool will run, a PoC
+        # script) are shown with the call's own arguments.
+        preview = {
+            k: v for k, v in (display_args or {}).items() if k not in (tool_args or {})
+        } if tool_args else {}
         result = self._ask_prompt(
             {
                 "shape": "tool_approval",
                 "tool_name": tool_name,
-                "tool_args": tool_args or display_args,
+                "tool_args": {**tool_args, **preview} if tool_args else display_args,
+                "preview": preview,
                 "description": description,
                 "risk": risk,
                 "approval_policy": approval_policy,
+                "requires_desktop": tool_name in {"verify_security_proof", "verify_remediation"},
             }
         )
         if isinstance(result, dict) and result.get("cancelled"):

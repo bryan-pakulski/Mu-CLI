@@ -187,7 +187,7 @@ export function usePromptSync(): void {
   useEffect(() => {
     if (!yolo || !isConnected || !session) return;
     for (const prompt of queue) {
-      if (prompt.shape !== 'tool_approval' || autoApproving.current.has(prompt.id)) continue;
+      if (prompt.shape !== 'tool_approval' || prompt.approval_policy === 'always_human' || prompt.requires_desktop || autoApproving.current.has(prompt.id)) continue;
       autoApproving.current.add(prompt.id);
       void promptsApi.answer(prompt.id, { approved: true, remember: false })
         .then(() => {

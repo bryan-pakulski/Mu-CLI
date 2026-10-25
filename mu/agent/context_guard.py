@@ -1047,5 +1047,4 @@ from mu.agent.teacher_watcher import (  # noqa: F401
     _run_teacher_watcher_user,
     _run_teacher_watcher_assistant,
     _persist_teacher_course,
-    _render_learner_profile_block,
 )

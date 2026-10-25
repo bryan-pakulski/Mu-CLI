@@ -80,8 +80,15 @@ class AgentLoop:
             stop_reason=reason,
         )
         self.registry.fire("on_stop", ctx)
-        if hasattr(self.session, "stop_loop"):
-            self.session.stop_loop()
+        try:
+            from mu.loop.engine import set_status
+            from mu.loop.state import loop_state
+
+            mission = loop_state(self.session).mission
+            if mission is not None and mission.status in ("running", "blocked", "paused"):
+                set_status(self.session, "stopped", reason=reason, actor="system")
+        except Exception:  # noqa: BLE001 — stopping must not fail
+            pass
 
     # ------------------------------------------------------------- internals
 

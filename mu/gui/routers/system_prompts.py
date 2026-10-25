@@ -23,13 +23,18 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from mu.prompts import (
+    acknowledge_stale,
+    diff_override,
     get_resolved,
     init_templates,
     known_names,
     prompts_dir,
     read_override_raw,
     reload,
+    reset_override,
     resolved_snapshot,
+    stale_notice,
+    stale_overrides,
     validate,
     write_override,
 )
@@ -57,11 +62,17 @@ def _session(request: Request) -> Any:
 @router.get("")
 async def list_prompts(request: Request):
     snap = resolved_snapshot(_session(request))
+    stale = {item["name"]: item for item in stale_overrides()}
     return {
         "prompts_dir": prompts_dir(),
         "items": [
-            {"name": name, **info}
+            {"name": name, **info, "stale": stale.get(name)}
             for name, info in snap.items()
+        ],
+        "notices": [
+            {"name": item["name"], "text": stale_notice(item)}
+            for item in stale.values()
+            if not item["acknowledged"]
         ],
     }
 
@@ -122,19 +133,28 @@ async def init_prompts(body: PromptInitBody):
 
 @router.post("/{name}/reset")
 async def reset_prompt(name: str):
-    """Delete the file override for ``name`` so the hardcoded fallback
-    (or a fresh `/prompts init`) takes over again."""
+    """Move the file override for ``name`` aside (``<name>.md.bak``) so the
+    bundled prompt applies again."""
     if name not in known_names():
         raise HTTPException(status_code=404, detail=f"unknown prompt name: {name}")
-    import os
-
-    path = os.path.join(prompts_dir(), f"{name}.md")
-    removed = False
     try:
-        if os.path.isfile(path):
-            os.remove(path)
-            removed = True
+        backup = reset_override(name)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    reload()
-    return {"ok": True, "name": name, "removed": removed}
+    return {"ok": True, "name": name, "removed": backup is not None, "backup": backup}
+
+
+@router.post("/{name}/keep")
+async def keep_prompt(name: str):
+    """Keep an older override; its notice stays quiet until the bundled prompt changes."""
+    if name not in known_names():
+        raise HTTPException(status_code=404, detail=f"unknown prompt name: {name}")
+    acknowledge_stale(name)
+    return {"ok": True, "name": name}
+
+
+@router.get("/{name}/diff")
+async def prompt_diff(name: str):
+    if name not in known_names():
+        raise HTTPException(status_code=404, detail=f"unknown prompt name: {name}")
+    return {"name": name, "diff": diff_override(name)}

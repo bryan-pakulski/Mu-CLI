@@ -73,6 +73,14 @@
                             <span x-show="$store.tts.isSpeaking(t.id)"><svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-square"></use></svg></span>
                         </button>
                     </div>
+                    <!-- default mode's turn receipt (modes v2 §4.1): files changed and whether a check
+                         passed after the last edit; opens the receipt sheet -->
+                    <button type="button" class="mode-receipt" x-show="t.role === 'assistant' && t.receipt && !t.streaming"
+                            @click="$store.workPlan.openReceipt(t.receipt)">
+                        <span class="w-sign" :data-status="t.receipt && t.receipt.mark.status" aria-hidden="true"
+                              x-text="t.receipt && t.receipt.mark.glyph"></span>
+                        <span x-text="t.receipt && t.receipt.line"></span>
+                    </button>
                 </div>
             </template>
 
@@ -586,6 +594,22 @@
      :data-busy="$store.chat.busy ? '' : null"
      @click.outside="modeOpen = false; settingsOpen = false"
      @keydown.escape.window="modeOpen = false; settingsOpen = false">
+    <!-- The plan (work items, modes v2 §3.3): a quiet disclosure above the composer while it has open items. -->
+    <details class="mode-plan w-disclose" x-show="$store.workPlan.rows().length" x-cloak>
+        <summary>
+            <span>Plan</span>
+            <span class="mode-plan__current" x-show="$store.workPlan.currentTitle()" x-text="' · ' + $store.workPlan.currentTitle()"></span>
+        </summary>
+        <ul class="w-rows">
+            <template x-for="row in $store.workPlan.rows()" :key="row.id">
+                <li class="w-row">
+                    <span class="w-sign" :data-status="row.status" aria-hidden="true" x-text="row.glyph"></span>
+                    <div class="w-row__main"><span class="w-row__title" x-text="row.title"></span></div>
+                    <span class="w-row__when" x-text="row.sub"></span>
+                </li>
+            </template>
+        </ul>
+    </details>
     <!-- MUCLI_UNIFIED_REGISTRIES_V1: selection chips remain in the composer; registry lives in the Artifacts panel. -->
     <div class="attachment-selection w-composer__attachments" x-show="$store.attachments.selectedItems().length">
         <template x-for="item in $store.attachments.selectedItems()" :key="item.attachment_id">
@@ -669,7 +693,7 @@
                         aria-haspopup="listbox" :aria-expanded="modeOpen">
                     <span class="w-chip__dot w-composer__mode-dot" aria-hidden="true"></span>
                     <span class="label w-sr-only">Mode</span>
-                    <span class="value" x-text="$store.mode.realMode"></span>
+                    <span class="value" x-text="$store.mode.realMode + $store.mode.footWord()"></span>
                     <span class="caret w-chip__caret" aria-hidden="true">▾</span>
                 </button>
                 <div class="composer-mode-popout w-menu" x-show="modeOpen" x-cloak

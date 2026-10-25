@@ -11,13 +11,15 @@ Subcommands:
     /teach grades                     — markdown table of every graded assignment
     /teach curriculum                 — render the course's curriculum.md
     /teach delete <id>                — delete a course
+    /teach approve                    — approve the proposed curriculum (the learner's decision)
+    /teach start <id> --override <why> — start a lesson out of order (recorded)
+    /teach finish --early <why>       — finish before every lesson passed (recorded)
     /teach help                       — workflow help text
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import asdict
 from typing import Any
 
 from mu.teacher import (
@@ -44,6 +46,9 @@ Most workflows:
   /teach next               — show the next pending lesson
   /teach grades             — every graded assignment, newest first
   /teach curriculum         — render the syllabus
+  /teach approve            — approve the proposed curriculum
+  /teach start <id> --override <why> — start a lesson out of order
+  /teach finish --early <why> — finish the course before every lesson passed
   /teach exit               — clear active course (course stays on disk)
   /teach delete <id>        — permanently delete a course directory
 """
@@ -93,21 +98,48 @@ def _active_course(session: Any) -> Course | None:
 
 
 def _sync_record(session: Any, course: Course) -> dict:
-    fc = _folder_context(session)
-    metrics = course_metrics(course)
-    record = {
-        "type": "course",
-        "course_id": course.course_id,
-        "subject": course.subject,
-        "directory": course.directory,
-        "course_path": _storage.course_state_path(course.course_id, fc),
-        "status": course.status,
-        "metrics": metrics,
-        "updated_at": course.updated_at,
-        "created_at": course.created_at,
-    }
+    from mu.teacher.gates import course_record
+
+    record = course_record(course, _folder_context(session))
     session.session_manager.upsert_teacher_course(record)
+    if session.session_manager.active_course_id == course.course_id:
+        session.session_manager.teacher_state = dict(record)
     return record
+
+
+def _learner_action(session: Any, sub: str, rest: str) -> CommandResult:
+    """The learner's decisions: approve the curriculum, finish early, start out of order."""
+    from mu.modes.events import GateError
+    from mu.teacher import gates
+    from mu.teacher.engine import save_course
+
+    course = _active_course(session)
+    if course is None:
+        return CommandResult(ok=False, message="No active course. /teach load <id> first.")
+    try:
+        if sub == "approve":
+            gates.approve_curriculum(course, actor="user:cli")
+            message = (f"Curriculum approved (revision {course.curriculum_revision}). "
+                       f"First lesson: {course.current_lesson_id}.")
+        elif sub == "finish":
+            reason = rest.replace("--early", "", 1).strip()
+            if "--early" not in rest or not reason:
+                return CommandResult(ok=False, message="Usage: /teach finish --early <reason>")
+            gates.early_exit(course, reason=reason, actor="user:cli")
+            message = "Early finish recorded; the agent can now finalize the course."
+        else:  # start <lesson> --override <reason>
+            lesson_id, _, reason = rest.partition("--override")
+            if not lesson_id.strip():
+                return CommandResult(ok=False, message="Usage: /teach start <lesson_id> [--override <reason>]")
+            lesson = gates.start_lesson(course, _storage.slugify(lesson_id.strip()), actor="user:cli",
+                                        override_reason=reason.strip())
+            message = f"Lesson {lesson.lesson_id} started" + (" (order override recorded)." if lesson.override else ".")
+    except (GateError, ValueError) as exc:
+        return CommandResult(ok=False, message=str(exc))
+    save_course(course)
+    _sync_record(session, course)
+    session.session_manager.save_history(_folder_context(session))
+    return CommandResult(ok=True, message=message)
 
 
 # ---------------------------------------------------------- subcommands
@@ -246,8 +278,8 @@ def _queue_course_resumption_briefing(session: Any, course: Course) -> None:
         lines.append("ACTION: finish the diagnostic and call propose_curriculum.")
     elif course.status == "curriculum_proposed":
         lines.append(
-            "ACTION: the learner needs to call approve_curriculum before the "
-            "lesson loop can begin."
+            "ACTION: the learner approves the curriculum (/teach approve or the "
+            "panel) before the lesson loop can begin."
         )
     elif course.status == "completed":
         lines.append("ACTION: course is complete. Surface the report card.")
@@ -402,8 +434,8 @@ def _help(session: Any) -> CommandResult:
     "/teach",
     "/t",
     help=(
-        "Teacher-mode courses: list/new/load/exit, status/next/grades, "
-        "curriculum, delete. Run /mode teacher to drive a loaded course."
+        "Teacher-mode courses: list/new/load/exit, status/next/grades, curriculum, "
+        "approve, start --override, finish --early, delete. Run /mode teacher to drive a loaded course."
     ),
 )
 def teach_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
@@ -433,6 +465,8 @@ def teach_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
             result = _curriculum(session)
         elif sub == "delete":
             result = _delete(session, rest)
+        elif sub in ("approve", "finish", "start"):
+            result = _learner_action(session, sub, rest)
         elif sub == "help":
             result = _help(session)
         else:

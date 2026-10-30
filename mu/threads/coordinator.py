@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -153,6 +154,8 @@ class ThreadCoordinator:
         self.group_dir = os.path.join(history_root, "thread-groups", clean)
         self.db_path = os.path.join(self.group_dir, "coordination.sqlite3")
         self._publish = publish
+        self._probe_lock = threading.Lock()
+        self._probe_conn: sqlite3.Connection | None = None
         os.makedirs(self.group_dir, mode=0o700, exist_ok=True)
         self._initialize()
 
@@ -263,7 +266,9 @@ class ThreadCoordinator:
                 """
             )
             conn.execute(
-                "INSERT OR REPLACE INTO group_meta(key, value) VALUES('schema_version', '1')"
+                """INSERT INTO group_meta(key, value) VALUES('schema_version', '1')
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                   WHERE value!=excluded.value"""
             )
             conn.execute(
                 "INSERT OR IGNORE INTO group_meta(key, value) VALUES('created_at', ?)",
@@ -502,8 +507,35 @@ class ThreadCoordinator:
                 (thread_id, runtime_id),
             )
 
+    def _wake_work_exists(self, now: float) -> bool:
+        """Read-only idle probe for the wake scheduler's frequent polls.
+
+        It reuses one open connection: closing a WAL database's last
+        connection checkpoints it and drops ``-wal``/``-shm``, so a fresh
+        connection per poll rewrites the wal-index on disk every time.
+        """
+        with self._probe_lock:
+            if self._probe_conn is None:
+                self._probe_conn = sqlite3.connect(
+                    self.db_path, timeout=10.0, check_same_thread=False
+                )
+            return self._probe_conn.execute(
+                """SELECT 1 FROM wake_requests
+                   WHERE status='pending' OR (status='claimed' AND claimed_at<?)
+                   LIMIT 1""",
+                (now - 30.0,),
+            ).fetchall() != []
+
+    def close(self) -> None:
+        with self._probe_lock:
+            if self._probe_conn is not None:
+                self._probe_conn.close()
+                self._probe_conn = None
+
     def claim_wake(self, runtime_id: str) -> dict[str, Any] | None:
         now = _now()
+        if not self._wake_work_exists(now):
+            return None
         with self._immediate() as conn:
             # Recover a scheduler that died after claiming a wake.
             conn.execute(

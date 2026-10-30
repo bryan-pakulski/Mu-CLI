@@ -51,6 +51,12 @@ class JobStore:
         self._init_lock = threading.Lock()
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self.initialize()
+        # An idle connection held (and opened by a read) for the store's lifetime. Every
+        # query opens its own connection; without this one, each close is the WAL
+        # database's last, so SQLite checkpoints and deletes -wal/-shm and the next poll
+        # recreates them: an idle GUI rewrote them to disk several times a second.
+        self._anchor = sqlite3.connect(self.path, check_same_thread=False)
+        self._anchor.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchall()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=15.0, isolation_level=None)

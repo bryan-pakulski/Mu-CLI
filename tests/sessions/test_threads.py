@@ -417,3 +417,27 @@ def test_a_finished_turn_leaves_the_thread_free_for_another_surface(tmp_path):
     coordinator = session.thread_coordinator
     assert coordinator is not None
     assert coordinator.heartbeat(session.thread_meta.thread_id, "runtime-other-surface", ttl=120) is True
+
+
+def test_idle_wake_scheduler_scans_commit_nothing_and_pending_wakes_still_claim(tmp_path):
+    import sqlite3
+
+    from mu.threads.scheduler import ThreadWakeScheduler
+
+    coordinator, parent, child = _register_pair(tmp_path)
+    scheduler = ThreadWakeScheduler(lambda c, w: True, root=str(tmp_path))
+    watcher = sqlite3.connect(coordinator.db_path)
+    try:
+        before = watcher.execute("PRAGMA data_version").fetchone()[0]
+        for _ in range(5):
+            for c in scheduler._coordinators():
+                assert c.claim_wake(scheduler.runtime_id) is None
+        # data_version changes whenever another connection commits.
+        assert watcher.execute("PRAGMA data_version").fetchone()[0] == before
+
+        sent = coordinator.send_message(parent.thread_id, child.thread_id, "ping")
+        claimed = [c.claim_wake(scheduler.runtime_id) for c in scheduler._coordinators()]
+        assert [w["wake_id"] for w in claimed if w] == [sent["wake_id"]]
+    finally:
+        watcher.close()
+        scheduler.stop()

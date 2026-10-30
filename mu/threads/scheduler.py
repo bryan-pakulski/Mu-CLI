@@ -35,6 +35,7 @@ class ThreadWakeScheduler:
         self.root = os.path.abspath(os.path.expanduser(root or _config.HISTORY_DIR))
         self.runtime_id = f"wake-{os.getpid()}-{uuid.uuid4().hex}"
         self._stop = threading.Event()
+        self._known: dict[str, ThreadCoordinator] = {}
         self._thread: threading.Thread | None = None
         self._pool = ThreadPoolExecutor(
             max_workers=max(1, int(max_workers)),
@@ -57,17 +58,26 @@ class ThreadWakeScheduler:
         if wait and self._thread is not None:
             self._thread.join(timeout=2.0)
         self._pool.shutdown(wait=wait, cancel_futures=True)
+        for coordinator in self._known.values():
+            coordinator.close()
+        self._known.clear()
 
     def _coordinators(self):
         pattern = os.path.join(
             self.root, "thread-groups", "tg-*", "coordination.sqlite3"
         )
-        for path in glob.glob(pattern):
-            group_id = os.path.basename(os.path.dirname(path))
-            try:
-                yield ThreadCoordinator(group_id, root=self.root)
-            except Exception:
-                continue
+        present = {os.path.basename(os.path.dirname(p)) for p in glob.glob(pattern)}
+        for group_id in set(self._known) - present:
+            self._known.pop(group_id).close()
+        for group_id in sorted(present):
+            coordinator = self._known.get(group_id)
+            if coordinator is None:
+                try:
+                    coordinator = ThreadCoordinator(group_id, root=self.root)
+                except Exception:
+                    continue
+                self._known[group_id] = coordinator
+            yield coordinator
 
     def _deliver(self, coordinator: ThreadCoordinator, wake: dict) -> None:
         try:

@@ -719,10 +719,21 @@
             // waits" as prose at the top of the work column (not a second state chip).
             const facts = [
                 ['Key', `<span class="work-mono work-detail-key" title="job ${esc(job.id)}">${esc(jobKey(job))}</span>`],
-                job.repository ? ['Repository', `<span class="work-mono" title="repository ${esc(job.repository)}">${esc(job.repository)}</span>`] : null,
+                // A plain folder runs on a git snapshot of it; its result is a patch to apply there.
+                job.folder_snapshot ? ['Folder', `<span class="work-mono" title="folder ${esc(job.folder_snapshot.source_path)}">${esc(job.folder_snapshot.source_path)}</span>`] : null,
+                job.folder_snapshot ? ['Result', `<a href="/api/jobs/${encodeURIComponent(job.id)}/patch" download data-job-patch>${icon('download')} Download patch</a> <span class="work-meta">apply in the folder with <code>git apply</code></span>`] : null,
+                job.repository && !job.folder_snapshot ? ['Repository', `<span class="work-mono" title="repository ${esc(job.repository)}">${esc(job.repository)}</span>`] : null,
+                // Extra sources (mu/jobs/multi_source.py): each its own repository, PR or patch.
+                (job.sources || []).length ? ['Sources', (job.sources || []).map(src => {
+                    const result = src.pr?.url ? `<a href="${esc(src.pr.url)}" target="_blank" rel="noopener">${icon('git-pull-request')} PR${src.pr.number ? ` #${esc(src.pr.number)}` : ''}</a>`
+                        : (src.folder || src.branch) ? `<a href="/api/jobs/${encodeURIComponent(job.id)}/patch?source=${encodeURIComponent(src.name)}" download>${icon('download')} patch</a>` : '';
+                    return `<span class="work-mono" title="${esc(src.input)}">/sources/${esc(src.name)}</span> <span class="work-meta">${esc(src.input)}</span> ${result}`;
+                }).join('<br>')] : null,
                 job.branch ? ['Branch', `<span class="work-mono" title="branch">${esc(job.branch)}</span>`] : null,
                 job.origin_session ? ['Session', `<span title="session">${esc(job.origin_session)}</span>`] : null,
                 ['Budget', budgetText(job)],
+                (job.attachments || []).length ? ['Attachments', (job.attachments || []).map(a =>
+                    `<a class="work-mono" href="/api/jobs/${encodeURIComponent(job.id)}/attachments/${encodeURIComponent(a.name)}" download title="${esc(a.name)}">${esc(a.name)}</a>`).join(' · ')] : null,
                 prLabel ? ['Pull request', `<a href="${esc(job.pr.url)}" target="_blank" rel="noopener" data-pr-link>${icon('git-pull-request')} ${esc(prLabel)}</a>`] : null,
                 ENV ? ['Environment', ENV.headerPill(job.environments || job.build_environments, envOpen)] : null,
                 job.worktree ? ['Working directory', `<span class="work-mono work-detail-path" title="${esc(job.worktree)}">${esc(shortPath(job.worktree))}</span> <button type="button" class="w-textbtn" data-open-shell aria-expanded="${shellOpen}">${icon('terminal')}<span>Open a shell</span></button>`] : null,

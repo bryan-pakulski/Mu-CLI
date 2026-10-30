@@ -366,12 +366,34 @@
         <form id="work-create-form" class="work-create-form">
             <div class="w-modal__body work-form">
                 <div class="w-field work-field work-field-wide" id="job-workspace-field">
-                    <label class="w-field__label" for="job-workspace">Workspace</label>
-                    <input class="w-input" id="job-workspace" required list="job-workspace-recent" autocomplete="off" spellcheck="false" data-mono placeholder="/home/me/src/project — or https://github.com/org/repo.git" aria-describedby="job-repository-hint">
-                    <datalist id="job-workspace-recent"></datalist>
-                    <div class="w-chip-row work-workspace-recent" id="job-workspace-chips" role="group" aria-label="Recent workspaces"></div>
+                    <span class="w-field__label" id="job-source-label">Source</span>
+                    <div class="w-segmented work-source-kind" data-size="sm" role="radiogroup" aria-labelledby="job-source-label" id="job-source-kind">
+                        <button type="button" class="w-segmented__option" role="radio" aria-checked="true" data-source-kind="folder">Folder</button>
+                        <button type="button" class="w-segmented__option" role="radio" aria-checked="false" data-source-kind="repository">Repository</button>
+                        <button type="button" class="w-segmented__option" role="radio" aria-checked="false" data-source-kind="session">Session</button>
+                    </div>
+                    <div class="work-stack-tight" data-source-panel="folder">
+                        <input class="w-input" id="job-workspace" list="job-workspace-recent" autocomplete="off" spellcheck="false" data-mono placeholder="/home/me/src/project — or https://github.com/org/repo.git" aria-labelledby="job-source-label" aria-describedby="job-repository-hint">
+                        <datalist id="job-workspace-recent"></datalist>
+                        <div class="w-chip-row work-workspace-recent" id="job-workspace-chips" role="group" aria-label="Recent workspaces"></div>
+                    </div>
+                    <div class="work-stack-tight" data-source-panel="repository" hidden>
+                        <span class="w-select"><select class="w-select__control" id="job-repository" aria-labelledby="job-source-label" aria-describedby="job-repository-hint"></select></span>
+                        <input class="w-input" id="job-repository-url" autocomplete="off" spellcheck="false" data-mono placeholder="git@github.com:org/repo.git#main" aria-label="Repository URL" hidden>
+                    </div>
+                    <div class="work-stack-tight" data-source-panel="session" hidden>
+                        <span class="w-select"><select class="w-select__control" id="job-session" aria-labelledby="job-source-label" aria-describedby="job-repository-hint"></select></span>
+                        <label class="w-check"><input class="w-check__input" type="checkbox" id="job-session-conversation"><span>Attach the conversation</span></label>
+                    </div>
                     <small class="w-field__hint" id="job-repository-hint">The repository the job works in: a local path or a git URL (https or ssh).</small>
                     <div class="work-env-approval" id="job-environments-approval" role="region" aria-label="Build environment approval" hidden></div>
+                </div>
+                <div class="w-field work-field work-field-wide" id="job-sources-field">
+                    <span class="w-field__label" id="job-sources-label">Other sources</span>
+                    <ul class="work-sources" id="job-sources" aria-labelledby="job-sources-label"></ul>
+                    <datalist id="job-repository-names"></datalist>
+                    <div class="w-btn-row"><button type="button" class="w-textbtn" id="job-source-add">Add a source</button></div>
+                    <small class="w-field__hint" id="job-sources-hint">More folders or repositories the job may change, at /sources/&lt;name&gt; in its sandbox. Each gets its own branch and pull request; a folder’s change comes back as a patch.</small>
                 </div>
                 <div class="w-field work-field work-field-wide" id="job-environments-field">
                     <span class="w-field__label" id="job-environments-label">Run in</span>
@@ -401,6 +423,16 @@
                     <textarea class="w-textarea" id="job-validation" rows="3" data-mono placeholder="pytest tests/auth&#10;npm run typecheck"></textarea>
                     <small class="w-field__hint">Optional. The planner proposes checks from the repository; commands listed here are added to them.</small>
                 </label>
+                <div class="w-field work-field work-field-wide" id="job-attachments-field">
+                    <span class="w-field__label" id="job-attachments-label">Attachments</span>
+                    <div class="w-btn-row" role="group" aria-labelledby="job-attachments-label">
+                        <button type="button" class="w-btn" data-variant="tonal" data-size="sm" id="job-attach-files">Add files…</button>
+                        <button type="button" class="w-textbtn" id="job-attach-session" hidden>From the session…</button>
+                        <input type="file" id="job-attach-input" multiple hidden>
+                    </div>
+                    <ul class="work-attachments" id="job-attachments" aria-live="polite"></ul>
+                    <small class="w-field__hint" id="job-attachments-hint">Specs, logs, screenshots or data the job needs. Every stage can read them; they are never committed.</small>
+                </div>
                 <details class="work-advanced" id="work-advanced-details">
                     <summary>Advanced</summary>
                     <div class="work-advanced__body">

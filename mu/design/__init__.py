@@ -45,6 +45,29 @@ def destinations() -> Dict[str, Any]:
     return {k: v for k, v in load_tokens().get("destination", {}).items() if not k.startswith("_")}
 
 
+def scenery() -> Dict[str, Any]:
+    """Watercolour scenery packs for the Wash theme: name → {label, note, accent?} (classic first)."""
+    return {k: v for k, v in load_tokens().get("scenery", {}).items() if not k.startswith("_")}
+
+
+def scenery_choices() -> list:
+    """Scenery picker rows: name, label, note, the accent pigment per mode, and the Paper/Dusk
+    thumbnails (the pack's own scene; classic shows dawn, its default destination scene)."""
+    tokens = load_tokens()
+    rows = []
+    for name, spec in scenery().items():
+        scene = name if spec.get("accent") else "dawn"
+        accent = spec.get("accent") or tokens["semantic"]["accent"]
+        rows.append({
+            "name": name, "label": spec["label"], "note": spec["note"], "accent": spec.get("accent") or "",
+            "paper": {"thumb": f"/static/wash/art/{scene}-paper-800.webp",
+                      "pigment": tokens["themes"]["paper"]["pigment"][accent]["pigment"]},
+            "dusk": {"thumb": f"/static/wash/art/{scene}-dusk-800.webp",
+                     "pigment": tokens["themes"]["dusk"]["pigment"][accent]["pigment"]},
+        })
+    return rows
+
+
 def palette_choices() -> list:
     """Theme picker rows (Wash first): name, label, note and swatches per mode
     (canvas, surface, ink and the accent / ok / attention / danger / plan pigments)."""

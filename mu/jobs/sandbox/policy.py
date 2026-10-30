@@ -170,7 +170,7 @@ def gpus_arg(request: str) -> str:
 def container_args(name: str, stage: str, workspace: str, inputs: str, output: str,
                    relay: str, policy: SandboxPolicy, token: str, *, role: str = "job-stage",
                    harness_mounts: tuple = (), module: str = "mu.jobs.sandbox.worker",
-                   on_warning=None) -> list[str]:
+                   on_warning=None, extra_mounts: tuple = ()) -> list[str]:
     """Network-none + a scoped Unix socket avoids exposing any host TCP service.
 
     Only the disposable output directory is writable apart from implement's
@@ -226,6 +226,13 @@ def container_args(name: str, stage: str, workspace: str, inputs: str, output: s
             raise ValueError(f"unsupported harness mount {dst}")
         if dst != "/harness/state" and not readonly:
             raise ValueError(f"harness mount {dst} must be read-only")
+        mounts.append((src, dst, readonly))
+    # A job's extra sources (mu/jobs/multi_source.py): /sources/<name>, plus its read-only .git pointer.
+    for src, dst, readonly in extra_mounts:
+        if not re.fullmatch(r"/sources/[a-z0-9._-]{1,40}(/\.git)?", dst) or ".." in dst:
+            raise ValueError(f"unsupported source mount {dst}")
+        if dst.endswith("/.git") and not readonly:
+            raise ValueError(f"source git pointer {dst} must be read-only")
         mounts.append((src, dst, readonly))
     for src, dst, readonly in mounts:
         args += bind_mount(str(Path(src).resolve(strict=True)), dst, readonly, podman=podman, selinux=selinux)

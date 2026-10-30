@@ -198,8 +198,9 @@ html[data-embed] .w-shell > .mu-viewside {
     /* How much of the painting Glass 100% lets through: 22% once the painting is blurred (≥ 60%
      * blur), 12% with no blur, where the painting behind text is sharp; so the leaf's opacity floor
      * is 78% … 88% (check_contrast verifies both ends: the lowest that keeps every text colour at
-     * 4.5:1 over every painting). */
-    --mu-clear: calc(12% + 10% * min(1, var(--mu-blur, 0.6) / 0.6));
+     * 4.5:1 over every painting). A scenery pack with darker passages scales it down
+     * (--mu-clear-scale from tokens.json scenery leaf_clear; the check applies the same). */
+    --mu-clear: calc((12% + 10% * min(1, var(--mu-blur, 0.6) / 0.6)) * var(--mu-clear-scale, 1));
     --w-leaf-fill: color-mix(in srgb, var(--wash-surface) calc(100% - var(--mu-clear) * var(--mu-glass)), transparent);
     --w-glass-filter-leaf: blur(calc(40px * var(--mu-blur, 0.6))) saturate(calc(1 + 0.6 * var(--mu-glass)));
     --w-glass-filter-bar: blur(calc(22px * var(--mu-blur, 0.6))) saturate(calc(1 + 0.4 * var(--mu-glass)));

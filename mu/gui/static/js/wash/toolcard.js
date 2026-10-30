@@ -171,7 +171,18 @@
         for (var i = 0; i < list.length; i += 1) {
             var ev = list[i];
             if (!ev) continue;
-            if (ev.kind === 'tool_call') {
+            if (ev.kind === 'tool_call' && ev.name === 'raise_blocker') {
+                // A blocker is a question for the user, not a tool row: it stays in view.
+                var ask = parseArgs(ev.args) || {};
+                var q = {
+                    type: 'question', id: String(ev.id || ('q-' + i)), source: ev, name: ev.name,
+                    summary: String(ask.summary || ''), needs: String(ask.requested_input || ''),
+                    details: String(ask.details || ''),
+                    questions: (Array.isArray(ask.questions) ? ask.questions : (ask.questions ? [ask.questions] : [])).map(String),
+                };
+                items.push(q);
+                pending.push(q);
+            } else if (ev.kind === 'tool_call') {
                 var kind = kindOf(ev.name);
                 var card = {
                     type: 'card',
@@ -203,6 +214,7 @@
                     };
                     items.push(match);
                 }
+                if (match.type === 'question') continue;
                 var text = resultText(ev);
                 match.result = ev;
                 match.resultText = text;
@@ -393,6 +405,18 @@
             + '</div>';
     }
 
+    function renderQuestion(item) {
+        var qs = item.questions.filter(Boolean);
+        return '<div class="w-traceask" role="note">'
+            + '<p class="w-traceask__head">' + icon('alert-circle') + '<span>Paused for your answer</span></p>'
+            + (item.summary ? '<p class="w-traceask__summary">' + esc(item.summary) + '</p>' : '')
+            + (item.needs ? '<p class="w-traceask__line"><span class="w-traceask__key">Needs</span> ' + esc(item.needs) + '</p>' : '')
+            + (item.details ? '<p class="w-traceask__line">' + esc(item.details) + '</p>' : '')
+            + (qs.length ? '<ul class="w-traceask__questions">' + qs.map(function (q) { return '<li>' + esc(q) + '</li>'; }).join('') + '</ul>' : '')
+            + '<p class="w-traceask__hint">Reply in chat or answer it in the panel; the work carries on with your answer.</p>'
+            + '</div>';
+    }
+
     function renderNote(item) {
         return '<p class="w-tracenote">' + icon('info') + '<span>' + esc(item.ev && item.ev.text) + '</span></p>';
     }
@@ -427,12 +451,21 @@
             if (item.type === 'group') return renderGroup(item, options);
             if (item.type === 'thinking') return renderThinking(item);
             if (item.type === 'note') return renderNote(item);
+            if (item.type === 'question') return renderQuestion(item);
             return renderToolCard(item, options);
         }).join('');
     }
 
     function renderToolCards(events, options) {
-        var items = buildToolCards(events, options);
+        var all = buildToolCards(events, options);
+        // Questions never fold into the turn summary: they stay below it, in full.
+        var asks = all.filter(function (item) { return item.type === 'question'; }).map(renderQuestion).join('');
+        var items = all.filter(function (item) { return item.type !== 'question'; });
+        if (asks) return renderToolList(items, options) + '<div class="w-toollist">' + asks + '</div>';
+        return renderToolList(items, options);
+    }
+
+    function renderToolList(items, options) {
         if (!items.length) {
             return options && options.running
                 ? '<div class="w-toollist"><p class="w-tracenote" data-state="working"><span class="w-inkdrop" data-size="sm" data-tone="running"></span><span>Working…</span></p></div>'

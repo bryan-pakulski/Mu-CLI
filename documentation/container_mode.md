@@ -104,6 +104,16 @@ clients list, download, and delete artifacts through session-scoped endpoints.
 The web chat always shows an expandable **Artifacts** section, including an
 empty state before the first deliverable is published.
 
+## Seeing what it builds
+
+The worker image ships headless Chromium. `browser_snapshot` screenshots a page and the model sees
+the image on its next turn. Inside the container `http://localhost:<port>` is allowed: it is the
+container itself (the dev server the agent started), never the host. Private, link-local and
+metadata addresses stay blocked, and external pages go through the egress proxy. Options: a
+desktop/tablet/mobile viewport or explicit size, light/dark mode, waiting for a selector, capturing
+one element, and up to 20 steps (click, fill, press, hover, select, wait) on local pages. On the
+host (workspace sessions) loopback stays blocked.
+
 ## Worker upgrades and diagnostics
 
 Container registry records include a worker protocol version. Loading an older

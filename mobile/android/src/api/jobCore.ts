@@ -46,6 +46,12 @@ export interface JobSummary {
   stage_agents?: Record<string, ResolvedStageAgent>;
   /** Saved session the job was created from (metadata.origin_session); '' when unknown. */
   origin_session?: string;
+  /** Files attached at creation (GET /api/jobs/<id>/attachments/<name>). */
+  attachments?: JobAttachment[];
+  /** Set when the job ran on a git snapshot of a plain folder: its result is a patch (GET /api/jobs/<id>/patch). */
+  folder_snapshot?: { source_path: string; skipped_total?: number } | null;
+  /** Extra editable sources: each its own repository with a PR, or a folder whose change is a patch. */
+  sources?: JobSourceSummary[];
   /** Build environments pill (count 0 = shared runtime image). */
   environments?: JobEnvironmentsSummary;
   /** Job cost cap (`max_cost_usd`); null = unlimited. */
@@ -57,6 +63,8 @@ export interface JobSummary {
   /** Home needs-you rows: one-line attention summary (= limit.summary when paused on a limit). */
   attention_summary?: string;
 }
+export interface JobSourceSummary { name: string; input: string; kind?: string; branch?: string; folder?: boolean; pr?: { url?: string; number?: number; state?: string } }
+export interface JobAttachment { name: string; size?: number; mime_type?: string; origin?: Record<string, string> }
 export interface JobPR { url?: string; number?: number; provider?: string; draft?: boolean; state?: 'open' | 'merged' | 'closed' | string; merged_at?: string; checked_at?: number }
 /** Header: running cost vs the cap and worker-active time vs the runtime cap. */
 export interface JobBudget { cost_usd: number; max_cost_usd: number | null; cost_fraction: number | null; active_seconds: number; max_runtime_seconds: number | null }

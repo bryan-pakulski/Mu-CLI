@@ -73,8 +73,14 @@
                             <span class="w-sign" :data-status="item.status" aria-hidden="true" x-text="item.glyph"></span>
                             <div class="w-row__main">
                                 <span class="w-row__title" x-text="item.title"></span>
-                                <span class="w-row__sub" x-text="item.sub"></span>
+                                <span class="w-row__sub" x-text="item.note ? item.sub + ' · ' + item.note : item.sub"></span>
                             </div>
+                            <span class="w-row__actions">
+                                <template x-for="action in (item.actions || [])" :key="action.id">
+                                    <button type="button" class="w-textbtn" :data-tone="action.primary ? null : 'quiet'"
+                                            @click.stop="$store.loop.workAct(item, action)" x-text="action.label"></button>
+                                </template>
+                            </span>
                             <span class="w-row__when mono" x-text="item.id"></span>
                         </li>
                     </template>

@@ -411,6 +411,54 @@ def _resolve_blockers_from_message(session, text) -> None:
         logger.debug("blocker resolution failed", exc_info=True)
 
 
+def _start_mission_from_message(session, text) -> None:
+    """In loop mode the user's message starts the mission when none is live.
+
+    The message is the user's own words on a user surface, so it is the goal;
+    they change it with ``/loop goal`` or the panel. A mission the harness
+    paused for the user (they stopped a turn or left loop mode) resumes. One
+    the user paused, or a blocked or done one, is left alone: the message talks
+    to the agent about it.
+    """
+    goal = str(text or "").strip()
+    if not goal or goal.startswith("/"):
+        return
+    try:
+        manager = getattr(session, "session_manager", None)
+        if manager is None or getattr(manager, "mode_state", None) is None:
+            return
+        from mu.loop.engine import resume_from_message, start_mission
+        from mu.loop.state import loop_state
+
+        mission = loop_state(session).mission
+        if mission is None or mission.status == "stopped":
+            start_mission(session, goal, actor="user:chat")
+        else:
+            resume_from_message(session)
+    except Exception:  # noqa: BLE001 — never block the turn
+        logger.debug("loop mission start from message failed", exc_info=True)
+
+
+def _pause_mission_outside_loop(session) -> None:
+    """A mission left running while the session is in another mode (switched by
+    a path that did not pause it) is paused, so no surface shows it running."""
+    try:
+        from mu.loop.engine import on_mode_change
+
+        on_mode_change(session, "", actor="system")
+    except Exception:  # noqa: BLE001 — never block the turn
+        logger.debug("loop mission pause outside loop mode failed", exc_info=True)
+
+
+def _pause_mission_on_interrupt(session) -> None:
+    try:
+        from mu.loop.engine import on_interrupt
+
+        on_interrupt(session)
+    except Exception:  # noqa: BLE001 — the interrupt must still land
+        logger.debug("loop mission pause on interrupt failed", exc_info=True)
+
+
 def run_turn(session, text, *, origin="user"):
     logger.info(f"Sending message: {text[:100]}...")
     session.paused_execution_text = None
@@ -571,6 +619,10 @@ def run_turn(session, text, *, origin="user"):
         raw_text = str(text or "").strip()
         if raw_text and len(raw_text) > 10 and not raw_text.startswith("/"):
             session.variables["session_goal"] = raw_text
+    if origin == "user" and active_mode == "loop":
+        _start_mission_from_message(session, text)
+    elif active_mode != "loop":
+        _pause_mission_outside_loop(session)
     # Mode-agnostic: every turn, mirror the pinned session_goal into
     # task_memory so it survives history compaction.
     if origin == "user":
@@ -3269,6 +3321,7 @@ def run_turn(session, text, *, origin="user"):
                 session.ui.show_info("\nAgentic loop interrupted by user.")
             logger.warning("Agentic loop interrupted by user.")
             session.paused_execution_text = str(text or "")
+            _pause_mission_on_interrupt(session)
             session.session_manager.history.append(
                 {
                     "role": "tool",

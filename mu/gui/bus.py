@@ -202,6 +202,13 @@ class EventBus:
         self.outcomes[name] = {"status": status, "error": error, "at": time.time()}
 
     async def publish(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        # Events a producer thread queued earlier go out first: a loop-side
+        # terminal event (turn_complete) must never overtake the agent's last
+        # deltas/assistant_end, or clients reopen the finished turn as running.
+        self._drain_ingress()
+        return self._publish_now(event)
+
+    def _publish_now(self, event: Dict[str, Any]) -> Dict[str, Any]:
         self._record_outcome(event)
         stamp = dict(event)
         stamp["seq"] = next(self._seq)
@@ -213,11 +220,9 @@ class EventBus:
             try:
                 sub.queue.put_nowait(stamp)
             except asyncio.QueueFull:
-                # F2: slow-consumer overflow now drops the OLDEST queued
-                # event (same as before) but the client can detect the gap
-                # via the monotonic seq and the reconnect can replay from
-                # the ring — an overflow is no longer an unrecoverable
-                # silent loss.
+                # F2: slow-consumer overflow drops the OLDEST queued event;
+                # the client detects the gap via the monotonic seq and the
+                # reconnect replays from the ring.
                 try:
                     sub.queue.get_nowait()
                     sub.queue.put_nowait(stamp)
@@ -261,30 +266,17 @@ class EventBus:
             pass
 
     def _drain_ingress(self) -> None:
-        """Loop-side drain: hand the batch to ONE drain coroutine.
+        """Loop-side drain: publish the queued batch synchronously, in order.
 
-        Round-48 F3: the r48 first cut called the async publish() directly
-        (un-awaited coroutines — caught by probe). publish() is async (it
-        may be awaited by in-loop callers), so the drain runs it via
-        ensure_future on a SHARED task that covers the whole batch — one
-        task per burst, not one per event.
+        Publishing is synchronous, so the batch goes out here rather than in
+        a separately scheduled task that a direct ``publish`` could overtake.
         """
         with self._ingress_lock:
             batch = list(self._ingress)
             self._ingress.clear()
             self._drain_scheduled = False
-        if not batch:
-            return
-        loop = self._loop
-
-        async def _publish_batch() -> None:
-            for event in batch:
-                try:
-                    await self.publish(event)
-                except Exception:  # noqa: BLE001 — telemetry must not break
-                    return
-
-        try:
-            asyncio.ensure_future(_publish_batch(), loop=loop)
-        except RuntimeError:
-            return
+        for event in batch:
+            try:
+                self._publish_now(event)
+            except Exception:  # noqa: BLE001 — telemetry must not break
+                continue

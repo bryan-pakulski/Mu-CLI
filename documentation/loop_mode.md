@@ -20,10 +20,11 @@ A mission (`LoopMission`) has:
 
 **The user owns it.** Only a user surface (`/loop`, the GUI panel, mobile) can
 start a mission, change its goal or budget, pause, resume, stop it, or attest a
-criterion. Agent attempts are refused. Without a mission, loop mode does not
-treat the first message as the goal: the agent asks the user to run
-`/loop start <goal>` (or use the panel's Start), and nothing continues on its
-own. One mission is live at a time; start a new one after stopping (or
+criterion. Agent attempts are refused. A chat message sent in loop mode while
+no mission is live (none yet, or the last one was stopped) starts one with that
+message as its goal (actor `user:chat`); change it with `/loop goal` or the
+panel. A message to a paused, blocked or done mission talks about it and does
+not replace it, and slash commands never start one. One mission is live at a time; start a new one after stopping (or
 finishing) the current one. The last ten finished missions are kept.
 
 ## Increments
@@ -40,7 +41,9 @@ old prose "timeline update".
 
 Check runs come from `run_check` (see the modes evidence model): `bash` test
 runs, todo or criterion checks. Each records the command, exit code, an output
-excerpt and the full output in the result store.
+excerpt and the full output in the result store. A `bash` call recorded as a
+check (a test command, or `purpose: "verify"`) ends its result with the run id
+(*Recorded as check run r12 (passed)*), so the agent can cite it as evidence.
 
 ## Backlog: work items with evidence
 
@@ -50,7 +53,13 @@ The backlog is the session's work items, driven by `todo_write`,
 item can only be marked `done` with evidence: the id of a passing check run
 (`todo_set_status(id, "done", evidence=["r3"])`). A user can complete one
 without evidence from a user surface by giving an override reason; that is
-recorded as an override event.
+recorded as an override event. On the web (the Plan disclosure above the
+composer and the loop panel's Backlog) and on Android (Loop → Backlog) every
+open item has its verbs: a blocked one *Unblock* / *Done…* / *Drop*, the
+in-progress one *Done…* / *Not now* / *Drop*, a to-do one *Start* / *Done…* /
+*Drop*. *Done…* asks why: check run ids in the answer (`r12`) are evidence, any
+other text is the recorded reason. The route is
+`POST /api/mode-state/work/{id}` (`status`, `evidence`, `override_reason`).
 
 ## Done when
 
@@ -76,9 +85,22 @@ These are real. The loop body checks the mission at every iteration boundary
 of a loop-mode turn: when it leaves `running` (paused, stopped, done, or out of
 budget) the turn ends at the next boundary. A paused mission tells the agent to
 answer the user but not continue mission work until they resume it. A stopped
-mission cannot resume; its record stays. Turns never start by themselves:
-each turn begins with a user message (there is no auto-continuation across
-turns).
+mission cannot resume; its record stays.
+
+The harness also pauses a live (running or blocked) mission when the user walks
+away from the work, so no surface keeps showing it running: stopping a turn
+(the chat's Stop, Esc in the terminal) pauses it with the reason
+`interrupted`, and leaving loop mode (`/mode`, the mode menu on web or mobile,
+or a turn that starts in another mode) pauses it with `loop mode is off`. Unlike
+an explicit Pause, the user's next loop-mode message resumes a mission paused
+this way (unless a budget is used up); Resume in the panel works too.
+
+Turns never start by themselves:
+each begins with a user message, or with the user pressing Start or Resume in
+the panel, which runs a turn as if they had sent the goal (Start) or
+"Resume the mission." (Resume) in chat. Every client sees that turn begin
+(`turn_started`) and end (`turn_complete`). There is no auto-continuation
+across turns.
 
 ## Blockers
 

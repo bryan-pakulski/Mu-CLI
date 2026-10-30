@@ -35,6 +35,43 @@ def _now() -> float:
     return time.time()
 
 
+def _pid_namespace() -> str:
+    try:
+        return str(os.stat("/proc/self/ns/pid").st_ino)
+    except OSError:
+        return ""
+
+
+def new_runtime_id() -> str:
+    """An execution-lease owner id that names its process.
+
+    ``runtime-<pid namespace>-<pid>-<nonce>``: a lease whose owner is a dead
+    process in this pid namespace (a GUI restarted mid-turn) can be taken over
+    at once instead of blocking the thread until its TTL runs out.
+    """
+    return f"runtime-{_pid_namespace() or 'x'}-{os.getpid()}-{uuid.uuid4().hex}"
+
+
+def runtime_is_dead(runtime_id: str) -> bool:
+    """True only when ``runtime_id`` provably belongs to a process that has exited."""
+    parts = str(runtime_id or "").split("-")
+    if len(parts) != 4 or parts[0] != "runtime" or not parts[2].isdigit():
+        return False
+    namespace = _pid_namespace()
+    if not namespace or parts[1] != namespace:
+        return False
+    pid = int(parts[2])
+    if pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
 
@@ -443,6 +480,7 @@ class ThreadCoordinator:
                 existing is not None
                 and existing["runtime_id"] != runtime_id
                 and float(existing["expires_at"] or 0) > now
+                and not runtime_is_dead(existing["runtime_id"])
             ):
                 return False
             conn.execute(

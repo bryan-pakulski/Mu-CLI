@@ -88,6 +88,13 @@ def mode_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
                     ),
                 )
         session.variables["agent_mode"] = chosen
+        paused = False
+        try:
+            from mu.loop.engine import on_mode_change
+
+            paused = on_mode_change(session, chosen, actor="user:cli")
+        except Exception:
+            pass
         fc = getattr(session, "folder_context", None)
         session.session_manager.save_history(fc)
         _refresh_hud(session)
@@ -97,13 +104,15 @@ def mode_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
             f"{meta.get('description', '')} "
             f"({meta.get('documentation', '')})"
         ).strip()
+        if paused:
+            message += "\nThe loop mission is paused; switch back to loop mode and send a message to resume it."
         if chosen == "loop":
             try:
                 from mu.loop.state import loop_state
 
                 mission = loop_state(session).mission
                 if mission is None or mission.status in ("stopped", "done"):
-                    message += ("\nNo mission yet — start one with /loop start <goal> "
+                    message += ("\nNo mission yet — your next message starts one as its goal, or use /loop start <goal> "
                                 "[--done \"criterion\" --check \"cmd\"] [--max-cost USD] [--max-hours H].")
             except Exception:
                 pass

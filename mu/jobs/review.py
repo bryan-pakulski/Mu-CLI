@@ -82,6 +82,26 @@ def _review_target(service: JobService, job) -> tuple[str, str]:
     raise JobReviewError("This job does not have an available review branch yet.")
 
 
+def build_job_patch(service: JobService, job_id: str, *, source: str = "") -> str:
+    """The job's whole change as one patch (binary-safe, untruncated) that ``git apply`` applies
+    to the base: how a job on a folder snapshot (mu/jobs/folder_snapshot.py) hands its result back.
+    ``source`` names an extra source (mu/jobs/multi_source.py); its patch applies in that source."""
+    job = service.get(job_id)
+    if source:
+        from .multi_source import source_diff, sources
+        match = next((s for s in sources(job) if s["name"] == source), None)
+        if match is None:
+            raise JobReviewError(f"This job has no source named {source!r}.")
+        if not match.get("branch"):
+            raise JobReviewError(f"Source {source!r} has not been prepared yet.")
+        return source_diff(job, match, prefixed=False, binary=True)
+    if not job.base_sha:
+        raise JobReviewError("This job does not have a captured base commit yet.")
+    repo, head_ref = _review_target(service, job)
+    return _git(repo, "diff", "--no-ext-diff", "--no-color", "--binary", "--full-index", "--find-renames",
+                f"{job.base_sha}...{head_ref}", "--", timeout=300)
+
+
 def build_job_diff(service: JobService, job_id: str, *, max_chars: int = 500_000) -> JobDiff:
     job = service.get(job_id)
     if not job.base_sha:
@@ -106,6 +126,18 @@ def build_job_diff(service: JobService, job_id: str, *, max_chars: int = 500_000
         "--",
         timeout=120,
     )
+    # Extra sources (mu/jobs/multi_source.py): their changes follow, paths under sources/<name>/.
+    from .multi_source import source_diff, sources
+    for source in sources(job):
+        if not source.get("branch"):
+            continue
+        piece = source_diff(job, source)
+        if not piece:
+            continue
+        patch += piece
+        prefix = f"sources/{source['name']}/"
+        files += [line[len("+++ b/"):] for line in piece.splitlines() if line.startswith(f"+++ b/{prefix}")]
+        stat += f"\n{prefix}: {piece.count('diff --git ')} file(s) changed"
     limit = max(10_000, int(max_chars))
     truncated = len(patch) > limit
     if truncated:

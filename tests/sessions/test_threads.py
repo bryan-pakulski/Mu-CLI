@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import pytest
 from pathlib import Path
 from types import SimpleNamespace
@@ -90,6 +91,28 @@ def test_execution_lease_is_exclusive_and_status_goals_are_scrubbed(tmp_path):
 
     coordinator.release_execution_lease(parent.thread_id, "runtime-one")
     assert coordinator.heartbeat(parent.thread_id, "runtime-two", ttl=120) is True
+
+
+def test_a_lease_held_by_an_exited_process_is_taken_over_at_once(tmp_path):
+    import subprocess
+    import sys
+
+    from mu.threads.coordinator import new_runtime_id
+
+    coordinator, parent, _child = _register_pair(tmp_path)
+    alive = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        mine = new_runtime_id()
+        live_peer = mine.replace(f"-{os.getpid()}-", f"-{alive.pid}-")
+        assert coordinator.heartbeat(parent.thread_id, live_peer, ttl=120) is True
+        assert coordinator.heartbeat(parent.thread_id, mine, ttl=120) is False
+    finally:
+        alive.kill()
+        alive.wait()
+    # The peer's process is gone (a GUI restarted mid-turn): its lease no longer blocks.
+    assert coordinator.heartbeat(parent.thread_id, mine, ttl=120) is True
+    # An owner that cannot be checked keeps its lease until the TTL.
+    assert coordinator.heartbeat(parent.thread_id, "runtime-elsewhere", ttl=120) is False
 
 
 def test_path_claim_conflict_requires_coordination_and_human_override(tmp_path):
@@ -382,3 +405,15 @@ def test_orphan_thread_session_detected_for_404(tmp_path, monkeypatch):
 
     _shutil.rmtree(history_root / "sessions" / "ghost-thread")
     assert sessions_router._thread_row_for_session("ghost-thread") is not None
+
+
+def test_a_finished_turn_leaves_the_thread_free_for_another_surface(tmp_path):
+    # The first turn of a new session gets its coordinator mid-turn; the loop's per-iteration
+    # heartbeat must not leave a lease that locks the terminal, GUI or a container out.
+    from mode_helpers import agent_session
+
+    session = agent_session(tmp_path, steps=["hello"], name="lease-release")
+    session.send_message("say hello please")
+    coordinator = session.thread_coordinator
+    assert coordinator is not None
+    assert coordinator.heartbeat(session.thread_meta.thread_id, "runtime-other-surface", ttl=120) is True

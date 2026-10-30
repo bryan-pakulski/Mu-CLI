@@ -200,18 +200,22 @@ async def list_jobs(
 
 @router.post("")
 async def create_job(request: Request, payload: Dict[str, Any]):
-    """Create a job. ``repository`` (URL or local path) is an alternative to
-    ``workspace_root``: URLs are cloned/refreshed under $MUCLI_HOME/repos first, so
+    """Create a job. ``source`` (mu/jobs/sources.py: a session, a Settings → Repositories
+    entry or a folder) or ``repository`` (URL or local path) are alternatives to
+    ``workspace_root``; ``attachments`` (mu/jobs/attachments.py) are files given to every stage: URLs are cloned/refreshed under $MUCLI_HOME/repos first, so
     the session defaults are looked up for the clone's path. Clone failures return
     400 ``{"detail": <actionable message>, "error": {"kind", "host"}}``."""
     from fastapi.responses import JSONResponse
     from starlette.concurrency import run_in_threadpool
 
     from mu.jobs.clone import CloneError, apply_repository
+    from mu.jobs.sources import apply_source
 
     service = _service(request)
     try:
-        resolved = await run_in_threadpool(apply_repository, payload)
+        # ``source`` (session / repository / folder) first: it may name the session whose
+        # defaults apply below. ``attachments`` are stored by create_from_payload.
+        resolved = await run_in_threadpool(lambda: apply_repository(apply_source(payload)))
         job = service.create_from_payload(_with_session_defaults(request, resolved))
     except HTTPException:
         raise
@@ -405,11 +409,12 @@ async def _import_tickets(request: Request, body: Dict[str, Any]):
     from fastapi.responses import JSONResponse
 
     from mu.jobs.clone import CloneError, apply_repository
+    from mu.jobs.sources import apply_source
 
     try:
-        # ``defaults.repository`` (git URL or local path) resolves to a workspace the
-        # same way POST /api/jobs does; the clone runs off the event loop.
-        resolved_defaults = await run_in_threadpool(apply_repository, raw_defaults)
+        # ``defaults.source`` / ``defaults.repository`` resolve to a workspace the same way
+        # POST /api/jobs does; the clone runs off the event loop.
+        resolved_defaults = await run_in_threadpool(lambda: apply_repository(apply_source(raw_defaults)))
         defaults = _with_session_defaults(request, resolved_defaults)
     except CloneError as exc:
         return JSONResponse(status_code=400, content={"detail": str(exc),
@@ -882,6 +887,22 @@ async def get_job_evidence(job_id: str, file: str, request: Request):
     })
 
 
+@router.get("/{job_id}/attachments/{name}")
+async def get_job_attachment(job_id: str, name: str, request: Request):
+    """A file attached when the job was created (mu/jobs/attachments.py), always as a download."""
+    from fastapi.responses import FileResponse
+    from mu.jobs.attachments import path_for
+    job = _job_or_404(_service(request), job_id)
+    path = path_for(job, name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="attachment not found")
+    return FileResponse(path, media_type="application/octet-stream", headers={
+        "Content-Disposition": f'attachment; filename="{os.path.basename(path)}"',
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+    })
+
+
 def _check_run_artifacts(request: Request, job_id: str):
     from mu.jobs.core.artifacts import artifacts_for
     return artifacts_for(_job_or_404(_service(request), job_id))
@@ -997,6 +1018,23 @@ async def get_job_diff(
         return {"diff": build_job_diff(service, job_id, max_chars=max_chars).to_dict()}
     except JobReviewError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/{job_id}/patch")
+async def get_job_patch(job_id: str, request: Request, source: str = Query(default="", max_length=64)):
+    """The job's change as a downloadable patch. Jobs on a plain folder run on a snapshot of it
+    (mu/jobs/folder_snapshot.py); apply the result in the folder with ``git apply <file>``.
+    ``source`` selects an extra source (mu/jobs/multi_source.py) instead of the primary."""
+    from mu.jobs.review import build_job_patch
+    service = _service(request)
+    job = _job_or_404(service, job_id)
+    try:
+        patch = build_job_patch(service, job_id, source=source)
+    except JobReviewError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", f"job-{job.id[:12]}{'-' + source if source else ''}.patch")
+    return Response(content=patch, media_type="text/x-diff", headers={
+        "Content-Disposition": f'attachment; filename="{name}"', "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/{job_id}/events")

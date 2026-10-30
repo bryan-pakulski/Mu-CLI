@@ -383,7 +383,9 @@ class Session:
                 self._thread_coordination_error = str(exc)
                 logger.debug("thread coordinator initialization failed", exc_info=True)
         if not getattr(self, "_thread_runtime_id", None):
-            self._thread_runtime_id = f"runtime-{os.getpid()}-{uuid.uuid4().hex}"
+            from mu.threads.coordinator import new_runtime_id
+
+            self._thread_runtime_id = new_runtime_id()
         # Artifacts are intentionally self-managed outside session.json. Build
         # the registry lazily so old sessions load without migrations.
         try:
@@ -1591,7 +1593,9 @@ class Session:
                     ttl=120.0,
                 ):
                     raise RuntimeError(
-                        "This thread already has an active turn in another runtime."
+                        "This thread already has an active turn in another Mu "
+                        "process (terminal, GUI or container). Wait for it to "
+                        "finish or stop it there."
                     )
                 lease_acquired = True
                 coordinator.set_status(
@@ -1693,7 +1697,12 @@ class Session:
                         "idle",
                         runtime_id=self._thread_runtime_id,
                     )
-                    coordinator.release_execution_lease(
+                # The loop body renews the lease every iteration, including on
+                # a first turn whose coordinator was attached mid-turn; release
+                # whatever this runtime holds so no surface is locked out.
+                held = getattr(self, "thread_coordinator", None) or coordinator
+                if held is not None and turn_started:
+                    held.release_execution_lease(
                         self.thread_meta.thread_id, self._thread_runtime_id
                     )
             except Exception:

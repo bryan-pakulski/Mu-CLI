@@ -115,7 +115,9 @@ def execute_tool_with_memory(
     _, _, abort = default_registry.fire_with_signals("post_tool", post_ctx)
     if abort is not None:
         session._record_hook_abort("post_tool", abort)
-    return result
+    # A post_tool hook may annotate the result (e.g. the check run id a bash
+    # call was recorded as) by replacing ctx.tool_result.
+    return post_ctx.tool_result
 
 
 # ---------------------------------------------------------------- structured result

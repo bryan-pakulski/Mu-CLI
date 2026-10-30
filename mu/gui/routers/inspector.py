@@ -261,6 +261,17 @@ async def get_workspace(request: Request) -> Dict[str, Any]:
     }
 
 
+def _refuse_while_running(request: Request) -> None:
+    """A turn holds the session lock for its whole run; waiting for it in an
+    async handler would stall the event loop (the whole GUI), and the agent
+    must not have its workspace swapped mid-turn."""
+    if request.app.state.session_busy_for().is_set():
+        raise HTTPException(
+            status_code=409,
+            detail="Workspace cannot be changed while the session is running.",
+        )
+
+
 @router.post("/workspace")
 async def add_workspace(
     request: Request,
@@ -276,6 +287,7 @@ async def add_workspace(
             status_code=400,
             detail=f"not a directory: {folder!r}",
         )
+    _refuse_while_running(request)
     with request.app.state.session_lock_for():
         session.folder_context.add_folder(folder)
         try:
@@ -296,6 +308,7 @@ async def remove_workspace(
     session=Depends(require_session),
 ) -> Dict[str, Any]:
     folder = os.path.expanduser(path.strip())
+    _refuse_while_running(request)
     with request.app.state.session_lock_for():
         try:
             session.folder_context.remove_folder(folder)

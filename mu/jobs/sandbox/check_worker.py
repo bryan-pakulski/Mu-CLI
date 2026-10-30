@@ -55,8 +55,10 @@ def run_one(request, suite=None):
             Path(argv[0]).name == "pytest" or argv[:3] in (["python", "-m", "pytest"], ["python3", "-m", "pytest"])):
         junit = default_junit
         argv.append("--junitxml=" + junit)
+    # A relative cwd is inside the primary source; /sources/<name>/... runs in an extra source.
     cwd = Path("/workspace") / str(request.get("cwd") or "")
-    if not cwd.resolve().is_relative_to(Path("/workspace")) or not cwd.is_dir():
+    inside = any(cwd.resolve().is_relative_to(Path(root)) for root in ("/workspace", "/sources"))
+    if not inside or cwd.resolve() == Path("/sources") or not cwd.is_dir():
         return {"passed": False, "return_code": 2, "timed_out": False, "stdout": "",
                 "stderr": f"working directory {request.get('cwd')!r} does not exist in the repository"}
     try:

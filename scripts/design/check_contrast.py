@@ -34,6 +34,12 @@ def _hex_rgb(value: str):
     return tuple(int(v[i:i + 2], 16) for i in (0, 2, 4))
 
 
+def _pages(tokens) -> list[tuple[str, str]]:
+    """(pack, destination) for every scenery pack's own page paintings (tokens.json scenery pages)."""
+    return [(pack, page) for pack, spec in tokens.get("scenery", {}).items()
+            if not pack.startswith("_") and isinstance(spec, dict) for page in spec.get("pages") or []]
+
+
 def glass_backdrops(theme: str) -> list[tuple[str, tuple, tuple]]:
     """(wash, darkest, lightest) composited glass-over-art colours.
 
@@ -47,8 +53,10 @@ def glass_backdrops(theme: str) -> list[tuple[str, tuple, tuple]]:
     match = _RGBA.match(tokens["themes"][theme]["glass"]["surface"])
     gr, gg, gb, alpha = (*map(int, match.groups()[:3]), float(match.group(4)))
     out = []
-    for wash in tokens["glass"]["ambient"]:
-        path = ART / f"ambient-{wash}-{theme}-960.webp"
+    sources = [(wash, ART / f"ambient-{wash}-{theme}-960.webp") for wash in tokens["glass"]["ambient"]]
+    sources += [(f"{pack}/{page}", ART / "pages" / pack / f"ambient-{page}-{theme}-960.webp")
+                for pack, page in _pages(tokens)]
+    for wash, path in sources:
         im = Image.open(path).convert("RGB").filter(ImageFilter.GaussianBlur(12)).resize((240, 150))
         pixels = [
             (r * (1 - alpha) + gr * alpha, g * (1 - alpha) + gg * alpha, b * (1 - alpha) + gb * alpha)
@@ -71,12 +79,20 @@ def scene_backdrops(theme: str, alpha: float = GLASS_LEAF_ALPHA, *, sharp: bool 
     like the leaf at 60% blur, or sharp (no blur, at 800px wide so fine detail counts)."""
     from PIL import Image, ImageFilter
 
-    surface = _hex_rgb(load_tokens()["themes"][theme]["color"]["surface"])
+    tokens = load_tokens()
+    surface = _hex_rgb(tokens["themes"][theme]["color"]["surface"])
+    scales = {name: float(spec.get("leaf_clear", 1)) for name, spec in tokens.get("scenery", {}).items()
+              if not name.startswith("_") and isinstance(spec, dict)}
     out = []
-    for scene in load_tokens()["glass"]["ambient"]:
-        im = Image.open(ART / f"{scene}-{theme}-1600.webp").convert("RGB")
+    sources = [(scene, scene, ART / f"{scene}-{theme}-1600.webp") for scene in tokens["glass"]["ambient"]]
+    sources += [(f"{pack}/{page}", pack, ART / "pages" / pack / f"{page}-{theme}-1600.webp")
+                for pack, page in _pages(tokens)]
+    for scene, pack, path in sources:
+        # A scenery pack may let less of its painting through (tokens.json scenery leaf_clear).
+        scene_alpha = 1 - (1 - alpha) * scales.get(pack, 1.0)
+        im = Image.open(path).convert("RGB")
         im = im.resize((800, 450)) if sharp else im.resize((400, 225)).filter(ImageFilter.GaussianBlur(6))
-        mixed = Image.blend(im, Image.new("RGB", im.size, surface), alpha)
+        mixed = Image.blend(im, Image.new("RGB", im.size, surface), scene_alpha)
         # Extremes by luma, then exact luminance over the darkest and lightest few.
         luma = list(mixed.convert("L").getdata())
         order = sorted(range(len(luma)), key=luma.__getitem__)

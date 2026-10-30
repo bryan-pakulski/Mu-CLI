@@ -121,6 +121,19 @@ test('default: the receipt line and the plan disclosure rows', () => {
         .map(r => [r.id, r.status])), [['w1', 'active']]);
 });
 
+test('work items: every open status has its verbs and Done reads runs as evidence, text as the reason', () => {
+    const { M } = load();
+    const rows = M.receipt.planRows([{ id: 'w5', title: 'fusion', status: 'blocked', note: 'needs a run id' },
+        { id: 'w6', title: 'report', status: 'in_progress' }, { id: 'w7', title: 'next', status: 'pending' }]);
+    assert.deepEqual(plain(rows.map(r => [r.id, r.note, r.actions.map(a => a.label), r.actions.find(a => a.primary)?.id || null])), [
+        ['w5', 'needs a run id', ['Unblock', 'Done…', 'Drop'], 'pending'],
+        ['w6', '', ['Done…', 'Not now', 'Drop'], 'done'],
+        ['w7', '', ['Start', 'Done…', 'Drop'], null]]);
+    assert.deepEqual(plain(M.doneBody('r12, r14')), { status: 'done', evidence: ['r12', 'r14'], override_reason: '' });
+    assert.deepEqual(plain(M.doneBody('report reviewed, see r3')),
+        { status: 'done', evidence: ['r3'], override_reason: 'report reviewed, see r3' });
+});
+
 test('security: coverage sentence, engine-ready decisions, vocabulary and escaped evidence', () => {
     const { M, S } = load();
     const f = { finding_id: 'f1', title: 'Injection', status: 'remediation_verified', proof_verified: true,
@@ -137,4 +150,17 @@ test('security: coverage sentence, engine-ready decisions, vocabulary and escape
     const html = M.security.findingSheet(f);
     assert.ok(html.includes('&lt;script&gt;') && !html.includes('<script>'));
     assert.ok(html.includes('&lt;output&gt;'));
+});
+
+test('a blocker is answered with its whole question in view', () => {
+    const { M } = load();
+    const long = 'Which quantisation should the matmul path use for the next increment, given fp16 inputs change results?';
+    const b = { id: 'b1', summary: long, needs: 'a decision on fp16', details: 'Tried int8; accuracy dropped.',
+        questions: ['Accept fp16?', 'Keep fp32 fallback?'] };
+    const [row] = M.blockerRows([b]);
+    assert.equal(row.title, long);
+    const q = M.blockerQuestion(row.blocker);
+    for (const part of [long, 'Needs: a decision on fp16', 'Tried int8; accuracy dropped.', '• Accept fp16?', '• Keep fp32 fallback?']) {
+        assert.ok(q.includes(part), part);
+    }
 });

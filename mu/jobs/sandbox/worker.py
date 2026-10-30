@@ -123,7 +123,13 @@ def main():
     mucli.init_provider = lambda *a, **k: RelayProvider(model["provider"], model["model"],
                                                         request.get("context_window"))
     args = SimpleNamespace(session="stage", provider=model["provider"], model=model["model"],
-        provider_prevalidated=True, session_type="workspace", workspace=["/workspace"],
+        provider_prevalidated=True, session_type="workspace",
+        # Files attached to the job (mu/jobs/attachments.py) are a second, read-only folder.
+        workspace=["/workspace",
+                   # The job's extra sources (mu/jobs/multi_source.py), then its attachments (read-only).
+                   *[p for p in request.get("sources") or [] if isinstance(p, str) and p.startswith("/sources/")
+                     and ".." not in p and Path(p).is_dir()],
+                   *(["/artifacts/attachments"] if Path("/artifacts/attachments").is_dir() else [])],
         # Jobs run unattended: the writing stage auto-approves inside the sandbox; read-only
         # stages keep approvals on so StageUI denies any write automatically.
         yolo=stage not in READ_ONLY_STAGES, gui=False,

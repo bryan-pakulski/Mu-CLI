@@ -20,6 +20,7 @@ import {
   motion as washMotion,
   paper,
   radius as washRadius,
+  scenery as sceneryMap,
   semantic as semanticPigments,
   series as seriesPigments,
   shadowTint,
@@ -51,9 +52,26 @@ export function paletteLabel(name: PaletteName | null): string {
 export function paletteNote(name: PaletteName | null): string {
   return name ? palettePalettes[name].note : 'Watercolour paper, the default.';
 }
+/** Every watercolour scene (tokens.json glass.ambient): the classic three and the scenery packs. */
+export type SceneName = 'dawn' | 'lagoon' | 'meadow' | 'desert' | 'forest' | 'ocean' | 'space';
 /** A destination's watercolour scene (assets/wash/ambient-<scene>-<theme>). */
-export function destinationAmbient(name: DestinationName): 'dawn' | 'lagoon' | 'meadow' {
-  return destinationMap[name].ambient as 'dawn' | 'lagoon' | 'meadow';
+export function destinationAmbient(name: DestinationName): SceneName {
+  return destinationMap[name].ambient as SceneName;
+}
+/** Watercolour scenery packs (tokens.json scenery): null = Classic (each destination keeps its own). */
+export type SceneryName = Exclude<keyof typeof sceneryMap, 'classic' | '_doc'>;
+export const SCENERY = (Object.keys(sceneryMap) as string[])
+  .filter(name => !name.startsWith('_') && Boolean((sceneryMap as Record<string, { accent?: string }>)[name].accent)) as SceneryName[];
+type ScenerySpec = { label: string; note: string; accent?: string };
+export function sceneryLabel(name: SceneryName | null): string {
+  return (sceneryMap as Record<string, ScenerySpec>)[name ?? 'classic'].label;
+}
+export function sceneryNote(name: SceneryName | null): string {
+  return (sceneryMap as Record<string, ScenerySpec>)[name ?? 'classic'].note;
+}
+/** The pigment a scenery pack recolours every destination's accent to. */
+export function sceneryAccent(name: SceneryName): PigmentName {
+  return (sceneryMap as Record<string, ScenerySpec>)[name].accent as PigmentName;
 }
 export type LayerName = keyof typeof layerPigments;
 
@@ -135,7 +153,7 @@ function syntaxFrom(p: WashPalette): SyntaxColors {
 }
 
 /** Build the semantic colour shape from one generated palette (an alternative palette when given). */
-export function washColors(name: WashThemeName, palette: PaletteName | null = null): WashColors {
+export function washColors(name: WashThemeName, palette: PaletteName | null = null, scenery: SceneryName | null = null): WashColors {
   const base = name === 'dusk' ? dusk : paper;
   const p: WashPalette = palette && palettePalettes[palette] ? { ...base, ...(palettePalettes[palette][name] as WashPalette) } : base;
   const pigment = {} as Record<PigmentName, Tone3>;
@@ -168,7 +186,8 @@ export function washColors(name: WashThemeName, palette: PaletteName | null = nu
     info: tone3(p, 'info'),
     neutral: tone3(p, 'neutral'),
     pigment,
-    destination: Object.fromEntries(DESTINATIONS.map(d => [d, tone3(p, destinationMap[d].accent)])) as Record<DestinationName, Tone3>,
+    // A scenery pack (Wash only; flat palettes ignore it) recolours every destination to its pigment.
+    destination: Object.fromEntries(DESTINATIONS.map(d => [d, tone3(p, scenery && !palette ? sceneryAccent(scenery) : destinationMap[d].accent)])) as Record<DestinationName, Tone3>,
     mode: mapRecord(modePigments as Record<ModeName, string>, p),
     layer: mapRecord(layerPigments as Record<LayerName, string>, p),
     series: seriesPigments.map(n => tone3(p, n)),
@@ -423,9 +442,9 @@ export const paperTheme: Theme = { colors: paperColors, spacing, typography, fon
 export const duskTheme: Theme = { colors: duskColors, spacing, typography, fontSizes, fontWeights, radii, motion };
 
 /** A theme for any light/dark side and palette. */
-export function themeFor(name: WashThemeName, palette: PaletteName | null = null): Theme {
-  if (!palette) return name === 'dusk' ? duskTheme : paperTheme;
-  return { colors: washColors(name, palette), spacing, typography, fontSizes, fontWeights, radii, motion };
+export function themeFor(name: WashThemeName, palette: PaletteName | null = null, scenery: SceneryName | null = null): Theme {
+  if (!palette && !scenery) return name === 'dusk' ? duskTheme : paperTheme;
+  return { colors: washColors(name, palette, palette ? null : scenery), spacing, typography, fontSizes, fontWeights, radii, motion };
 }
 
 /** Platform default UI family when the bundled fonts have not loaded. */

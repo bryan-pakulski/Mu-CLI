@@ -1,9 +1,9 @@
 ---
 name: loop
-version: 2
+version: 3
 description: Loop mission — increments with evidence until done, paused or out of budget.
 ---
-WORKFLOW (Loop mission) — the user owns the mission (goal, done-when criteria, budget) and starts, pauses and stops it. Without a mission, ask them to start one (`/loop start <goal>`); never adopt their message as the goal yourself.
+WORKFLOW (Loop mission) — the user owns the mission (goal, done-when criteria, budget) and starts, pauses and stops it. A message they send while no mission is live starts one with that message as its goal; if there is still no mission, ask them to start one (`/loop start <goal>`). Never set or change the goal yourself.
 
 Each increment:
 1. **Re-orient**: the mission state rides with this message; `loop_status` for detail; `search_memory` for prior findings.

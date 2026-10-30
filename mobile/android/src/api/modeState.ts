@@ -86,4 +86,7 @@ export const modeStateApi = {
   resolveBlocker: (id: string, resolution: string) =>
     api.post<{ ok: boolean; blocker: Blocker }>(`/api/mode-state/blockers/${encodeURIComponent(id)}/resolve`, { resolution }),
   listWork: () => api.get<{ items: WorkItem[]; current: string | null; counts: Record<string, number> }>('/api/mode-state/work'),
+  /** The user starts, unblocks, finishes or drops a work item (done may need evidence or a reason). */
+  setWorkStatus: (id: string, body: { status: string; evidence?: string[]; override_reason?: string }) =>
+    api.post<{ items: WorkItem[]; current: string | null; counts: Record<string, number> }>(`/api/mode-state/work/${encodeURIComponent(id)}`, body),
 };

@@ -49,6 +49,12 @@ def run_suites_in_container(job, workspace, suites, *, runner=None, service=None
     return results
 
 
+def _source_mounts(job):
+    """The job's extra sources, writable like the checks workspace (mu/jobs/multi_source.py)."""
+    from ..multi_source import container_mounts
+    return tuple(container_mounts(job, "checks"))
+
+
 def _spec(suite, timeout):
     return {"command": suite.command, "junit": suite.junit, "timeout": timeout, "cwd": str(getattr(suite, "cwd", "") or "")}
 
@@ -70,7 +76,7 @@ def _run_container(job, workspace, suites, *, runner=None, service=None, restart
         (dirs[0] / "request.json").write_text(json.dumps(request))
         # Named like stage containers so Activity can attribute it to the job.
         name = f"mucli-job-{str(job.id)[:12]}-checks-{uuid.uuid4().hex[:8]}"
-        args = container_args(name, "checks", workspace, *map(str, dirs), policy, "")
+        args = container_args(name, "checks", workspace, *map(str, dirs), policy, "", extra_mounts=_source_mounts(job))
         args[-1] = "mu.jobs.sandbox.check_worker"  # entrypoint (args[-3]) is the policy's Python
         bridge = proxy = None
 
@@ -85,6 +91,8 @@ def _run_container(job, workspace, suites, *, runner=None, service=None, restart
             # (changed paths, secret files, credentials in the diff). Not for the baseline copy.
             if should_guard and workspace == job.worktree and getattr(job, "worktree", ""):
                 _guard(job, policy)
+                from ..multi_source import guard as guard_sources
+                guard_sources(job)
 
         def finish(result):
             if result.get("missing_executable"):
@@ -98,7 +106,7 @@ def _run_container(job, workspace, suites, *, runner=None, service=None, restart
                 from .engine import attach_docker
                 policy, proxy = attach_docker(policy, job, environment, list(states), dirs[2], service=service,
                                               stage="checks")
-                args = container_args(name, "checks", workspace, *map(str, dirs), policy, "")
+                args = container_args(name, "checks", workspace, *map(str, dirs), policy, "", extra_mounts=_source_mounts(job))
                 args[-1] = "mu.jobs.sandbox.check_worker"
             runner.run([docker, *args], timeout=30)
             if service is None:

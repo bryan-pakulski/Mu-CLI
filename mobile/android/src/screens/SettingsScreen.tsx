@@ -1,19 +1,21 @@
 // Settings (documentation/plans/mobile_parity.md §6 Settings), the web's settings page on a phone:
-//   Appearance  theme cards (Wash and the palettes, each with a light and a dark side), light or
-//               dark, glass strength (Wash only), Reduce decoration
+//   Appearance  theme cards (Wash and the palettes, each with a light and a dark side), scenery
+//               (Wash only: Classic or a watercolour pack), light or dark, glass strength (Wash
+//               only), Reduce decoration
 //   Devices     this phone's pairing (the computer lists and revokes devices)
 //   Areas       each area keeps its own settings beside its work
 // Session-level settings (mode, model, effort, plan, auto-approve, variables) live with the
 // conversation: the composer foot and the Chat ⋯ menu.
 
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { devicesApi, type PairedDevice } from '../api/devices';
 import { useConnectionStore } from '../store/connection';
 import { TEXT_SCALE_RANGE, useTheme, type ThemePreference } from '../theme/ThemeContext';
-import { PALETTES, paletteLabel, paletteNote, radii, spacing, washColors, type PaletteName } from '../theme/tokens';
+import { PALETTES, SCENERY, paletteLabel, paletteNote, radii, sceneryAccent, sceneryLabel, sceneryNote, spacing, washColors, type PaletteName, type SceneryName } from '../theme/tokens';
 import { PageHeader, Pressable, Row, Rows, Segmented, Slider, SwitchRow, Text } from '../ui';
+import { washArt } from '../ui/WashBackground';
 
 const GLASS_STOPS = [0, 20, 40, 60, 80, 100].map(v => ({ value: String(v), label: v === 0 ? 'Off' : `${v}%` }));
 // Text size stops from tokens.json density.text_scale (85–120 in steps of 5).
@@ -24,7 +26,7 @@ for (let v = TEXT_SCALE_RANGE.min; v <= TEXT_SCALE_RANGE.max; v += TEXT_SCALE_RA
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
-  const { colors, preference, setPreference, reduceDecoration, setReduceDecoration, palette, setPalette, glass, setGlass, textScale, setTextScale } = useTheme();
+  const { colors, preference, setPreference, reduceDecoration, setReduceDecoration, palette, setPalette, sceneryChoice, setScenery, glass, setGlass, textScale, setTextScale } = useTheme();
   const { baseUrl, isConnected, pairingRequired } = useConnectionStore();
   const [me, setMe] = useState<PairedDevice | null>(null);
   const server = baseUrl.replace(/^https?:\/\//, '');
@@ -50,6 +52,17 @@ export function SettingsScreen() {
               <ThemeCard key={name ?? 'wash'} name={name} selected={palette === name} onPress={() => setPalette(name)} />
             ))}
           </View>
+          {palette == null ? (
+            <View style={styles.setting} testID="scenery-setting">
+              <Text variant="label">Scenery</Text>
+              <Text variant="caption" tone="ink3">The watercolour behind the glass. Classic gives each place its own; a pack paints them all and brings its colour.</Text>
+              <View style={styles.themes} accessibilityRole="radiogroup" accessibilityLabel="Scenery">
+                {([null, ...SCENERY] as Array<SceneryName | null>).map(name => (
+                  <SceneryCard key={name ?? 'classic'} name={name} selected={sceneryChoice === name} onPress={() => setScenery(name)} />
+                ))}
+              </View>
+            </View>
+          ) : null}
           <View style={styles.setting}>
             <Text variant="label">Light or dark</Text>
             <Text variant="caption" tone="ink3">System follows the phone. Every theme has both.</Text>
@@ -146,7 +159,32 @@ function ThemeCard({ name, selected, onPress }: { name: PaletteName | null; sele
   );
 }
 
+/** A scenery choice: the pack's light and dark paintings (Classic shows dawn), its accent and name. */
+function SceneryCard({ name, selected, onPress }: { name: SceneryName | null; selected: boolean; onPress: () => void }) {
+  const { colors } = useTheme();
+  const label = sceneryLabel(name);
+  const scene = name ?? 'dawn';
+  return (
+    <Pressable onPress={onPress} scale={false} accessibilityRole="radio" accessibilityLabel={`${label} scenery`} accessibilityHint={sceneryNote(name)}
+      accessibilityState={{ selected, checked: selected }} testID={`scenery-${name ?? 'classic'}`}
+      style={[styles.card, { borderColor: selected ? colors.ink : colors.hairline, borderWidth: selected ? 2 : 1, backgroundColor: colors.surface }]}>
+      <View style={styles.sides} importantForAccessibility="no-hide-descendants">
+        {(['paper', 'dusk'] as const).map(side => (
+          <Image key={side} source={washArt(scene, side)} resizeMode="cover" style={[styles.side, styles.thumb, { borderColor: colors.hairline }]} />
+        ))}
+      </View>
+      <View style={styles.sceneryLabel}>
+        <View style={[styles.dot, styles.sceneryDot, { backgroundColor: name ? colors.pigment[sceneryAccent(name)].pigment : colors.accent.pigment }]} />
+        <Text variant="label" numberOfLines={1}>{label}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  thumb: { padding: 0, overflow: 'hidden' },
+  sceneryLabel: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  sceneryDot: { width: 7, height: 7, borderRadius: 4 },
   content: { padding: spacing.base, paddingBottom: spacing['2xl'], gap: spacing.xl },
   section: { gap: spacing.md },
   sectionHead: { gap: spacing.xs },

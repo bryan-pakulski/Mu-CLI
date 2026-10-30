@@ -190,6 +190,27 @@
 .w-tracenote .w-icon { flex: none; }
 .w-tracenote[data-state="working"] { color: var(--wash-ink-2); }
 
+/* A blocker raised in the turn: the question, in full, where the conversation is. */
+.w-traceask {
+    display: grid;
+    gap: var(--wash-space-1);
+    margin: var(--wash-space-2) 0 0;
+    padding: var(--wash-space-3) var(--wash-space-4);
+    border-radius: var(--wash-radius-md);
+    background: var(--wash-attention-wash);
+    color: var(--wash-ink-2);
+    font-size: var(--wash-type-body-size);
+    line-height: var(--wash-type-body-line);
+    overflow-wrap: anywhere;
+}
+.w-traceask p { margin: 0; white-space: pre-wrap; }
+.w-traceask__head { display: flex; align-items: center; gap: var(--wash-space-2); color: var(--wash-attention-ink);
+    font-size: var(--wash-type-caption-size); font-weight: var(--wash-type-label-weight); }
+.w-traceask__summary { color: var(--wash-ink); font-weight: var(--wash-type-label-weight); }
+.w-traceask__key { color: var(--wash-ink-3); }
+.w-traceask__questions { margin: 0; padding-left: var(--wash-space-5); }
+.w-traceask__hint { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }
+
 /* sub-agent card */
 .w-subagents {
     align-self: stretch;

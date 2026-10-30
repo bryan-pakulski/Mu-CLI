@@ -18,6 +18,13 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir -r /opt/mucli/
 RUN mkdir -p "$TIKTOKEN_CACHE_DIR" \
     && python3 -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
+# Headless Chromium for browser_snapshot (mu/tools/agent/browser.py): the agent screenshots the UI
+# it builds, including dev servers on the container's own localhost.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN python3 -m playwright install --with-deps --only-shell chromium \
+    && chmod -R a+rX /opt/ms-playwright \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /workspace
 EXPOSE 30312
 ENTRYPOINT ["python3", "-m", "mu.container.worker"]

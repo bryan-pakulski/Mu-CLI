@@ -64,7 +64,7 @@ export const providersApi = {
     }),
   getCurrent: () => api.get<CurrentProvider>('/api/providers/current'),
   switch: (provider: string, model: string, ollamaHost?: string, ollamaMode?: string, ollamaApiKey?: string) =>
-    api.put<Record<string, unknown>>('/api/providers/switch', {
+    api.post<Record<string, unknown>>('/api/providers/switch', {
       provider, model, ollama_host: ollamaHost, ollama_mode: ollamaMode, ollama_api_key: ollamaApiKey,
     }),
 };

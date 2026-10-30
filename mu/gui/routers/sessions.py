@@ -1380,15 +1380,17 @@ async def update_session_workspace(
         # the check-to-write window cannot be interleaved by another
         # surface's mutation; save_history re-enforces the revision as a
         # cross-process CAS.
+        # Checked before taking the lock: a turn holds it for its whole run,
+        # and waiting for it here would stall the event loop (the whole GUI).
+        if state.session_busy_for(name).is_set():
+            raise HTTPException(
+                status_code=409,
+                detail="Workspace cannot be changed while the session is running.",
+            )
         with state.session_lock_for(name):
             conflict = _check_if_match(request, session.session_manager, if_match)
             if conflict is not None:
                 return conflict
-            if state.session_busy_for(name).is_set():
-                raise HTTPException(
-                    status_code=409,
-                    detail="Workspace cannot be changed while the session is running.",
-                )
             expected = int(getattr(session.session_manager, "revision", 0) or 0)
             # Round-14 F6: build the new folder set on a detached copy and
             # install it on the live folder_context ONLY after the CAS save
@@ -1611,13 +1613,26 @@ async def create_session(request: Request, payload: Dict[str, Any]):
     workspace = str(payload.get("workspace") or "").strip()
     if session_type == "chat":
         workspace = ""
+    # ``create_workspace`` (the mobile New session sheet): a missing folder is created, after
+    # every other check passes, instead of failing. A path that exists but is not a folder,
+    # a relative path or a secret path is still refused.
+    create_workspace = False
     if workspace:
         workspace = os.path.expanduser(workspace)
         if not os.path.isdir(workspace):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Workspace path is not a directory: {workspace}",
-            )
+            if not (payload.get("create_workspace") and session_type == "workspace" and not os.path.lexists(workspace)):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Workspace path is not a directory: {workspace}",
+                )
+            if not os.path.isabs(workspace):
+                raise HTTPException(status_code=400, detail=f"Workspace path must be absolute: {workspace}")
+            from mu.security.secret_paths import is_denied_path
+
+            if is_denied_path(workspace)[0]:
+                raise HTTPException(status_code=400, detail=f"Workspace path is not allowed: {workspace}")
+            workspace = os.path.normpath(workspace)
+            create_workspace = True
 
     ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
     variables: Dict[str, Any] = {**ollama_vars, "session_type": session_type}
@@ -1681,6 +1696,11 @@ async def create_session(request: Request, payload: Dict[str, Any]):
         data["container_config"] = container_config
 
     path = _safe_session_dir(name)
+    if create_workspace:
+        try:
+            os.makedirs(workspace, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"Could not create workspace {workspace}: {exc.strerror or exc}") from exc
     # Round-50 F7 + F10: creation was check-then-create (two concurrent
     # creates both observed "absent", then both truncated the same
     # session.json) and wrote the document non-atomically (a crash or

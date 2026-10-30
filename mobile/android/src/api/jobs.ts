@@ -130,8 +130,37 @@ export interface JobDiagnosticsSnapshot {
   worker_log_truncated: boolean;
 }
 
+/** Where a new job's code comes from (mu/jobs/sources.py); an alternative to workspace_root/repository. */
+export type JobSource =
+  | { kind: 'folder'; path: string }
+  | { kind: 'repository'; name: string }
+  | { kind: 'repository'; url: string }
+  | { kind: 'session'; session: string; include_conversation?: boolean };
+
+/** A file given to the job at creation (mu/jobs/attachments.py): an upload or a session's file. */
+export type JobAttachmentInput =
+  | { name: string; content_base64: string; mime_type?: string }
+  | { session: string; attachment_id: string }
+  | { session: string; artifact_id: string };
+
+/** Settings → Repositories (`jobs.repositories`): the New job sheet's repository choices. */
+export interface ConfiguredRepository { name: string; url: string; branch: string }
+
+export function configuredRepositories(rules: JobRules | null | undefined): ConfiguredRepository[] {
+  const raw: unknown = rules?.values?.['jobs.repositories'];
+  if (!Array.isArray(raw)) return [];
+  return (raw as unknown[])
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+    .map(r => ({ name: String(r.name || '').trim(), url: String(r.url || '').trim(), branch: String(r.branch || '').trim() }))
+    .filter(r => r.name && r.url);
+}
+
 export interface CreateJobInput extends Record<string, unknown> {
   title: string;
+  source?: JobSource;
+  /** Extra editable sources (mu/jobs/multi_source.py): each at /sources/<name>, its own branch and PR or patch. */
+  sources?: JobSource[];
+  attachments?: JobAttachmentInput[];
   description?: string;
   session_name?: string;
   /** Workspace-first creation: the repository path (a saved session on it supplies model defaults). */

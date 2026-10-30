@@ -30,6 +30,8 @@ import { usePlanMode } from '../components/PlanModeIndicator';
 import { SubagentActivityPanel } from '../components/SubagentActivityPanel';
 import { VisualizationCard } from '../components/VisualizationCard';
 import { NeedsYouBanner } from '../components/PromptHost';
+import { LoopMissionStrip } from '../components/chat/LoopMissionStrip';
+import { navigateTo } from '../navigation/nav';
 import { InlinePrompt, ResolvedLine } from '../components/chat/InlinePrompt';
 import { useAutoApprove } from '../components/chat/useAutoApprove';
 import { TurnReceiptRow } from '../components/modes/TurnReceipt';
@@ -439,6 +441,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
         ) : null}
       </View>
 
+      {mode.name === 'loop' ? <LoopMissionStrip refreshKey={`${focused}:${streaming}`} onOpen={() => navigateTo('Loop')} /> : null}
       {artifactsVisible ? <ArtifactStrip sessionName={activeSessionName} refreshKey={artifactRevision} /> : null}
 
       <Composer

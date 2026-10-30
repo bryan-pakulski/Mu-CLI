@@ -32,7 +32,9 @@ TEXT = {".txt", ".log", ".md", ".json", ".csv", ".xml", ".html", ".htm", ".svg",
 INSTRUCTIONS = (
     "Evidence: when you test or verify behaviour (a UI change, an API response, a CLI run), save what "
     "you observed to /output/evidence/ so the human reviewing this job can see it without running the "
-    "code: screenshots (PNG/JPEG/WebP/GIF), short recordings (MP4/WebM) or text logs. A headless "
+    "code: screenshots (PNG/JPEG/WebP/GIF), short recordings (MP4/WebM) or text logs. The "
+    "browser_snapshot tool (when you have it) renders http://localhost:<port> or a file, can set a device "
+    "size or dark mode and click through steps, and saves the screenshot here for you. Otherwise a headless "
     "Chromium is usually available: `playwright screenshot --full-page <url> /output/evidence/<name>.png` "
     "(or Playwright from Python/Node; `playwright install chromium` if it is missing). Optionally add "
     "/output/evidence/index.json: "

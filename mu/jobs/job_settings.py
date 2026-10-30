@@ -233,6 +233,16 @@ RULES_SCHEMA: List[Dict[str, Any]] = [
         _f("checks.suites", "Required check suites", "suites", [],
            "Added to every job's plan checks. Commands run in the sandboxed checks stage."),
      ]},
+    {"id": "repositories", "title": "Repositories", "hint": "The repositories the New job sheet offers as a source (owned by mu/jobs/sources.py).",
+     "fields": [
+        _f("jobs.repositories", "Job repositories", "rows", [],
+           "URL = a git URL (https, ssh or user@host:path; cloned into a managed checkout) or a local repository path. "
+           "Branch = the base branch new jobs start from (blank = the remote default, or the folder's current branch).",
+           columns=[{"key": "name", "label": "Name", "placeholder": "backend", "required": True, "pattern": r"[\w .@+-]{1,80}"},
+                    {"key": "url", "label": "URL or path", "placeholder": "git@github.com:org/backend.git · /home/me/src/backend",
+                     "required": True, "pattern": r"[^\s'\"]+"},
+                    {"key": "branch", "label": "Branch", "placeholder": "main", "pattern": r"[\w./+-]*"}]),
+     ]},
     {"id": "toolchains", "title": "Toolchains", "hint": "Per-repository build environments (planos-style). A matching repository's stages run in a per-job snapshot of the source; mucli adds Python + its agent code. Used when neither the job, the repository's .mucli/jobs.toml nor the job's container session names an environment.",
      "fields": [
         _f("sandbox.toolchains", "Repository toolchain images", "rows", [],
@@ -390,6 +400,10 @@ for _section in RULES_SCHEMA:
             _f("jobs.clone.lfs", "Git LFS", "select", "auto",
                "auto: run git lfs pull when the repository uses LFS and git-lfs is installed (otherwise warn).",
                options=[["auto", "Auto"], ["off", "Off"]]),
+            _f("jobs.folder_snapshot_max_mb", "Folder snapshot limit", "int", 2048,
+               "A job on a folder that is not a git repository runs on a git snapshot of it (secrets, dependency "
+               "directories and .gitignored files left out); its change comes back as a patch. Larger folders are refused.",
+               min=1, max=1_000_000, unit="MB"),
         ]
 # --- end W8 block
 

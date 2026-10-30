@@ -229,6 +229,69 @@
     else apply(null, { silent: true });
 })();
 
+// Scenery (Wash theme only) — Settings → Appearance → Scenery.
+// Preference (localStorage `mucli-scenery`): "classic" (the default: each destination keeps its
+// own scene and accent) or a pack from tokens.json scenery (desert, forest, ocean, space…), which
+// paints every destination with its watercolour and recolours the accent. Applied as
+// html[data-scenery] (removed for classic; the pre-paint bootstrap does the same); tokens.css does
+// the rest, and flat palettes ignore it. Pack names come from the bootstrap (window.MU_SCENERY) or
+// wash_tokens.js. Controls: any [data-scenery-choice="<name>"] button (aria-pressed kept in sync);
+// [data-scenery-setting] blocks are disabled while a flat palette is chosen.
+(function () {
+    'use strict';
+    var KEY = 'mucli-scenery';
+    function packs() {
+        if (Array.isArray(window.MU_SCENERY)) return window.MU_SCENERY;
+        var all = window.WASH && window.WASH.scenery ? Object.keys(window.WASH.scenery) : [];
+        return all.filter(function (name) { return name !== 'classic'; });
+    }
+    function normalize(value) { return packs().indexOf(String(value || '')) >= 0 ? String(value) : 'classic'; }
+    function preference() {
+        try { return normalize(localStorage.getItem(KEY)); } catch (_) { return 'classic'; }
+    }
+    function syncControls(name) {
+        var flat = !!document.documentElement.getAttribute('data-palette');
+        document.querySelectorAll('[data-scenery-choice]').forEach(function (button) {
+            button.setAttribute('aria-pressed', button.getAttribute('data-scenery-choice') === name ? 'true' : 'false');
+        });
+        document.querySelectorAll('[data-scenery-setting]').forEach(function (box) {
+            if (flat) box.setAttribute('data-disabled', ''); else box.removeAttribute('data-disabled');
+            box.querySelectorAll('[data-scenery-choice]').forEach(function (button) { button.disabled = flat; });
+        });
+    }
+    function apply(pref, opts) {
+        var name = normalize(pref || preference());
+        var root = document.documentElement;
+        if (name === 'classic') root.removeAttribute('data-scenery');
+        else root.setAttribute('data-scenery', name);
+        syncControls(name);
+        if (!(opts && opts.silent)) {
+            window.dispatchEvent(new CustomEvent('mucli-scenery-change', { detail: { scenery: name } }));
+            if (window.MuTheme) {
+                var wash = window.MuTheme.current();
+                window.dispatchEvent(new CustomEvent('mucli-theme-change', {
+                    detail: { theme: window.MuTheme.legacyName(wash), wash: wash, preference: window.MuTheme.preference(), scenery: name },
+                }));
+            }
+        }
+        return name;
+    }
+    function set(value) {
+        var name = normalize(value);
+        try { localStorage.setItem(KEY, name); } catch (_) { /* private mode */ }
+        return apply(name);
+    }
+    document.addEventListener('click', function (event) {
+        var button = event.target.closest && event.target.closest('[data-scenery-choice]');
+        if (button && !button.disabled) set(button.getAttribute('data-scenery-choice'));
+    });
+    window.addEventListener('storage', function (event) { if (event.key === KEY) apply(event.newValue, { silent: true }); });
+    window.addEventListener('mucli-palette-change', function () { syncControls(normalize(document.documentElement.getAttribute('data-scenery'))); });
+    window.MuScenery = { KEY: KEY, packs: packs, preference: preference, current: function () { return normalize(document.documentElement.getAttribute('data-scenery')); }, set: set, apply: apply };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { apply(null, { silent: true }); });
+    else apply(null, { silent: true });
+})();
+
 // Glass (Mu revision 2; Wash theme only) — Settings → Appearance → Glass.
 // Preference (localStorage `mucli-glass`): 0–100, default 60. Applied as the CSS
 // variable --mu-glass (0–1) and html[data-glass] when above 0 (the pre-paint

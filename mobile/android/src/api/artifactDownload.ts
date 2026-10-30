@@ -23,6 +23,10 @@ export function evidenceFileUrl(base: string, jobId: string, file: string): stri
   return `${base}/api/jobs/${enc(jobId)}/evidence/${file.split('/').map(enc).join('/')}`;
 }
 
+export function jobAttachmentUrl(base: string, jobId: string, name: string): string {
+  return `${base}/api/jobs/${enc(jobId)}/attachments/${enc(name)}`;
+}
+
 /** A file name safe for the cache and the picked folder (as the server's Content-Disposition). */
 export function safeFileName(name: string): string {
   const clean = String(name || '').split('/').pop()!.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '');
@@ -57,6 +61,19 @@ export function saveCheckArtifact(jobId: string, run: number, file: { path: stri
 
 export function saveEvidenceFile(jobId: string, item: { file: string; name?: string; bytes?: number }): Promise<SaveOutcome> {
   return save(evidenceFileUrl(baseUrl(), jobId, item.file), item.name || item.file, item.bytes);
+}
+
+export function jobPatchUrl(base: string, jobId: string, source = ''): string {
+  return `${base}/api/jobs/${enc(jobId)}/patch${source ? `?source=${enc(source)}` : ''}`;
+}
+
+/** A folder job's result (or one extra source's): the change as a patch, applied with `git apply`. */
+export function saveJobPatch(jobId: string, source = ''): Promise<SaveOutcome> {
+  return save(jobPatchUrl(baseUrl(), jobId, source), `job-${jobId.slice(0, 12)}${source ? `-${source}` : ''}.patch`);
+}
+
+export function saveJobAttachment(jobId: string, item: { name: string; size?: number }): Promise<SaveOutcome> {
+  return save(jobAttachmentUrl(baseUrl(), jobId, item.name), item.name, item.size);
 }
 
 /**

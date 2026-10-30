@@ -725,6 +725,18 @@
     .work-form-error:not(:empty) { display: block; }
     .work-workspace-recent { margin-top: var(--wash-space-1); }
     .work-workspace-recent:empty { display: none; }
+    .work-source-kind { align-self: flex-start; }
+    /* New job → Other sources: one row per extra source (kind, folder/repository/session, remove). */
+    .work-sources { display: flex; flex-direction: column; gap: var(--wash-space-2); margin: 0; padding: 0; list-style: none; }
+    .work-sources:empty { display: none; }
+    .work-sources > li { display: flex; align-items: center; gap: var(--wash-space-2); min-width: 0; }
+    .work-sources > li > .w-select:first-child { flex: 0 0 9.5rem; }
+    .work-sources > li > :is(.w-input, .w-select:not(:first-child)) { flex: 1 1 auto; min-width: 0; }
+    /* New job → Attachments: one row per file (name, size, origin, remove). */
+    .work-attachments { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+    .work-attachments:empty { display: none; }
+    .work-attachments > li { display: flex; align-items: center; gap: var(--wash-space-2); min-height: 32px; border-bottom: 1px solid var(--wash-hairline); }
+    .work-attachments > li > .work-mono { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* Advanced options: a disclosure, not a box (Mu §9.5 "More options ▸"). */
     .work-advanced { border: 0; border-top: 1px solid var(--wash-hairline); padding-top: var(--wash-space-3); }
     .work-advanced > summary { padding: 0; color: var(--wash-ink-2); font-size: var(--wash-type-label-size); font-weight: var(--wash-type-label-weight); cursor: pointer; }

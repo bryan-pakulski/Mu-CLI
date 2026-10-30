@@ -611,6 +611,11 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
                 target = inputs / filename
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(value)
+        # Files attached at creation: read-only at /artifacts/attachments (named in the prompt).
+        from ..attachments import copy_into
+        copy_into(job, str(inputs))
+        from ..multi_source import container_mounts, container_paths
+        source_mounts, source_paths = container_mounts(job, stage), container_paths(job)
         guidance = str((job.metadata or {}).get("resume_guidance") or "")
         previous = art.read_json(f"logs/{stage}-transcript.json", []) or []
         # ``fresh``: a context_overflow retry starts a new conversation even if the stage was paused.
@@ -656,6 +661,8 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
             "context_window": _context_window(relay, model),
             "reasoning_effort": _stage_effort(stage),
             "environments": describe(ready) if stage == "implement" and len(ready) > 1 else [],
+            # Extra sources (mu/jobs/multi_source.py): more folders of the stage session.
+            "sources": source_paths,
             **({"harness": harness_request} if harness_request else {})}))
         created = False
         docker_proxy = None
@@ -672,7 +679,8 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
                                   harness_mounts=tuple(harness_mounts),
                                   module="mu.jobs.sandbox.harness_worker" if agent != "mucli" else "mu.jobs.sandbox.worker",
                                   on_warning=lambda message: service.store.append_event(
-                                      job.id, "sandbox_git_metadata_unavailable", payload={"stage": stage, "message": message}))
+                                      job.id, "sandbox_git_metadata_unavailable", payload={"stage": stage, "message": message}),
+                                  extra_mounts=tuple(source_mounts))
             runner.run([docker, *args], timeout=30)
             created = True
             errors, completed = [], threading.Event()
@@ -768,6 +776,8 @@ def _run_stage_once(service, job, stage, prompt, *, runner=None, relay_factory=M
                                                payload={"stage": stage, "agent": agent, "resets_at": result.get("resets_at")})
             if stage == "implement":
                 _guard(job, policy, literals=injected_literals(agent))
+                from ..multi_source import guard as guard_sources
+                guard_sources(job, literals=injected_literals(agent))
             result["cost_usd"] = relay.cost
             if result["kind"] != "completed":
                 # A reached cap pauses the stage resumably and asks a human; it never fails the job.

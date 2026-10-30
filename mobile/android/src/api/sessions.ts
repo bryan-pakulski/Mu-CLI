@@ -169,6 +169,8 @@ export interface CreateSessionOptions {
   ollamaHost?: string;
   ollamaApiKey?: string;
   container?: ContainerCreateOptions;
+  /** Create the workspace folder on the host when it does not exist yet (instead of a 400). */
+  createWorkspace?: boolean;
 }
 
 export interface WorkspaceSuggestionResponse {
@@ -220,6 +222,7 @@ export const sessionsApi = {
       activate: true,
       session_type: options?.sessionType || 'workspace',
       workspace,
+      create_workspace: options?.createWorkspace || undefined,
       ollama_mode: options?.ollamaMode,
       ollama_host: options?.ollamaHost,
       ollama_api_key: options?.ollamaApiKey,

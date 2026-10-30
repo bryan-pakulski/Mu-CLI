@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -121,12 +123,32 @@ async def set_mode(name: str, request: Request, session=Depends(require_session)
             ),
         )
     session_name = session.session_manager.current_session_name
-    with request.app.state.session_lock_for(session_name):
-        session.variables["agent_mode"] = name
-        try:
-            session.session_manager.save_history(session.folder_context)
-        except Exception:
-            pass
+    # Never wait on the session lock here: a turn holds it for its whole run
+    # and waiting would stall the event loop (the whole GUI). The new mode
+    # applies from the turn's next iteration; a running turn saves it, an idle
+    # session is saved in the background.
+    session.variables["agent_mode"] = name
+    try:
+        from mu.loop.engine import on_mode_change
+
+        from .mode_state import surface_actor
+
+        on_mode_change(session, name, actor=surface_actor(request))
+    except Exception:
+        pass
+    if not request.app.state.session_busy_for(session_name).is_set():
+        lock = request.app.state.session_lock_for(session_name)
+
+        def _persist():
+            if lock.acquire(timeout=2):
+                try:
+                    session.session_manager.save_history(session.folder_context)
+                except Exception:
+                    pass
+                finally:
+                    lock.release()
+
+        await asyncio.to_thread(_persist)
     bus = getattr(request.app.state, "bus", None)
     if bus is not None:
         await bus.publish(

@@ -11,6 +11,8 @@ export type WorkspacePathFieldProps = {
   placeholder?: string;
   autoFocus?: boolean;
   disabled?: boolean;
+  /** The caller creates a missing folder (New session): say so instead of asking for an existing one. */
+  createMissing?: boolean;
 };
 
 export function WorkspacePathField({
@@ -19,6 +21,7 @@ export function WorkspacePathField({
   placeholder = '/home/user/dev/project',
   autoFocus = false,
   disabled = false,
+  createMissing = false,
 }: WorkspacePathFieldProps) {
   const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
@@ -104,7 +107,9 @@ export function WorkspacePathField({
 
       {value.trim() && !loading ? (
         <Text variant="xs" dim style={styles.statusText} numberOfLines={1} ellipsizeMode="middle">
-          {exists ? `Folder found: ${resolvedPath}` : 'Enter an existing folder on the MuCLI host.'}
+          {exists ? `Folder found: ${resolvedPath}`
+            : createMissing ? `New folder: ${resolvedPath || value.trim()} is created with the session.`
+            : 'Enter an existing folder on the MuCLI host.'}
         </Text>
       ) : null}
     </View>

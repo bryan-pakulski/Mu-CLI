@@ -278,6 +278,11 @@
 .mode-shell .mode-shell__state { margin: var(--wash-space-1) 0 0; }
 .mode-shell .mode-shell__tabs { margin-top: var(--wash-space-3); }
 .mode-panel .mode-now { margin: 0 0 var(--wash-space-5); }
+/* Something waiting for you is read in full: Now rows wrap instead of truncating. */
+.mode-panel .mode-now .w-row__title,
+.mode-panel .mode-now .w-row__sub { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+/* The answer dialog's question keeps its line breaks (needs, details, each question). */
+.mode-ask__body { margin: 0 0 var(--wash-space-4); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--wash-ink); }
 .mode-panel .mode-body > .w-stepper { margin: 0 0 var(--wash-space-4); }
 .mode-panel .mode-goal {
     margin: 0 0 var(--wash-space-3);

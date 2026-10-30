@@ -63,6 +63,11 @@ const FIXTURES: Record<string, ToolEvent[]> = {
     call('m1', 'remember', ['a', 'b']), result('remember', 'ok'),
     call('t1', 'custom_tool', 'plain text arg'),
   ],
+  'a blocker is a question, not a tool row': [
+    call('r1', 'read_file', { path: 'x' }), result('read_file', 'b'),
+    call('q1', 'raise_blocker', { summary: 'fp16?', requested_input: 'a decision', questions: ['Accept fp16?'] }),
+    result('raise_blocker', '{"ok": true}'),
+  ],
   'mixed kinds count in order of first appearance': [
     call('1', 'bash', { cmd: 'ls' }), result('bash', 'a'),
     call('2', 'read_file', { path: 'x' }), result('read_file', 'b'),

@@ -3680,7 +3680,8 @@ ${problem.text}`, "error", 16000);
         async act(row, action) {
             if (action.id !== "resolve") return;
             const answer = await Alpine.store("modeAsk").ask({ title: "Answer the blocker",
-                label: "Your answer — the agent sees it on its next turn", confirm: "Answer" });
+                body: window.MuModeModels.blockerQuestion(row.blocker),
+                label: "Your answer — the agent picks it up straight away", confirm: "Answer" });
             if (answer === null) return;
             const r = await fetch(`/api/mode-state/blockers/${encodeURIComponent(row.ref)}/resolve`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
@@ -6279,6 +6280,15 @@ function routeEvent(ev) {
     const isFocused = !name || name === chat.currentName;
     switch (ev.kind) {
         case "user_message": break;  // optimistic local turn; history refresh reconciles other clients
+        case "turn_started":
+            // A turn this tab did not send (another tab, or the loop panel's
+            // Start / Resume): show the message and the working state.
+            if (!slot.busy) {
+                chat.addUser(String(ev.text || ""), name, ev.attachments || []);
+                slot.busy = true;
+                chat._ensureBusyTrace(slot);
+            }
+            break;
         case "attachment_created":
         case "attachment_deleted":
             if (isFocused) Alpine.store("attachments").load(name);

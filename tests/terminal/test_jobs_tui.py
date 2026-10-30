@@ -101,6 +101,11 @@ def _build(home: pathlib.Path) -> Dict[str, str]:
     service = JobService(JobStore(os.path.join(jobs_root(), "jobs.sqlite3")))
     ws = home / "ws"
     ws.mkdir(parents=True, exist_ok=True)
+    # A git repository: these jobs push (a plain folder's job finishes as a patch instead).
+    import subprocess
+    for args in (["init", "-q", "-b", "main"], ["-c", "user.name=T", "-c", "user.email=t@example.com",
+                                                "commit", "-q", "--allow-empty", "-m", "base"]):
+        subprocess.run(["git", "-C", str(ws), *args], check=True, capture_output=True)
 
     def make(key, title, path):
         job = service.create_from_payload({

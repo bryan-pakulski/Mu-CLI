@@ -12,14 +12,20 @@ import { StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewSt
 import Svg, { Defs, Image as SvgImage, LinearGradient, Mask, Rect, Stop } from 'react-native-svg';
 import { useTheme } from '../theme/ThemeContext';
 import type { ThemeName } from '../theme/ThemeContext';
+import { pageArt } from '../theme/washArt.generated';
+import { sceneryAccent, type PigmentName, type SceneName, type SceneryName } from '../theme/tokens';
 
-export type WashArt = 'dawn' | 'lagoon' | 'meadow';
+export type WashArt = SceneName;
 export type SpotPigment = 'apricot' | 'lagoon' | 'lilac' | 'meadow' | 'rose' | 'sky';
 
 const ART: Record<WashArt, Record<ThemeName, ImageSourcePropType>> = {
   dawn: { paper: require('../../assets/wash/dawn-paper.webp'), dusk: require('../../assets/wash/dawn-dusk.webp') },
   lagoon: { paper: require('../../assets/wash/lagoon-paper.webp'), dusk: require('../../assets/wash/lagoon-dusk.webp') },
   meadow: { paper: require('../../assets/wash/meadow-paper.webp'), dusk: require('../../assets/wash/meadow-dusk.webp') },
+  desert: { paper: require('../../assets/wash/desert-paper.webp'), dusk: require('../../assets/wash/desert-dusk.webp') },
+  forest: { paper: require('../../assets/wash/forest-paper.webp'), dusk: require('../../assets/wash/forest-dusk.webp') },
+  ocean: { paper: require('../../assets/wash/ocean-paper.webp'), dusk: require('../../assets/wash/ocean-dusk.webp') },
+  space: { paper: require('../../assets/wash/space-paper.webp'), dusk: require('../../assets/wash/space-dusk.webp') },
 };
 
 const SPOTS: Record<SpotPigment, Record<ThemeName, ImageSourcePropType>> = {
@@ -31,15 +37,22 @@ const SPOTS: Record<SpotPigment, Record<ThemeName, ImageSourcePropType>> = {
   sky: { paper: require('../../assets/wash/spot-sky-paper.webp'), dusk: require('../../assets/wash/spot-sky-dusk.webp') },
 };
 
-export function washArt(art: WashArt, theme: ThemeName): ImageSourcePropType {
-  return ART[art][theme];
+/** The hero painting; a scenery pack's own painting for `page` when it has one (tokens.json scenery pages). */
+export function washArt(art: WashArt, theme: ThemeName, page?: string | null): ImageSourcePropType {
+  const own = page ? pageArt[art]?.[page]?.[theme] : undefined;
+  return own ? own.hero : ART[art][theme];
 }
 
 export function spotWash(pigment: SpotPigment, theme: ThemeName): ImageSourcePropType {
   return SPOTS[pigment][theme];
 }
 
-const FLAT: Record<WashArt, 'apricot' | 'lagoon' | 'meadow'> = { dawn: 'apricot', lagoon: 'lagoon', meadow: 'meadow' };
+const CLASSIC_FLAT: Record<'dawn' | 'lagoon' | 'meadow', PigmentName> = { dawn: 'apricot', lagoon: 'lagoon', meadow: 'meadow' };
+
+/** The flat wash for "Reduce decoration": the classic scene's pigment, or the pack's accent. */
+function flatPigment(art: WashArt): PigmentName {
+  return art in CLASSIC_FLAT ? CLASSIC_FLAT[art as keyof typeof CLASSIC_FLAT] : sceneryAccent(art as SceneryName);
+}
 
 export type WashBackgroundProps = {
   art?: WashArt;
@@ -54,8 +67,12 @@ export type WashBackgroundProps = {
  * A canvas-coloured container with a hero band of watercolour art at the top
  * that fades to canvas. Children render on top, full size.
  */
-export function WashBackground({ art = 'dawn', height = 280, children, style, testID }: WashBackgroundProps) {
-  const { colors, name, reduceDecoration } = useTheme();
+export function WashBackground({ art: requested = 'dawn', height = 280, children, style, testID }: WashBackgroundProps) {
+  const { colors, name, reduceDecoration, scenery, destination } = useTheme();
+  // A scenery pack paints every hero band with its painting of the destination; Classic keeps
+  // the screen's own scene.
+  const art: WashArt = scenery ?? requested;
+  const page = scenery ? destination : null;
   if (!reduceDecoration) {
     // Glass: no canvas fill; the art fades out by alpha into whatever is behind.
     return (
@@ -74,7 +91,7 @@ export function WashBackground({ art = 'dawn', height = 280, children, style, te
                   <Rect x="0" y="0" width="100%" height="100%" fill="url(#wash-alpha)" />
                 </Mask>
               </Defs>
-              <SvgImage href={washArt(art, name)} x="0" y="0" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" mask="url(#wash-mask)" />
+              <SvgImage href={washArt(art, name, page)} x="0" y="0" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" mask="url(#wash-mask)" />
             </Svg>
           </View>
         </View>
@@ -85,7 +102,7 @@ export function WashBackground({ art = 'dawn', height = 280, children, style, te
   return (
     <View testID={testID} style={[styles.root, { backgroundColor: colors.canvas }, style]}>
       <View pointerEvents="none" importantForAccessibility="no-hide-descendants" style={[styles.band, { height }]}>
-        <View testID="wash-flat" style={[StyleSheet.absoluteFill, { backgroundColor: colors.pigment[FLAT[art]].wash }]} />
+        <View testID="wash-flat" style={[StyleSheet.absoluteFill, { backgroundColor: colors.pigment[flatPigment(art)].wash }]} />
         <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" preserveAspectRatio="none">
           <Defs>
             <LinearGradient id="wash-fade" x1="0" y1="0" x2="0" y2="1">

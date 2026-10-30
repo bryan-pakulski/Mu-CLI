@@ -86,7 +86,9 @@ class EnvironmentBroker:
                     bridge = EgressBridge(dirs[2], policy.egress_extra).start()
                 policy, proxy = attach_docker(policy, self.job, state, list(self.states.values()), dirs[2],
                                               service=self.service, settings=self.settings)
-                args = container_args(name, "checks", self.job.worktree, *map(str, dirs), policy, "", role="job-broker")
+                from ..multi_source import container_mounts
+                args = container_args(name, "checks", self.job.worktree, *map(str, dirs), policy, "", role="job-broker",
+                                      extra_mounts=tuple(container_mounts(self.job, "checks")))
                 args[-1] = "mu.jobs.sandbox.check_worker"
                 self.runner.run([docker, *args], timeout=60)
                 created = True

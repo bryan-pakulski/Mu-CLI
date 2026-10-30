@@ -6,7 +6,8 @@
      prefers-reduced-transparency. Reduced sets html[data-decoration="reduced"],
      which swaps every wash painting for a flat wash token. It applies the palette
      (localStorage `mucli-palette`: darcula | one | material | tokyo → html[data-palette];
-     wash, the default, sets nothing) and the Wash glass strength (`mucli-glass`, 0–100,
+     wash, the default, sets nothing), the Wash scenery (localStorage `mucli-scenery`: a pack from
+     tokens.json scenery → html[data-scenery]; classic, the default, sets nothing) and the Wash glass strength (`mucli-glass`, 0–100,
      default 60 → --mu-glass and html[data-glass]) and its blur (`mucli-glass-blur`, 0–100,
      default 60 → --mu-blur) and the text size (`mucli-text-scale`, 85–120 percent → --mu-scale).
      It also sets
@@ -36,6 +37,12 @@
         var palette = localStorage.getItem('mucli-palette');
         if (palette === 'darcula' || palette === 'one' || palette === 'material' || palette === 'tokyo') root.setAttribute('data-palette', palette);
     } catch (e) { /* storage unavailable: wash */ }
+    // Scenery for the Wash theme (route_theme.js MuScenery): classic (default) | a tokens.json pack.
+    window.MU_SCENERY = {{ wash_scenery_names | tojson }};
+    try {
+        var scenery = localStorage.getItem('mucli-scenery');
+        if (window.MU_SCENERY.indexOf(scenery) >= 0) root.setAttribute('data-scenery', scenery);
+    } catch (e) { /* storage unavailable: classic */ }
     // Glass strength for the Wash theme (route_theme.js MuGlass): 0–100, default 60.
     var glass = 60;
     try {

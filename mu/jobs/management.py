@@ -456,6 +456,9 @@ class JobManagementService:
         # W3: archived jobs drop their branches (local always; remote per settings).
         from .worktree import delete_job_branches
         delete_job_branches(self.service, self.service.get(job.id))
+        # Extra sources (mu/jobs/multi_source.py): their worktrees and branches go too.
+        from .multi_source import remove as remove_sources
+        remove_sources(self.service, self.service.get(job.id))
         return self.state(job.id)
 
     def restore(self, job_id: str) -> Dict[str, Any]:
@@ -590,6 +593,15 @@ class JobManagementService:
             except Exception:  # noqa: BLE001 - the controller sweeper retries orphans
                 pass
         worktree_removed = False
+        if purge_artifacts:
+            from .multi_source import sources as extra_sources, view as source_view
+            for source in extra_sources(job):
+                sub = source_view(job, source)
+                if sub.worktree and os.path.exists(sub.worktree):
+                    try:
+                        JobWorktreeManager(self.service).remove(sub, force=False)
+                    except WorktreeError:
+                        pass  # orphaned but harmless, like the primary below
         if purge_artifacts and job.worktree and os.path.exists(job.worktree):
             try:
                 worktree_removed = JobWorktreeManager(self.service).remove(job, force=False)

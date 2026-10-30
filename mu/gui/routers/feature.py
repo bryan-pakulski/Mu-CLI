@@ -93,7 +93,7 @@ def feature_payload(session: Any, plan: Optional[engine.FeaturePlan] = None, *, 
 
 
 @router.get("/state")
-async def get_feature_state(request: Request) -> Dict[str, Any]:
+def get_feature_state(request: Request) -> Dict[str, Any]:
     session = mode_session(request)
     if session is None or getattr(session.session_manager, "mode_state", None) is None:
         return {"active": False, "active_feature_id": None, "plan": None, "features": [], "blockers": [],
@@ -117,12 +117,12 @@ def _act(request: Request, fn) -> Dict[str, Any]:
 
 
 @router.post("/approve")
-async def approve(request: Request) -> Dict[str, Any]:
+def approve(request: Request) -> Dict[str, Any]:
     return _act(request, lambda s, actor: engine.approve(s, actor=actor))
 
 
 @router.post("/{feature_id}/approve")
-async def approve_named(request: Request, feature_id: str) -> Dict[str, Any]:
+def approve_named(request: Request, feature_id: str) -> Dict[str, Any]:
     """Earlier clients (Android) post to /{feature_id}/approve."""
     session, _states = states_for(request)
     if session.session_manager.active_feature_id != _slugify_feature_id(feature_id):
@@ -131,7 +131,7 @@ async def approve_named(request: Request, feature_id: str) -> Dict[str, Any]:
 
 
 @router.post("/tasks/{task_id}/start")
-async def start(request: Request, task_id: int) -> Dict[str, Any]:
+def start(request: Request, task_id: int) -> Dict[str, Any]:
     return _act(request, lambda s, actor: engine.start_task(s, task_id, actor=actor))
 
 
@@ -144,7 +144,7 @@ class TransitionBody(BaseModel):
 
 
 @router.post("/tasks/{task_id}/transition")
-async def transition(request: Request, task_id: int, body: TransitionBody) -> Dict[str, Any]:
+def transition(request: Request, task_id: int, body: TransitionBody) -> Dict[str, Any]:
     reason = body.reason or body.blocked_reason or body.notes or ""
     return _act(request, lambda s, actor: engine.transition(s, task_id, body.to_status, actor=actor, reason=reason))
 
@@ -154,7 +154,7 @@ class AttestBody(BaseModel):
 
 
 @router.post("/tasks/{task_id}/criteria/{criterion_id}/attest")
-async def attest(request: Request, task_id: int, criterion_id: str, body: AttestBody) -> Dict[str, Any]:
+def attest(request: Request, task_id: int, criterion_id: str, body: AttestBody) -> Dict[str, Any]:
     return _act(request, lambda s, actor: engine.attest_criterion(s, task_id, criterion_id, note=body.note, actor=actor))
 
 
@@ -163,7 +163,7 @@ class CompleteTaskBody(BaseModel):
 
 
 @router.post("/tasks/{task_id}/complete")
-async def complete_task(request: Request, task_id: int, body: Optional[CompleteTaskBody] = None) -> Dict[str, Any]:
+def complete_task(request: Request, task_id: int, body: Optional[CompleteTaskBody] = None) -> Dict[str, Any]:
     reason = body.override_reason if body else ""
     return _act(request, lambda s, actor: engine.complete_task(s, task_id, actor=actor, override_reason=reason))
 
@@ -174,13 +174,13 @@ class DecideBody(BaseModel):
 
 
 @router.post("/diffs/{proposal_id}/decide")
-async def decide(request: Request, proposal_id: str, body: DecideBody) -> Dict[str, Any]:
+def decide(request: Request, proposal_id: str, body: DecideBody) -> Dict[str, Any]:
     return _act(request, lambda s, actor: engine.decide_diff(s, proposal_id, decision=body.decision,
                                                             reason=body.reason, actor=actor))
 
 
 @router.post("/complete")
-async def complete_feature(request: Request) -> Dict[str, Any]:
+def complete_feature(request: Request) -> Dict[str, Any]:
     return _act(request, lambda s, actor: engine.complete_feature(s, actor=actor))
 
 
@@ -202,40 +202,40 @@ def _record_or_404(sm, feature_id: str) -> Dict[str, Any]:
 
 
 @router.delete("/{feature_id}")
-async def delete_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+def delete_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     session = _session_or_412(request)
     sm = session.session_manager
     feature_id = _slugify_feature_id(feature_id)
     if sm.active_feature_id == feature_id:
         raise HTTPException(status_code=409, detail=f"Feature '{feature_id}' is currently loaded — unload it first.")
     _record_or_404(sm, feature_id)
-    with mode_session_lock(request, session):
+    with mode_session_lock(request, session, exclusive=True):
         sm.delete_feature(feature_id)
     return {"ok": True, "features": _features_list(sm)}
 
 
 @router.post("/{feature_id}/load")
-async def load_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+def load_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     session = _session_or_412(request)
     sm = session.session_manager
     feature_id = _slugify_feature_id(feature_id)
     record = _record_or_404(sm, feature_id)
     if record.get("archived"):
         raise HTTPException(status_code=409, detail="Unarchive the feature first.")
-    with mode_session_lock(request, session):
+    with mode_session_lock(request, session, exclusive=True):
         sm.activate_feature(feature_id)
     return {"ok": True, "features": _features_list(sm)}
 
 
 @router.post("/{feature_id}/unload")
-async def unload_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+def unload_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     session = _session_or_412(request)
     sm = session.session_manager
     feature_id = _slugify_feature_id(feature_id)
     if sm.active_feature_id != feature_id:
         _record_or_404(sm, feature_id)
         raise HTTPException(status_code=409, detail=f"Feature '{feature_id}' is not the active feature.")
-    with mode_session_lock(request, session):
+    with mode_session_lock(request, session, exclusive=True):
         sm.active_feature_id = None
         sm.feature_state = None
         sm.save_history()
@@ -243,31 +243,31 @@ async def unload_feature(request: Request, feature_id: str) -> Dict[str, Any]:
 
 
 @router.post("/{feature_id}/archive")
-async def archive_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+def archive_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     session = _session_or_412(request)
     sm = session.session_manager
     feature_id = _slugify_feature_id(feature_id)
     if sm.active_feature_id == feature_id:
         raise HTTPException(status_code=409, detail="Unload the feature before archiving.")
     _record_or_404(sm, feature_id)
-    with mode_session_lock(request, session):
+    with mode_session_lock(request, session, exclusive=True):
         sm.archive_feature(feature_id)
     return {"ok": True, "features": _features_list(sm)}
 
 
 @router.post("/{feature_id}/unarchive")
-async def unarchive_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+def unarchive_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     session = _session_or_412(request)
     sm = session.session_manager
     feature_id = _slugify_feature_id(feature_id)
     _record_or_404(sm, feature_id)
-    with mode_session_lock(request, session):
+    with mode_session_lock(request, session, exclusive=True):
         sm.unarchive_feature(feature_id)
     return {"ok": True, "features": _features_list(sm)}
 
 
 @router.get("/{feature_id}/preview")
-async def preview_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+def preview_feature(request: Request, feature_id: str) -> Dict[str, Any]:
     session = _session_or_412(request)
     sm = session.session_manager
     feature_id = _slugify_feature_id(feature_id)
@@ -299,7 +299,7 @@ class CreateFeatureBody(BaseModel):
 
 
 @router.post("/create")
-async def create_feature(request: Request, body: CreateFeatureBody) -> Dict[str, Any]:
+def create_feature(request: Request, body: CreateFeatureBody) -> Dict[str, Any]:
     """Create a feature as a draft; with phases, the draft is filled in (still needs approval)."""
     session = _session_or_412(request)
     sm = session.session_manager
@@ -308,7 +308,7 @@ async def create_feature(request: Request, body: CreateFeatureBody) -> Dict[str,
         raise HTTPException(status_code=400, detail="feature_name is required")
     folders = getattr(sm.folder_context, "folders", None) or []
     directory = body.directory.strip() or (folders[0] if folders else os.getcwd())
-    with mode_session_lock(request, session):
+    with mode_session_lock(request, session, exclusive=True):
         record = sm.create_feature_record(name, directory=directory, feature_request=body.feature_request.strip())
         if body.phases:
             phases = [{"title": p.title, "goal": p.goal, "tasks": [

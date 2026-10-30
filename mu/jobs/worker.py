@@ -38,11 +38,15 @@ def _checkpoint(manager: JobWorktreeManager, service: JobService, job_id: str, l
             from .sandbox.runner import _guard
             from .sandbox.policy import guard_policy
             _guard(current, guard_policy(current, "implement"))
+        from . import multi_source
+        multi_source.guard(current)  # every extra source passes the same host guard first
         checkpoint = manager.checkpoint(current, label=label)
+        multi_source.checkpoint(manager, current, label=label)
         if checkpoint and current.base_sha:
             from .core.artifacts import artifacts_for
             patch = manager._run(current.worktree, "diff", "--no-ext-diff", f"{current.base_sha}..{checkpoint}")
-            artifacts_for(current).ensure().write_text("diff.patch", patch.stdout or "")
+            # One diff for the review and the Diff tab: extra sources' paths are sources/<name>/...
+            artifacts_for(current).ensure().write_text("diff.patch", (patch.stdout or "") + multi_source.combined_diff(current))
         return checkpoint
     except Exception as exc:
         from .sandbox.policy import SandboxGuardError
@@ -461,6 +465,8 @@ def _implementation(service: JobService, job, lease) -> int:
         if str(execution.get("session_type") or "workspace") == "workspace":
             try:
                 manager.prepare(job)
+                from .multi_source import prepare as prepare_sources
+                prepare_sources(service, manager, service.get(job_id))
             except WorktreeError as exc:
                 diagnostics = exc.to_dict()
                 diagnostics.update(

@@ -43,7 +43,7 @@ import {
 import { useTheme } from '../theme/ThemeContext';
 import { useMotionPreference } from '../hooks/useMotionPreference';
 import { radii, spacing, touchTarget } from '../theme/tokens';
-import { AmbientLayer, GlassBackdrop, glassStyle, useAmbientArt, type AmbientArt } from './Glass';
+import { AmbientLayer, GlassBackdrop, glassStyle, useAmbientArt, useAmbientPage, type AmbientArt } from './Glass';
 import { Pressable } from './Pressable';
 import { Text } from './Text';
 import { Icon } from './Icon';
@@ -70,6 +70,7 @@ export type ModalFrameProps = {
 export function ModalFrame({ visible, onRequestClose, transparent = true, edges = ['top', 'bottom'], animationType = 'fade', containerStyle, children, testID, statusBarTranslucent = true, presentationStyle, ambient }: ModalFrameProps) {
   const { colors, reduceDecoration } = useTheme();
   const screenArt = useAmbientArt();
+  const screenPage = useAmbientPage();
   return (
     <Modal
       testID={testID}
@@ -84,7 +85,7 @@ export function ModalFrame({ visible, onRequestClose, transparent = true, edges 
       navigationBarTranslucent={navigationBarTranslucent}
     >
       <SafeAreaProvider initialMetrics={initialWindowMetrics} style={styles.flex}>
-        {transparent ? null : <AmbientLayer art={ambient || screenArt} testID="modal-ambient-wash" />}
+        {transparent ? null : <AmbientLayer art={ambient || screenArt} page={ambient ? null : screenPage} testID="modal-ambient-wash" />}
         <SafeAreaView edges={edges} style={[styles.flex, transparent ? null : glassStyle(1, colors, { flat: true, solid: reduceDecoration }), containerStyle]}>
           {children}
         </SafeAreaView>

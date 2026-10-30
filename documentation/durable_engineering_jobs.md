@@ -48,9 +48,9 @@ Every job runs in a workspace (`workspace_root`). By default this is the first
 folder of the session that creates it. In the terminal, `--in PATH` picks the
 workspace directly, and no chat session is needed. The job is filed under a
 hidden per-workspace session that is kept out of chat session lists. A
-payload may name `repository` instead (see below). Non-git workspaces are
-allowed; they run with `execution.git_enabled = false`, without a base commit,
-review branch or PR. Jobs stored before v2 that have `repository` set still load.
+payload may name `repository` instead (see below). A workspace that is not a git
+repository runs on a git snapshot of it (see **Folders** below). Jobs stored before v2
+that have `repository` set still load.
 
 The job's working directory (its worktree, on this machine) shows in the job's
 summary with **Open a shell**: a `cd '<worktree>'` command to copy into your own
@@ -96,6 +96,87 @@ do the same. Each clone gets its own hidden session.
 Job worktrees initialise submodules after `git worktree add`. When the network
 is unavailable this fails without stopping the job and is recorded as a
 `worktree_submodules_skipped` event.
+
+### Sources
+
+The New job sheet's **Source** picks where the code comes from. The API takes the same
+choice as `source` (`mu/jobs/sources.py`) instead of `workspace_root`/`repository`:
+
+- `{"kind": "folder", "path": "/src/app"}`: any local folder, git or not. A saved
+  session on that folder still supplies its defaults.
+- `{"kind": "repository", "name": "backend"}`: an entry of **Settings → Repositories**
+  (`jobs.repositories`: rows of name, URL or path, optional branch). URLs are cloned as
+  above, with the row's branch as `#branch`; for local paths the branch becomes
+  `base_branch`. `{"kind": "repository", "url": "..."}` takes a URL that isn't in the list.
+- `{"kind": "session", "session": "chat-1", "include_conversation": true}`: runs in the
+  session's first workspace with its model, mode and environment. `include_conversation`
+  attaches the session's conversation (its summary and user/assistant text, no tool
+  output) as `conversation-<session>.md`. A session without a workspace is refused.
+
+The resolved choice is recorded as `metadata.source`. Ticket imports accept `source`
+in their `defaults` too. The Android New job sheet offers the same Source switch and attachments (phone
+files are sent base64-encoded; a session's files by id), and a job's attachments save to
+the phone from its summary.
+
+### Folders
+
+A folder that is not a git repository (`source.kind = folder`, a session's workspace or
+`workspace_root`) runs on a managed git snapshot of it (`mu/jobs/folder_snapshot.py`). The
+folder is mirrored into `$MUCLI_HOME/repos/folders/<name>-<sha8>` (branch `main`) and
+committed; every new job on that folder refreshes the snapshot first, committing only when the
+folder changed, so the job starts from the folder as it is now. Left out (and listed in
+`metadata.folder_snapshot.skipped`): `.git` and dependency/cache directories (`node_modules`,
+virtualenvs, `__pycache__`, ...), secret files by the sandbox pre-check's rule (env templates and
+test fixtures are kept), symlinks that are absolute or leave the folder, and anything the folder's
+own `.gitignore` files ignore. Folders over `jobs.folder_snapshot_max_mb` (Settings → Git & PR
+hosts, default 2048 MB) are refused.
+
+The folder itself is never written. A folder job never publishes (`publish_mode = none`): its
+result is the patch from `GET /api/jobs/<id>/patch` (binary-safe, the whole change), applied in
+the folder with `git apply <file>`. The job summary on the web and Android links it. In review,
+**Finish (keep as patch)** replaces Push / open PR, and **Mark done** closes the job once the patch
+is applied.
+
+### Multiple sources
+
+A job may change several sources. `source` (or `workspace_root` / `repository`) is the primary; it
+runs at `/workspace` exactly as above. `sources` adds up to 8 more, each in the `source` shape
+(`folder`, `repository` by Settings name or `url`, `session`) plus an optional `alias` for its
+mount name (`mu/jobs/multi_source.py`). Each is resolved like the primary when the job is created
+(URLs cloned, plain folders snapshotted, git repositories from their current HEAD; a source that
+is already part of the job is refused) and recorded in `metadata.sources`.
+
+When the job is prepared, every extra source gets its own worktree on the job's branch name
+(`<jobs>/<id>/sources/<name>/<id>`). In the sandbox it is mounted at `/sources/<name>`: writable in
+implement, checks and (via the broker) build environments, read-only in plan and review, never
+in repair or template job setup, with its `.git` pointer mounted read-only so the agent cannot point
+the host's git elsewhere. The stage session lists it as a folder and the plan, implement and review
+prompts name it. A check suite may set `cwd` to `/sources/<name>/...`.
+
+The host guard (changed paths, secret files, credentials in the diff) and checkpoints cover every
+source; `diff.patch`, the Diff tab, `GET /api/jobs/<id>/diff` and the review prompt include each
+extra source's change with paths under `sources/<name>/`. Push opens one draft PR per extra source
+that has a remote and changes (before the primary's; a failure parks the job with the source's
+name), recorded per source (`metadata.sources[].pr`). Folders, and repositories without a remote,
+hand their change back as a patch: `GET /api/jobs/<id>/patch?source=<name>`. Archiving a job removes
+the extra worktrees and managed branches too. The merge poller and base-drift checks follow the
+primary only. The New job sheet (web and Android) has **Other sources**; the job summary lists each
+source with its PR or patch.
+
+### Attachments
+
+`attachments` (`mu/jobs/attachments.py`) gives files to a job at creation. Each item is
+an upload (`{"name", "content_base64", "mime_type"?}`), a chat session's attachment or
+artifact (`{"session", "attachment_id" | "artifact_id"}`) or its conversation
+(`{"session", "conversation": true}`). The limits are 20 files, 25 MiB per file and
+100 MiB in total. Every item is checked before the job is created, so a bad item returns
+`400` and no job is made. Files are stored in `$MUCLI_HOME/jobs/<id>/attachments/`, with
+names flattened and de-duplicated, and are listed in `metadata.attachments` (name, size,
+sha256, mime type, origin). Every stage gets a copy at `/artifacts/attachments/` (read-only,
+and a read-only second folder of the mucli stage session), and the plan, implement and
+review prompts list them. Attachments never enter the worktree, so they are never
+committed or pushed. Download them with `GET /api/jobs/<id>/attachments/<name>`; the job's
+summary links them.
 
 ### Plan
 
@@ -505,6 +586,13 @@ template-derived images install it best-effort at build (a base Playwright canno
 provision still builds), and Playwright's browser hosts are in the default
 package egress so `playwright install chromium` works where it is missing.
 
+mucli stage agents (plan and review included: it is in the read-only allowlist) also have the
+`browser_snapshot` tool. Inside the stage container it reaches the container's own localhost (the dev
+server the agent started), emulates a desktop, tablet or phone viewport and light/dark mode, can
+capture one element and run up to 20 steps (click, fill, press, hover, select, wait) on local pages,
+and saves each screenshot into `/output/evidence/` with a caption, so it becomes job evidence. The
+model sees the screenshot itself on its next turn (vision models).
+
 **Check artifacts** (`mu/jobs/check_artifacts.py`). Before checks discard what a suite
 left in the worktree, every file it wrote during the run (untracked *or* git-ignored:
 JUnit and coverage XML, logs, HTML reports, screenshots, packet captures, archives)
@@ -613,7 +701,7 @@ tab (web Jobs → Setup, Android Job settings → Setup, terminal `g u` and `g d
 ## Storage
 
 Each job's folder is `$MUCLI_HOME/jobs/<id>/`. It holds the worktree,
-`ticket.json`, versioned plans, `diff.patch`, `review.json`, check evidence,
+`ticket.json`, `attachments/`, versioned plans, `diff.patch`, `review.json`, check evidence,
 stage transcripts and `costs.jsonl`. The job database is
 `$MUCLI_HOME/jobs/jobs.sqlite3`, and job settings are
 `$MUCLI_HOME/jobs/settings.json`. The store is created at the current schema;

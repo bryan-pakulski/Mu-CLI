@@ -17,7 +17,7 @@ import { Text } from './Text';
 import { ToolCard, type ToolCallView } from './ToolCard';
 import {
   TOOL_KINDS, callItems, formatDuration, groupLabel, middleTruncate, turnSummary,
-  type ThinkingItem, type ToolCardItem, type ToolGroupItem, type ToolListItem,
+  type QuestionItem, type ThinkingItem, type ToolCardItem, type ToolGroupItem, type ToolListItem,
 } from './toolList';
 
 /** A model card as the ToolCard view. */
@@ -73,6 +73,26 @@ function ThinkingRow({ item }: { item: ThinkingItem }) {
   );
 }
 
+/** The agent's question (a ``raise_blocker`` call), in full: when and why the work paused. */
+export function QuestionRow({ item }: { item: QuestionItem }) {
+  const { colors } = useTheme();
+  const qs = item.questions.filter(Boolean);
+  return (
+    <View testID={`tool-question-${item.id}`} accessibilityRole="summary"
+      style={{ gap: spacing.xs, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radii.md, backgroundColor: colors.attention.wash }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+        <Icon name="alert-circle" size="sm" color={colors.attention.ink} />
+        <Text variant="caption" style={{ color: colors.attention.ink }}>Paused for your answer</Text>
+      </View>
+      {item.summary ? <Text variant="label">{item.summary}</Text> : null}
+      {item.needs ? <Text variant="body" tone="ink2"><Text variant="body" tone="ink3">Needs </Text>{item.needs}</Text> : null}
+      {item.details ? <Text variant="body" tone="ink2">{item.details}</Text> : null}
+      {qs.map((q, i) => <Text key={i} variant="body" tone="ink2">{`• ${q}`}</Text>)}
+      <Text variant="caption" tone="ink3">Reply in chat or answer it in the panel; the work carries on with your answer.</Text>
+    </View>
+  );
+}
+
 function Items({ items }: { items: ToolListItem[] }) {
   const { colors } = useTheme();
   return (
@@ -88,6 +108,7 @@ function Items({ items }: { items: ToolListItem[] }) {
             </View>
           );
         }
+        if (item.type === 'question') return <QuestionRow key={item.id} item={item} />;
         return <ToolCard key={item.id} call={cardView(item)} testID={`tool-card-${item.id}`} />;
       })}
     </View>
@@ -95,6 +116,18 @@ function Items({ items }: { items: ToolListItem[] }) {
 }
 
 export function ToolList({ items, running, testID = 'tool-list' }: { items: ToolListItem[]; running?: boolean; testID?: string }) {
+  // Questions never fold into the turn summary: they stay below it, in full (web renderToolCards).
+  const asks = items.filter((item): item is QuestionItem => item.type === 'question');
+  if (!asks.length) return <ToolRows items={items} running={running} testID={testID} />;
+  return (
+    <View style={{ gap: spacing.xs }}>
+      <ToolRows items={items.filter(item => item.type !== 'question')} running={running} testID={testID} />
+      {asks.map(item => <QuestionRow key={item.id} item={item} />)}
+    </View>
+  );
+}
+
+function ToolRows({ items, running, testID }: { items: ToolListItem[]; running?: boolean; testID: string }) {
   const { colors } = useTheme();
   const [open, setOpen] = useState(false);
   if (!items.length) {

@@ -334,7 +334,7 @@ async function defaultExecutor(item: QueuedItem): Promise<ReplayExecutorResult> 
       const { key: _drop, ...body } = item.payload;
       await api.post(`/api/variables/${encodeURIComponent(key)}`, body, { headers, query: { session_name: item.sessionName } });
     } else {
-      await api.put('/api/providers/switch', item.payload, { headers });
+      await api.post('/api/providers/switch', item.payload, { headers });
     }
     return { status: 'applied' };
   } catch (err) {

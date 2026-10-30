@@ -104,7 +104,7 @@ def teacher_payload(session) -> Dict[str, Any]:
 
 
 @router.get("/state")
-async def get_teacher_state(request: Request) -> Dict[str, Any]:
+def get_teacher_state(request: Request) -> Dict[str, Any]:
     session = mode_session(request)
     if session is None:
         return {"active": False, "active_course_id": None, "course": None, "courses": [], "course_path": None}
@@ -137,7 +137,7 @@ def _act(request: Request, fn) -> Dict[str, Any]:
 
 
 @router.post("/approve")
-async def approve(request: Request) -> Dict[str, Any]:
+def approve(request: Request) -> Dict[str, Any]:
     from mu.teacher.gates import approve_curriculum
 
     return _act(request, lambda course, actor: approve_curriculum(course, actor=actor))
@@ -148,7 +148,7 @@ class StartBody(BaseModel):
 
 
 @router.post("/lessons/{lesson_id}/start")
-async def start_lesson(request: Request, lesson_id: str, body: Optional[StartBody] = None) -> Dict[str, Any]:
+def start_lesson(request: Request, lesson_id: str, body: Optional[StartBody] = None) -> Dict[str, Any]:
     from mu.teacher.gates import start_lesson as start
 
     reason = body.override_reason if body else ""
@@ -160,7 +160,7 @@ class EarlyBody(BaseModel):
 
 
 @router.post("/finish-early")
-async def finish_early(request: Request, body: EarlyBody) -> Dict[str, Any]:
+def finish_early(request: Request, body: EarlyBody) -> Dict[str, Any]:
     from mu.teacher.gates import early_exit
 
     return _act(request, lambda course, actor: early_exit(course, reason=body.reason, actor=actor))
@@ -185,7 +185,7 @@ def _lesson_dir(course_dir: str, lesson_id: str) -> str:
 
 
 @router.get("/lessons/{lesson_id}/lecture")
-async def get_lecture_transcript(request: Request, lesson_id: str) -> Dict[str, Any]:
+def get_lecture_transcript(request: Request, lesson_id: str) -> Dict[str, Any]:
     """Return the authored lecture.md content for a lesson, or 404."""
     course_dir = _resolve_course_dir(request)
     if not course_dir:
@@ -199,7 +199,7 @@ async def get_lecture_transcript(request: Request, lesson_id: str) -> Dict[str, 
 
 
 @router.get("/lessons/{lesson_id}/exercises")
-async def get_exercises_listing(request: Request, lesson_id: str) -> Dict[str, Any]:
+def get_exercises_listing(request: Request, lesson_id: str) -> Dict[str, Any]:
     """Return a listing of exercise file paths plus each file's contents."""
     course_dir = _resolve_course_dir(request)
     if not course_dir:
@@ -223,7 +223,7 @@ async def get_exercises_listing(request: Request, lesson_id: str) -> Dict[str, A
 
 
 @router.get("/lessons/{lesson_id}/exercises/{path:path}")
-async def get_exercise_file(request: Request, lesson_id: str, path: str) -> Dict[str, Any]:
+def get_exercise_file(request: Request, lesson_id: str, path: str) -> Dict[str, Any]:
     """Return a single exercise file's contents (path-validated)."""
     course_dir = _resolve_course_dir(request)
     if not course_dir:

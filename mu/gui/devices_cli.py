@@ -64,7 +64,7 @@ def main(argv) -> int:
         except Exception:  # noqa: BLE001 - the code alone is enough
             pass
         minutes = max(1, int((pairing["expires_at"] - time.time()) // 60))
-        console.print(f"\n[wash.title]Pair a device[/]  code [bold]{esc(pairing['display'])}[/]  (valid {esc(minutes)} min, one use)")
+        console.print(f"\n[wash.title]Pair a device[/]  code [bold]{esc(pairing['display'])}[/]  (valid {esc(str(minutes))} min, one use)")
         if pairing.get("urls"):
             console.print("GUI address for the phone: " + ", ".join(esc(u) for u in pairing["urls"]))
         if pairing.get("listening_on_loopback"):

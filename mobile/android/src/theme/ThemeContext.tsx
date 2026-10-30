@@ -5,6 +5,9 @@
 // - theme: `system | paper | dusk` (light / dark); legacy `light`/`dark` migrate on read.
 // - palette: null (Wash) or one of tokens.json palettes (Darcula, One, Material, Tokyo Night).
 //   Palettes are flat: no glass, no watercolour (as on the web).
+// - scenery: null (Classic: each destination keeps its own scene and accent) or a tokens.json
+//   scenery pack (Desert, Forest, Ocean, Space), which paints every destination with its watercolour
+//   and recolours the accent. Wash only: flat palettes ignore it.
 // - glass: 0–100 (default 60), the Wash theme's glass strength.
 // - decoration: "Reduce decoration" swaps the watercolour for a flat canvas (G§6.2.5).
 // - text scale: percent of the design text size (tokens.json density.text_scale, 85–120); smaller
@@ -16,7 +19,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { useColorScheme } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { PALETTES, themeFor, type DestinationName, type PaletteName, type Theme, type Tone3 } from './tokens';
+import { PALETTES, SCENERY, themeFor, type DestinationName, type PaletteName, type SceneryName, type Theme, type Tone3 } from './tokens';
 import { textScale as TEXT_SCALE } from './wash.generated';
 
 export type ThemePreference = 'system' | 'paper' | 'dusk';
@@ -25,6 +28,7 @@ export type ThemeName = 'paper' | 'dusk';
 export const THEME_STORAGE_KEY = '@mucli/theme';
 export const DECORATION_STORAGE_KEY = '@mucli/reduce-decoration';
 export const PALETTE_STORAGE_KEY = '@mucli/palette';
+export const SCENERY_STORAGE_KEY = '@mucli/scenery';
 export const GLASS_STORAGE_KEY = '@mucli/glass';
 export const GLASS_DEFAULT = 60;
 export const TEXT_SCALE_STORAGE_KEY = '@mucli/text-scale';
@@ -40,6 +44,11 @@ export function parseTextScale(raw: string | number | null | undefined): number 
 
 export function parsePalette(raw: string | null | undefined): PaletteName | null {
   return raw && (PALETTES as readonly string[]).includes(raw) ? (raw as PaletteName) : null;
+}
+
+/** A stored scenery pack; anything else (including 'classic') is Classic (null). */
+export function parseScenery(raw: string | null | undefined): SceneryName | null {
+  return raw && (SCENERY as readonly string[]).includes(raw) ? (raw as SceneryName) : null;
 }
 
 export function parseGlass(raw: string | null | undefined): number {
@@ -74,6 +83,11 @@ export type ThemeContextValue = Theme & {
   /** null = the Wash theme. */
   palette: PaletteName | null;
   setPalette: (palette: PaletteName | null) => void;
+  /** The watercolour scenery pack in effect (null: Classic, or a flat palette is chosen). */
+  scenery: SceneryName | null;
+  /** The stored choice, kept while a flat palette is chosen. */
+  sceneryChoice: SceneryName | null;
+  setScenery: (scenery: SceneryName | null) => void;
   /** Glass strength 0–100 (Wash only; palettes and reduced decoration are flat). */
   glass: number;
   setGlass: (glass: number) => void;
@@ -103,6 +117,9 @@ const ThemeContext = createContext<ThemeContextValue>({
   setReduceDecoration: noop,
   palette: null,
   setPalette: noop,
+  scenery: null,
+  sceneryChoice: null,
+  setScenery: noop,
   glass: GLASS_DEFAULT,
   setGlass: noop,
   flat: false,
@@ -118,6 +135,7 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
   const [preference, setPreferenceState] = useState<ThemePreference>('system');
   const [reduceDecoration, setReduceDecorationState] = useState(false);
   const [palette, setPaletteState] = useState<PaletteName | null>(null);
+  const [sceneryChoice, setSceneryState] = useState<SceneryName | null>(null);
   const [glass, setGlassState] = useState(GLASS_DEFAULT);
   const [destination, setDestinationState] = useState<DestinationName>('chat');
   const [textScale, setTextScaleState] = useState<number>(TEXT_SCALE.default);
@@ -126,12 +144,13 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
     let cancelled = false;
     void (async () => {
       try {
-        const [themeRaw, decorationRaw, paletteRaw, glassRaw, scaleRaw] = await Promise.all([
+        const [themeRaw, decorationRaw, paletteRaw, glassRaw, scaleRaw, sceneryRaw] = await Promise.all([
           AsyncStorage.getItem(THEME_STORAGE_KEY),
           AsyncStorage.getItem(DECORATION_STORAGE_KEY),
           AsyncStorage.getItem(PALETTE_STORAGE_KEY),
           AsyncStorage.getItem(GLASS_STORAGE_KEY),
           AsyncStorage.getItem(TEXT_SCALE_STORAGE_KEY),
+          AsyncStorage.getItem(SCENERY_STORAGE_KEY),
         ]);
         if (cancelled) return;
         // Only touch state when storage differs from the defaults, so a
@@ -141,6 +160,8 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
         if (decorationRaw === '1') setReduceDecorationState(true);
         const storedPalette = parsePalette(paletteRaw);
         if (storedPalette) setPaletteState(storedPalette);
+        const storedScenery = parseScenery(sceneryRaw);
+        if (storedScenery) setSceneryState(storedScenery);
         const storedGlass = parseGlass(glassRaw);
         if (storedGlass !== GLASS_DEFAULT) setGlassState(storedGlass);
         const storedScale = parseTextScale(scaleRaw);
@@ -167,6 +188,11 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
     AsyncStorage.setItem(PALETTE_STORAGE_KEY, next ?? '').catch(noop);
   }, []);
 
+  const setScenery = useCallback((next: SceneryName | null) => {
+    setSceneryState(next);
+    AsyncStorage.setItem(SCENERY_STORAGE_KEY, next ?? 'classic').catch(noop);
+  }, []);
+
   const setGlass = useCallback((next: number) => {
     const value = parseGlass(String(next));
     setGlassState(value);
@@ -185,7 +211,8 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
 
   const name = resolveThemeName(preference, scheme);
   const toggleTheme = useCallback(() => setPreference(name === 'dusk' ? 'paper' : 'dusk'), [name, setPreference]);
-  const theme = useMemo(() => themeFor(name, palette), [name, palette]);
+  const scenery = palette ? null : sceneryChoice;
+  const theme = useMemo(() => themeFor(name, palette, scenery), [name, palette, scenery]);
 
   const value = useMemo<ThemeContextValue>(() => ({
     ...theme,
@@ -198,6 +225,9 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
     setReduceDecoration,
     palette,
     setPalette,
+    scenery,
+    sceneryChoice,
+    setScenery,
     glass,
     setGlass,
     flat: reduceDecoration || palette != null || glass === 0,
@@ -206,8 +236,8 @@ export function ThemeProvider({ children, statusBar = true }: { children: React.
     accent: theme.colors.destination[destination],
     textScale,
     setTextScale,
-  }), [theme, name, preference, reduceDecoration, palette, glass, destination, textScale,
-       setPreference, setReduceDecoration, setPalette, setGlass, setDestination, setTextScale, toggleTheme]);
+  }), [theme, name, preference, reduceDecoration, palette, scenery, sceneryChoice, glass, destination, textScale,
+       setPreference, setReduceDecoration, setPalette, setScenery, setGlass, setDestination, setTextScale, toggleTheme]);
 
   return (
     <ThemeContext.Provider value={value}>

@@ -196,6 +196,7 @@ def facts_for(service, job, core: Optional[CoreState] = None, *, archived: bool 
         live_stage=bool(job.worker_id) and core.state in (JobState.PLANNING, JobState.IMPLEMENTING,
                                                           JobState.REVIEWING),
         git_workspace=True,
+        folder_snapshot=bool(meta.get("folder_snapshot")),
         pending_approval=approval,
         has_diff=_has_diff(art),
         has_worker=bool(job.worker_id),
@@ -424,6 +425,18 @@ def _summary(service, job, *, now: float) -> Dict[str, Any]:
         "updated_at": job.updated_at,
         "repository": job.repository,
         "origin_session": str((job.metadata or {}).get("origin_session") or ""),
+        # Files attached at creation (mu/jobs/attachments.py): name, size, mime_type, origin.
+        "attachments": [{k: a.get(k) for k in ("name", "size", "mime_type", "origin") if k in a}
+                        for a in meta.get("attachments") or [] if isinstance(a, dict)],
+        # Jobs on a plain folder (mu/jobs/folder_snapshot.py): the folder, and that the result is a patch.
+        "folder_snapshot": ({"source_path": meta["folder_snapshot"].get("source_path", ""),
+                             "skipped_total": meta["folder_snapshot"].get("skipped_total", 0)}
+                            if isinstance(meta.get("folder_snapshot"), dict) else None),
+        # Extra editable sources (mu/jobs/multi_source.py): each with its PR or patch.
+        "sources": [{"name": src["name"], "input": src.get("input") or "", "kind": src.get("kind") or "",
+                     "branch": src.get("branch") or "", "folder": bool(src.get("folder_snapshot")),
+                     "pr": {k: v for k, v in dict(src.get("pr") or {}).items() if k in ("url", "number", "state", "draft")}}
+                    for src in meta.get("sources") or [] if isinstance(src, dict) and src.get("name")],
         "environments": _environments_summary(job),
         "stage_models": {s: resolve_stage_model(job.execution, s) for s in ("plan", "implement", "review")},
         "stage_agents": _stage_agents(job),

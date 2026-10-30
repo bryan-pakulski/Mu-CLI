@@ -381,7 +381,10 @@ def _recheck(service, job, facts, args):
     # Re-run Checks + Review on the current HEAD (no implement run).
     if not job.worktree:
         from ..worktree import JobWorktreeManager
-        JobWorktreeManager(service).prepare(job)
+        manager = JobWorktreeManager(service)
+        manager.prepare(job)
+        from ..multi_source import prepare as prepare_sources
+        prepare_sources(service, manager, service.get(job.id))
     service.store.set_fix_attempts(job.id, 0)
     _merge_meta(service, job.id, checks_trigger="recheck")
     service.transition(job.id, "verifying", reason="recheck requested")

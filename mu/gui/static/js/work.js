@@ -378,10 +378,142 @@
     const sameWorkspace = (a, b) => String(a || '').replace(/\/+$/, '') === String(b || '').replace(/\/+$/, '');
     // The saved session whose workspace this is: it supplies model defaults, mode and environment.
     const sessionForWorkspace = path => (sessions || []).find(s => (s.workspaces?.length ? s.workspaces : [s.workspace]).some(w => sameWorkspace(w, path)));
-    const chosenWorkspace = () => workspaceInput.value.trim();
+    // Source (mu/jobs/sources.py): a folder (path, or a git URL pasted there), a repository from
+    // Settings → Repositories (or another URL), or a saved session (its workspace and defaults).
+    const sourceKindEl = document.getElementById('job-source-kind');
+    const repoSelect = document.getElementById('job-repository');
+    const repoUrlInput = document.getElementById('job-repository-url');
+    const sessionSelect = document.getElementById('job-session');
+    const conversationBox = document.getElementById('job-session-conversation');
+    const OTHER_REPO = '\u0000other';
+    let sourceKind = 'folder', repositories = [];
+    const chosenRepository = () => repositories.find(r => r.name === repoSelect.value) || null;
+    function chosenWorkspace() {
+        if (sourceKind === 'repository') return repoSelect.value === OTHER_REPO ? repoUrlInput.value.trim() : (chosenRepository()?.url || '');
+        if (sourceKind === 'session') return chosenSession()?.workspace || '';
+        return workspaceInput.value.trim();
+    }
+    // The saved session that supplies model defaults, mode and environment.
+    function chosenSession() {
+        if (sourceKind === 'session') return (sessions || []).find(s => s.name === sessionSelect.value) || null;
+        const path = chosenWorkspace();
+        return path && !isRepoUrl(path) ? sessionForWorkspace(path) || null : null;
+    }
     // A git URL (https/ssh/scp-style) in the workspace field is sent as `repository` and cloned by the server.
     const GIT_URL = /^(?:(?:https?|ssh|git):\/\/[^\s/]+\/\S+|[\w.-]+@[\w.-]+:\S+)$/;
     const isRepoUrl = value => GIT_URL.test(String(value || '').trim());
+    function setSourceKind(kind) {
+        sourceKind = kind;
+        sourceKindEl.querySelectorAll('[data-source-kind]').forEach(b => b.setAttribute('aria-checked', String(b.dataset.sourceKind === kind)));
+        document.querySelectorAll('[data-source-panel]').forEach(p => { p.hidden = p.dataset.sourcePanel !== kind; });
+        renderAttachments();
+        syncSessionHints();
+        void refreshEnvPreview();
+    }
+    function renderSourcePickers() {
+        const keepRepo = repoSelect.value, keepSession = sessionSelect.value;
+        repoSelect.innerHTML = (repositories.length ? '' : '<option value="">No repositories in Settings yet</option>')
+            + repositories.map(r => `<option value="${esc(r.name)}">${esc(r.name)} — ${esc(r.url)}${r.branch ? ` (${esc(r.branch)})` : ''}</option>`).join('')
+            + `<option value="${OTHER_REPO}">Another URL…</option>`;
+        document.getElementById('job-repository-names').innerHTML = repositories.map(r => `<option value="${esc(r.name)}">${esc(r.url)}</option>`).join('');
+        if ([...repoSelect.options].some(o => o.value === keepRepo)) repoSelect.value = keepRepo;
+        repoUrlInput.hidden = repoSelect.value !== OTHER_REPO;
+        const usable = (sessions || []).filter(x => x.workspace);
+        sessionSelect.innerHTML = usable.length ? usable.map(x => `<option value="${esc(x.name)}">${esc(x.name)} — ${esc(describeSession(x))}</option>`).join('')
+            : '<option value="">No saved session has a workspace</option>';
+        const entry = usable.find(x => x.name === entrySession) || usable.find(x => x.current);
+        sessionSelect.value = [...sessionSelect.options].some(o => o.value === keepSession) && keepSession ? keepSession : (entry?.name || usable[0]?.name || '');
+    }
+    // Other sources (mu/jobs/multi_source.py): more folders, repositories or sessions the job may
+    // change, each at /sources/<name> with its own branch and PR (a folder: a patch).
+    const sourcesList = document.getElementById('job-sources');
+    const SOURCE_KINDS = [['folder', 'Folder'], ['repository', 'Repository'], ['session', 'Session']];
+    let extraSources = [];
+    function renderExtraSources() {
+        const usable = (sessions || []).filter(x => x.workspace);
+        sourcesList.innerHTML = extraSources.map((src, i) => {
+            const kind = `<span class="w-select"><select class="w-select__control" data-src-kind="${i}" aria-label="Kind of source ${i + 1}">${SOURCE_KINDS.map(([v, l]) =>
+                `<option value="${v}" ${v === src.kind ? 'selected' : ''}>${l}</option>`).join('')}</select></span>`;
+            const value = src.kind === 'session'
+                ? `<span class="w-select"><select class="w-select__control" data-src-value="${i}" aria-label="Session for source ${i + 1}">${usable.map(x =>
+                    `<option value="${esc(x.name)}" ${x.name === src.value ? 'selected' : ''}>${esc(x.name)} — ${esc(x.workspace)}</option>`).join('') || '<option value="">No saved session has a workspace</option>'}</select></span>`
+                : `<input class="w-input" data-mono data-src-value="${i}" value="${esc(src.value)}" autocomplete="off" spellcheck="false"
+                    aria-label="${src.kind === 'repository' ? 'Repository' : 'Folder'} for source ${i + 1}"
+                    list="${src.kind === 'repository' ? 'job-repository-names' : 'job-workspace-recent'}"
+                    placeholder="${src.kind === 'repository' ? 'a Settings repository — or a git URL' : '/home/me/src/other-project'}">`;
+            return `<li>${kind}${value}<button type="button" class="w-btn" data-variant="icon" data-size="sm" data-src-remove="${i}" aria-label="Remove source ${i + 1}" title="Remove">✕</button></li>`;
+        }).join('');
+    }
+    // A repository row names a Settings → Repositories entry, or else is a URL / path.
+    const extraSourcePayload = () => extraSources.filter(src => String(src.value || '').trim()).map(src => {
+        const value = src.value.trim();
+        if (src.kind === 'session') return { kind: 'session', session: value };
+        if (src.kind === 'repository') return repositories.some(r => r.name === value) ? { kind: 'repository', name: value } : { kind: 'repository', url: value };
+        return { kind: 'folder', path: value };
+    });
+    // Attachments (mu/jobs/attachments.py): uploads travel base64-encoded in the create request;
+    // session files are referenced by id and copied by the server.
+    const ATTACH_MAX_FILES = 20, ATTACH_MAX_BYTES = 25 * 1024 * 1024;
+    const attachList = document.getElementById('job-attachments');
+    const attachInput = document.getElementById('job-attach-input');
+    const attachSessionBtn = document.getElementById('job-attach-session');
+    let attachments = [];
+    const fmtSize = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+    function renderAttachments() {
+        const session = chosenSession();
+        attachSessionBtn.hidden = !session;
+        attachSessionBtn.textContent = session ? `From ${session.name}…` : 'From the session…';
+        attachList.innerHTML = attachments.map((a, i) => `<li><span class="work-mono" title="${esc(a.name)}">${esc(a.name)}</span>
+            <span class="work-meta">${esc([a.size != null ? fmtSize(a.size) : '', a.session ? `from ${a.session}` : ''].filter(Boolean).join(' · '))}</span>
+            <button type="button" class="w-btn" data-variant="icon" data-size="sm" data-attach-remove="${i}" aria-label="Remove ${esc(a.name)}" title="Remove">✕</button></li>`).join('');
+    }
+    const readBase64 = file => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+        reader.onerror = () => reject(reader.error || new Error(`Could not read ${file.name}`));
+        reader.readAsDataURL(file);
+    });
+    async function addFiles(files) {
+        for (const file of files) {
+            if (attachments.length >= ATTACH_MAX_FILES) { toast(`A job takes at most ${ATTACH_MAX_FILES} attachments`, 'danger'); break; }
+            if (file.size > ATTACH_MAX_BYTES) { toast(`${file.name} is larger than 25 MB`, 'danger'); continue; }
+            try { attachments.push({ name: file.name, size: file.size, mime_type: file.type || '', content_base64: await readBase64(file) }); }
+            catch (error) { toast(error.message, 'danger'); }
+        }
+        renderAttachments();
+    }
+    async function attachFromSession() {
+        const session = chosenSession();
+        if (!session) return;
+        const enc = encodeURIComponent(session.name);
+        let files = [];
+        try {
+            const [att, art] = await Promise.all([api(`/api/sessions/${enc}/attachments?limit=200`), api(`/api/sessions/${enc}/artifacts?limit=200`)]);
+            files = [...(att.attachments || []).map(a => ({ id: a.attachment_id, key: 'attachment_id', name: a.name, size: a.size, kind: 'attachment' })),
+                     ...(art.artifacts || []).map(a => ({ id: a.artifact_id, key: 'artifact_id', name: a.name, size: a.size, kind: a.kind === 'visualization' ? 'chart' : 'artifact' }))];
+        } catch (error) { toast(`Could not list ${session.name}'s files: ${error.message}`, 'danger'); return; }
+        const taken = new Set(attachments.filter(a => a.session === session.name).map(a => `${a.key}:${a.id}`));
+        const form = document.createElement('form');
+        form.className = 'work-stack';
+        form.innerHTML = (files.length ? `<ul class="work-attachments">${files.map((f, i) => `<li><label class="w-check work-grow"><input class="w-check__input" type="checkbox" data-pick="${i}" ${taken.has(`${f.key}:${f.id}`) ? 'checked disabled' : ''}><span class="work-mono">${esc(f.name)}</span></label>
+                <span class="work-meta">${esc([f.kind, f.size != null ? fmtSize(f.size) : ''].filter(Boolean).join(' · '))}</span></li>`).join('')}</ul>`
+            : `<p class="work-meta">${esc(session.name)} has no attachments or artifacts.</p>`)
+            + `<div class="w-btn-row" data-align="end"><button type="button" class="w-btn" data-variant="secondary" data-cancel>Cancel</button>${files.length ? '<button type="submit" class="w-btn" data-variant="primary">Attach</button>' : ''}</div>`;
+        const d = ui.dialog({ title: `Attach from ${session.name}`, body: form });
+        form.querySelector('[data-cancel]').onclick = () => d.close();
+        form.onsubmit = e => {
+            e.preventDefault();
+            form.querySelectorAll('[data-pick]:checked:not(:disabled)').forEach(box => {
+                const f = files[Number(box.dataset.pick)];
+                if (attachments.length < ATTACH_MAX_FILES) attachments.push({ session: session.name, key: f.key, id: f.id, name: f.name, size: f.size });
+            });
+            renderAttachments();
+            d.close();
+        };
+    }
+    const attachmentPayload = () => attachments.map(a => a.content_base64 != null
+        ? { name: a.name, mime_type: a.mime_type, content_base64: a.content_base64 }
+        : { session: a.session, [a.key]: a.id });
     function renderWorkspaceChips() {
         const recent = recentWorkspaces(sessions || []);
         document.getElementById('job-workspace-recent').innerHTML = recent.map(w => `<option value="${esc(w)}"></option>`).join('');
@@ -389,7 +521,8 @@
     }
     function syncSessionHints() {
         const path = chosenWorkspace();
-        const chosen = path ? sessionForWorkspace(path) : null;
+        const chosen = chosenSession();
+        renderAttachments();
         workspaceChips.querySelectorAll('[data-workspace]').forEach(b => b.setAttribute('aria-pressed', String(sameWorkspace(b.dataset.workspace, path))));
         if (path && isRepoUrl(path)) {
             repoHint.textContent = `Clones ${path} into a managed checkout; models come from Settings → Stage models.`;
@@ -397,11 +530,14 @@
             return;
         }
         if (!path) {
-            repoHint.textContent = (sessions || []).length ? 'Pick a recent workspace, type the repository path or paste a git URL.' : 'Type the repository path the job works in, or paste a git URL to clone.';
+            repoHint.textContent = sourceKind === 'repository' ? (repoSelect.value === OTHER_REPO ? 'Paste a git URL (https or ssh); add #branch for a base branch.' : 'Add repositories in Settings → Repositories.')
+                : sourceKind === 'session' ? 'Pick a saved session: the job runs in its workspace with its model, mode and environment.'
+                : (sessions || []).length ? 'Pick a recent workspace, type the repository path or paste a git URL.' : 'Type the repository path the job works in, or paste a git URL to clone.';
             executionHelp.textContent = '';
             return;
         }
-        repoHint.textContent = chosen
+        const branch = sourceKind === 'repository' ? chosenRepository()?.branch : '';
+        repoHint.textContent = branch ? `Starts from ${branch} in ${path}.` : chosen
             ? `Runs in ${path} with the model, mode and environment of session ${chosen.name}.`
             : `Runs in ${path}. No saved session uses this workspace: models come from Settings → Stage models (or the current session).`;
         executionHelp.textContent = chosen ? `Blank fields inherit from ${chosen.name}` + (chosen.provider ? ` (${chosen.provider} · ${chosen.model}, ${chosen.agent_mode} mode).` : '.') : '';
@@ -468,7 +604,7 @@
                 { title: 'Approve build environment', okLabel: 'Approve' })) return;
             b.disabled = true;
             try {
-                await api('/api/jobs/environments/approve', { method: 'POST', body: { repository: offer.repository || path, fingerprint: offer.fingerprint, session: sessionForWorkspace(path)?.name || '' } });
+                await api('/api/jobs/environments/approve', { method: 'POST', body: { repository: offer.repository || path, fingerprint: offer.fingerprint, session: chosenSession()?.name || '' } });
                 toast('Build environment approved', 'ok');
                 await refreshEnvPreview();
             } catch (error) { b.disabled = false; toast(error.message, 'danger'); }
@@ -484,10 +620,10 @@
         try {
             let data;
             if (runIn) {
-                await runIn.refresh({ workspace: path, session: sessionForWorkspace(path)?.name || '' });
+                await runIn.refresh({ workspace: path, session: chosenSession()?.name || '' });
                 data = runIn.info() || {};
             } else {
-                data = await window.MuJobEnvironments.sources(api, { repository: path, session: sessionForWorkspace(path)?.name || '', images: false });
+                data = await window.MuJobEnvironments.sources(api, { repository: path, session: chosenSession()?.name || '', images: false });
             }
             if (request === envRequest) { envPreview = data.resolved || { bindings: [], source: 'default' }; renderEnvField(); renderEnvApproval(); }
         } catch (error) { if (request === envRequest) { envPreview = { error: error.message, bindings: [] }; renderEnvField(); } }
@@ -497,7 +633,7 @@
         const E = window.MuJobEnvironments;
         const path = chosenWorkspace();
         const result = await E.editor({ api, ui, title: 'Build environments for the new job',
-            initial: envOverride || envPreview?.bindings || [], context: { repository: path, session: sessionForWorkspace(path)?.name || '' },
+            initial: envOverride || envPreview?.bindings || [], context: { repository: path, session: chosenSession()?.name || '' },
             clearLabel: 'Use default' });
         if (result === null) return;
         envOverride = result.length ? result : null;
@@ -625,6 +761,9 @@
             if (costInput) costInput.placeholder = costPlaceholder(values['defaults.max_cost_usd']);
             syncCostHint();
             fill('job-runtime', values['defaults.max_runtime_seconds']);
+            repositories = (values['jobs.repositories'] || []).filter(r => r && r.name && r.url);
+            renderSourcePickers();
+            if (sourceKind === 'repository') { syncSessionHints(); void refreshEnvPreview(); }
         } catch (_) { /* older server: keep the form's own defaults */ }
     }
 
@@ -639,6 +778,7 @@
             workspaceInput.value = workspaceInput.dataset.chosen || entry?.workspace || recentWorkspaces(list)[0] || '';
         }
         renderWorkspaceChips();
+        renderSourcePickers();
         syncSessionHints();
         syncTitleHint();
         void refreshEnvPreview();
@@ -646,7 +786,8 @@
         if (!agentPicker && window.MuJobAgents) agentPicker = window.MuJobAgents.sheet(document.getElementById('job-agents'),
             { api });
         void agentPicker?.refresh();
-        (chosenWorkspace() ? document.getElementById('job-title') : workspaceInput).focus();
+        const sourceControl = { folder: workspaceInput, repository: repoSelect, session: sessionSelect }[sourceKind];
+        (chosenWorkspace() ? document.getElementById('job-title') : sourceControl).focus();
     }
 
     function closeCreate() {
@@ -658,6 +799,10 @@
         createForm.reset();
         createForm.querySelectorAll('[data-touched]').forEach(el => { delete el.dataset.touched; });
         envOverride = null;
+        attachments = [];
+        renderAttachments();
+        extraSources = [];
+        renderExtraSources();
         runIn?.setDefault();
         agentPicker?.reset();
         workspaceInput.dataset.chosen = workspace;
@@ -670,13 +815,26 @@
         const submit = document.getElementById('work-create-submit');
         const title = document.getElementById('job-title').value.trim();
         const workspace = chosenWorkspace();
-        if (!workspace) { createError.textContent = 'Choose the workspace this job works in.'; workspaceInput.focus(); return; }
+        if (!workspace) {
+            createError.textContent = { repository: 'Choose a repository (add them in Settings → Repositories) or paste a URL.', session: 'Choose a session with a workspace.' }[sourceKind] || 'Choose the workspace this job works in.';
+            ({ folder: workspaceInput, repository: repoSelect.value === OTHER_REPO ? repoUrlInput : repoSelect, session: sessionSelect })[sourceKind].focus();
+            return;
+        }
         if (!title) { createError.textContent = 'Enter a title or a ticket key.'; document.getElementById('job-title').focus(); return; }
         submit.disabled = true;
         const mode = document.getElementById('job-mode').value.trim();
         const remote = isRepoUrl(workspace);
-        const session = remote ? null : sessionForWorkspace(workspace);
-        const common = { ...(remote ? { repository: workspace } : { workspace_root: workspace }), max_retries: Number(document.getElementById('job-retries').value || 2) };
+        // Folder: the path (or pasted URL) and the session matched by workspace, as before.
+        // Repository / session: a `source` the server resolves (mu/jobs/sources.py).
+        const session = sourceKind === 'folder' ? chosenSession() : null;
+        const source = sourceKind === 'repository'
+            ? (repoSelect.value === OTHER_REPO ? { kind: 'repository', url: workspace } : { kind: 'repository', name: repoSelect.value })
+            : sourceKind === 'session' ? { kind: 'session', session: sessionSelect.value, include_conversation: conversationBox.checked } : null;
+        const common = { ...(source ? { source } : remote ? { repository: workspace } : { workspace_root: workspace }),
+                         max_retries: Number(document.getElementById('job-retries').value || 2) };
+        if (attachments.length) common.attachments = attachmentPayload();
+        const otherSources = extraSourcePayload();
+        if (otherSources.length) common.sources = otherSources;
         const cost = costPayload(document.getElementById('job-cost').value);
         const runtime = Number(document.getElementById('job-runtime').value || 0);
         // 0 is sent explicitly (unlimited); blank lets the server apply the Settings default.
@@ -715,7 +873,7 @@
                 jobId = response.job.id; label = `Queued: ${response.job.title}`;
             }
             runIn?.commit();
-            resetCreate(workspace);
+            resetCreate(sourceKind === 'folder' ? workspace : workspaceInput.dataset.chosen || '');
             closeCreate();
             toast(label, 'ok');
             await refreshBoard({ quiet: true });
@@ -739,6 +897,43 @@
         workspaceInput.value = b.dataset.workspace; workspaceInput.dataset.touched = '1';
         syncSessionHints(); void refreshEnvPreview();
     });
+    sourceKindEl.addEventListener('click', e => { const b = e.target.closest('[data-source-kind]'); if (b) setSourceKind(b.dataset.sourceKind); });
+    sourceKindEl.addEventListener('keydown', e => {
+        // Radio group: arrow keys move the choice.
+        const kinds = ['folder', 'repository', 'session'], step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+        if (!step) return;
+        e.preventDefault();
+        const next = kinds[(kinds.indexOf(sourceKind) + step + kinds.length) % kinds.length];
+        setSourceKind(next);
+        sourceKindEl.querySelector(`[data-source-kind="${next}"]`).focus();
+    });
+    repoSelect.addEventListener('change', () => { repoUrlInput.hidden = repoSelect.value !== OTHER_REPO; if (!repoUrlInput.hidden) repoUrlInput.focus(); syncSessionHints(); void refreshEnvPreview(); });
+    repoUrlInput.addEventListener('input', () => { syncSessionHints(); clearTimeout(workspaceTimer); workspaceTimer = setTimeout(() => void refreshEnvPreview(), 400); });
+    sessionSelect.addEventListener('change', () => { syncSessionHints(); void refreshEnvPreview(); });
+    document.getElementById('job-source-add').addEventListener('click', () => {
+        if (extraSources.length >= 8) { toast('A job takes at most 8 other sources', 'danger'); return; }
+        extraSources.push({ kind: 'folder', value: '' });
+        renderExtraSources();
+        sourcesList.querySelector(`[data-src-value="${extraSources.length - 1}"]`)?.focus();
+    });
+    sourcesList.addEventListener('change', e => {
+        const k = e.target.closest('[data-src-kind]');
+        if (k) { extraSources[Number(k.dataset.srcKind)] = { kind: k.value, value: k.value === 'session' ? ((sessions || []).find(x => x.workspace)?.name || '') : '' }; renderExtraSources(); }
+        const v = e.target.closest('select[data-src-value]');
+        if (v) extraSources[Number(v.dataset.srcValue)].value = v.value;
+    });
+    sourcesList.addEventListener('input', e => {
+        const v = e.target.closest('input[data-src-value]');
+        if (v) extraSources[Number(v.dataset.srcValue)].value = v.value;
+    });
+    sourcesList.addEventListener('click', e => {
+        const b = e.target.closest('[data-src-remove]');
+        if (b) { extraSources.splice(Number(b.dataset.srcRemove), 1); renderExtraSources(); }
+    });
+    document.getElementById('job-attach-files').addEventListener('click', () => attachInput.click());
+    attachInput.addEventListener('change', () => { void addFiles([...attachInput.files]); attachInput.value = ''; });
+    attachSessionBtn.addEventListener('click', () => void attachFromSession());
+    attachList.addEventListener('click', e => { const b = e.target.closest('[data-attach-remove]'); if (b) { attachments.splice(Number(b.dataset.attachRemove), 1); renderAttachments(); } });
     document.getElementById('job-title').addEventListener('input', syncTitleHint);
     document.getElementById('job-environments-change')?.addEventListener('click', () => void changeEnvironments());
     envResetBtn?.addEventListener('click', () => { envOverride = null; if (runIn) runIn.setDefault(); else renderEnvField(); });

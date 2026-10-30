@@ -21,7 +21,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AccessibilityInfo, Animated, Image, Platform, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useTheme, type ThemeName } from '../theme/ThemeContext';
-import { destinationAmbient, easings, elevation, toneOf, type DestinationName, type Tone, type WashColors } from '../theme/tokens';
+import { pageArt } from '../theme/washArt.generated';
+import { destinationAmbient, easings, elevation, toneOf, type DestinationName, type SceneName, type Tone, type WashColors } from '../theme/tokens';
 import { glass as glassTokens, glassEffect } from '../theme/wash.generated';
 
 /* ------------------------------------------------------------ colour maths */
@@ -267,16 +268,23 @@ export function Stage({ children, style, testID }: { children?: React.ReactNode;
 
 /* ------------------------------------------------------------ ambient wash */
 
-export type AmbientArt = 'dawn' | 'lagoon' | 'meadow';
+export type AmbientArt = SceneName;
 
 const AMBIENT: Record<AmbientArt, Record<ThemeName, ImageSourcePropType>> = {
   dawn: { paper: require('../../assets/wash/ambient-dawn-paper.webp'), dusk: require('../../assets/wash/ambient-dawn-dusk.webp') },
   lagoon: { paper: require('../../assets/wash/ambient-lagoon-paper.webp'), dusk: require('../../assets/wash/ambient-lagoon-dusk.webp') },
   meadow: { paper: require('../../assets/wash/ambient-meadow-paper.webp'), dusk: require('../../assets/wash/ambient-meadow-dusk.webp') },
+  // Scenery packs (tokens.json scenery): one painting for every destination.
+  desert: { paper: require('../../assets/wash/ambient-desert-paper.webp'), dusk: require('../../assets/wash/ambient-desert-dusk.webp') },
+  forest: { paper: require('../../assets/wash/ambient-forest-paper.webp'), dusk: require('../../assets/wash/ambient-forest-dusk.webp') },
+  ocean: { paper: require('../../assets/wash/ambient-ocean-paper.webp'), dusk: require('../../assets/wash/ambient-ocean-dusk.webp') },
+  space: { paper: require('../../assets/wash/ambient-space-paper.webp'), dusk: require('../../assets/wash/ambient-space-dusk.webp') },
 };
 
-export function ambientArt(art: AmbientArt, theme: ThemeName): ImageSourcePropType {
-  return AMBIENT[art][theme];
+/** The ambient painting; a scenery pack's own painting for `page` when it has one (tokens.json scenery pages). */
+export function ambientArt(art: AmbientArt, theme: ThemeName, page?: DestinationName | null): ImageSourcePropType {
+  const own = page ? pageArt[art]?.[page]?.[theme] : undefined;
+  return own ? own.ambient : AMBIENT[art][theme];
 }
 
 /** The ambient scene of a destination (tokens.json destination). */
@@ -284,13 +292,18 @@ export function destinationArt(destination: DestinationName): AmbientArt {
   return destinationAmbient(destination);
 }
 
-type AmbientContextValue = { art: AmbientArt; setRouteArt: (art: AmbientArt) => void; pushOverride: (art: AmbientArt) => () => void };
+type AmbientContextValue = { art: AmbientArt; page: DestinationName | null; setRouteArt: (art: AmbientArt) => void; pushOverride: (art: AmbientArt) => () => void };
 
-const AmbientContext = createContext<AmbientContextValue>({ art: 'dawn', setRouteArt: () => undefined, pushOverride: () => () => undefined });
+const AmbientContext = createContext<AmbientContextValue>({ art: 'dawn', page: null, setRouteArt: () => undefined, pushOverride: () => () => undefined });
 
 /** Ambient art for the current screen; overrides (e.g. the environment manager) win while mounted. */
 export function useAmbientArt(): AmbientArt {
   return useContext(AmbientContext).art;
+}
+
+/** The destination whose own painting the ambient shows (a scenery pack), or null. */
+export function useAmbientPage(): DestinationName | null {
+  return useContext(AmbientContext).page;
 }
 
 export function useAmbientController() {
@@ -304,14 +317,14 @@ export function useAmbientOverride(art: AmbientArt | null) {
 }
 
 /** One fixed, full-bleed image (or flat canvas). Never per row. */
-export function AmbientLayer({ art, testID = 'ambient-wash', opacity }: { art: AmbientArt; testID?: string; opacity?: Animated.Value }) {
+export function AmbientLayer({ art, page = null, testID = 'ambient-wash', opacity }: { art: AmbientArt; page?: DestinationName | null; testID?: string; opacity?: Animated.Value }) {
   const { colors, name, reduceDecoration, palette } = useTheme();
   if (reduceDecoration || palette) {
     return <View testID={`${testID}-flat`} pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.canvas }]} />;
   }
   return (
     <Animated.View pointerEvents="none" importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { backgroundColor: colors.canvas }, opacity ? { opacity } : null]}>
-      <Image testID={testID} source={ambientArt(art, name)} resizeMode="cover" fadeDuration={0} accessibilityIgnoresInvertColors style={[StyleSheet.absoluteFill, styles.fill]} />
+      <Image testID={testID} source={ambientArt(art, name, page)} resizeMode="cover" fadeDuration={0} accessibilityIgnoresInvertColors style={[StyleSheet.absoluteFill, styles.fill]} />
     </Animated.View>
   );
 }
@@ -327,7 +340,7 @@ export const AMBIENT_FADE_MS = 1400;
  * full-screen flow) win while mounted. Children (the navigator) must be transparent to show it.
  */
 export function AmbientBackground({ children }: { children: React.ReactNode; initialArt?: AmbientArt }) {
-  const { destination } = useTheme();
+  const { destination, scenery } = useTheme();
   const [overrides, setOverrides] = useState<Array<{ id: number; art: AmbientArt }>>([]);
   const pushOverride = useCallback((art: AmbientArt) => {
     overrideSeq += 1;
@@ -335,30 +348,36 @@ export function AmbientBackground({ children }: { children: React.ReactNode; ini
     setOverrides(list => [...list, { id, art }]);
     return () => setOverrides(list => list.filter(o => o.id !== id));
   }, []);
-  const art = overrides.length ? overrides[overrides.length - 1].art : destinationArt(destination);
-  const [shown, setShown] = useState<{ current: AmbientArt; previous: AmbientArt | null }>({ current: art, previous: null });
+  // A scenery pack paints every place (overrides included) with its painting of the destination;
+  // Classic follows the destination's scene.
+  const art = scenery ?? (overrides.length ? overrides[overrides.length - 1].art : destinationArt(destination));
+  const page = scenery && pageArt[scenery]?.[destination] ? destination : null;
+  const key = page ? `${art}/${page}` : art;
+  type Shown = { art: AmbientArt; page: DestinationName | null; key: string };
+  const [shown, setShown] = useState<{ current: Shown; previous: Shown | null }>({ current: { art, page, key }, previous: null });
   const fade = useRef(new Animated.Value(1)).current;
   useEffect(() => {
-    if (art === shown.current) return;
+    if (key === shown.current.key) return;
+    const next = { art, page, key };
     let cancelled = false;
     void AccessibilityInfo.isReduceMotionEnabled().catch(() => false).then(reduce => {
       if (cancelled) return;
-      if (reduce) { setShown({ current: art, previous: null }); return; }
-      setShown(prev => ({ current: art, previous: prev.current }));
+      if (reduce) { setShown({ current: next, previous: null }); return; }
+      setShown(prev => ({ current: next, previous: prev.current }));
       fade.setValue(0);
       Animated.timing(fade, { toValue: 1, duration: AMBIENT_FADE_MS, easing: easings.bleed, useNativeDriver: true }).start(({ finished }) => {
         if (finished && !cancelled) setShown(prev => ({ current: prev.current, previous: null }));
       });
     });
     return () => { cancelled = true; };
-  }, [art, fade, shown.current]);
+  }, [art, page, key, fade, shown.current.key]);
   const setRouteArt = useCallback(() => undefined, []);
-  const value = useMemo(() => ({ art, setRouteArt, pushOverride }), [art, setRouteArt, pushOverride]);
+  const value = useMemo(() => ({ art, page, setRouteArt, pushOverride }), [art, page, setRouteArt, pushOverride]);
   return (
     <AmbientContext.Provider value={value}>
       <View style={styles.root}>
-        {shown.previous ? <AmbientLayer art={shown.previous} testID="ambient-wash-previous" /> : null}
-        <AmbientLayer art={shown.current} opacity={shown.previous ? fade : undefined} />
+        {shown.previous ? <AmbientLayer art={shown.previous.art} page={shown.previous.page} testID="ambient-wash-previous" /> : null}
+        <AmbientLayer art={shown.current.art} page={shown.current.page} opacity={shown.previous ? fade : undefined} />
         {children}
       </View>
     </AmbientContext.Provider>

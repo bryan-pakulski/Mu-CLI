@@ -166,6 +166,8 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
     try {
       await sessionsApi.create(name.trim(), provider, model.trim(), sessionType === 'workspace' ? workspace.trim() || undefined : undefined, {
         sessionType,
+        // A workspace folder that doesn't exist yet is created by the server.
+        createWorkspace: sessionType === 'workspace' && Boolean(workspace.trim()),
         ollamaMode: provider === 'ollama' ? ollamaMode : undefined,
         ollamaApiKey: provider === 'ollama' ? ollamaApiKey.trim() || undefined : undefined,
         container: sessionType === 'container' ? {
@@ -226,7 +228,7 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
 
           {step === 3 ? <>
             {sessionType === 'chat' ? <Notice icon="shield-check" text="Filesystem and shell tools are unavailable in chat sessions." /> : null}
-            {sessionType === 'workspace' ? <><Text variant="sm" dim style={styles.intro}>Choose a host folder. Leave empty for a tool-limited workspace session.</Text><WorkspacePathField value={workspace} onChangeText={setWorkspace} placeholder="Browse a workspace folder" /></> : null}
+            {sessionType === 'workspace' ? <><Text variant="sm" dim style={styles.intro}>Choose a host folder; a new path is created. Leave empty for a tool-limited workspace session.</Text><WorkspacePathField value={workspace} onChangeText={setWorkspace} placeholder="Browse a workspace folder" createMissing /></> : null}
             {sessionType === 'container' ? <>
               <Text variant="sm" dim style={styles.intro}>Create a new environment or attach to one already managed by MuCLI.</Text>
               <View style={styles.segment}><Segment label="Create new" selected={containerSource === 'new'} onPress={() => setContainerSource('new')} /><Segment label="Attach existing" selected={containerSource === 'existing'} onPress={() => setContainerSource('existing')} /></View>

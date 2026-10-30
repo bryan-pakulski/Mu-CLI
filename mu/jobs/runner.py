@@ -67,6 +67,10 @@ def implement_prompt(service, job: Job) -> str:
         lines.extend(["", "Acceptance criteria:", *[f"- {v}" for v in job.acceptance_criteria]])
     if job.validation_commands:
         lines.extend(["", "Validation expected by the controller:", *[f"- {v}" for v in job.validation_commands]])
+    from .attachments import prompt_lines
+    from .multi_source import prompt_lines as source_lines
+    lines.extend(source_lines(job))
+    lines.extend(prompt_lines(job))
     if job.branch:
         lines.extend(["", f"Managed job branch: {job.branch}"])
 

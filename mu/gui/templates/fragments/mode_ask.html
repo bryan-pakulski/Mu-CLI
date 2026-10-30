@@ -8,7 +8,7 @@
             <h2 class="w-modal__title" id="mode-ask-title" x-text="$store.modeAsk.title"></h2>
         </header>
         <div class="w-modal__body">
-            <p x-show="$store.modeAsk.body" x-text="$store.modeAsk.body"></p>
+            <p class="mode-ask__body" x-show="$store.modeAsk.body" x-text="$store.modeAsk.body"></p>
             <label class="w-field" x-show="$store.modeAsk.label">
                 <span class="w-field__label" x-text="$store.modeAsk.label"></span>
                 <textarea class="w-input" rows="3" x-model="$store.modeAsk.value"

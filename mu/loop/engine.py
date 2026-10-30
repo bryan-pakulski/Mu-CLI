@@ -331,6 +331,49 @@ def on_blockers_resolved(session: Any) -> None:
             state.touch()
 
 
+# Pauses the harness makes on the user's behalf when they walk away from the
+# work (Stop/Esc on a turn, leaving loop mode). Unlike an explicit Pause, the
+# user's next loop-mode message picks the mission up again.
+INTERRUPTED = "interrupted"
+MODE_OFF = "loop mode is off"
+AUTO_PAUSE_REASONS = (INTERRUPTED, MODE_OFF)
+
+
+def _pause_live(session: Any, reason: str, actor: str) -> bool:
+    from mu.modes.state import states_of
+
+    if states_of(session).peek("loop") is None:
+        return False
+    mission = _mission(session, required=False)
+    if mission is None or mission.status not in ("running", "blocked"):
+        return False
+    set_status(session, "paused", reason=reason, actor=actor)
+    return True
+
+
+def on_interrupt(session: Any) -> bool:
+    """The user stopped a loop-mode turn: the mission stops being worked."""
+    return _pause_live(session, INTERRUPTED, "user:chat")
+
+
+def on_mode_change(session: Any, mode: str, *, actor: str = "user:cli") -> bool:
+    """Leaving loop mode pauses a live mission so no surface shows it running."""
+    if str(mode or "").strip().lower() == "loop":
+        return False
+    return _pause_live(session, MODE_OFF, actor)
+
+
+def resume_from_message(session: Any) -> bool:
+    """A loop-mode message resumes a mission the harness paused for the user."""
+    mission = _mission(session, required=False)
+    if mission is None or mission.status != "paused" or mission.status_reason not in AUTO_PAUSE_REASONS:
+        return False
+    if budget_exhausted(mission):
+        return False
+    set_status(session, "running", actor="user:chat")
+    return True
+
+
 def may_continue(session: Any) -> bool:
     """True when the watchdog may push the agent on (a running mission)."""
     mission = _mission(session, required=False)
@@ -382,8 +425,9 @@ def capsule(session: Any) -> str:
 
 
 __all__ = [
-    "account_turn", "attest", "budget_exhausted", "capsule", "check_done_when", "may_continue",
-    "on_blocker", "on_blockers_resolved", "record_increment", "set_budget", "set_goal", "set_status",
+    "AUTO_PAUSE_REASONS", "account_turn", "attest", "budget_exhausted", "capsule", "check_done_when",
+    "may_continue", "on_blocker", "on_blockers_resolved", "on_interrupt", "on_mode_change",
+    "record_increment", "resume_from_message", "set_budget", "set_goal", "set_status",
     "start_mission", "status_text", "tightest_budget",
 ]
 

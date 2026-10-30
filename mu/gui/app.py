@@ -183,6 +183,9 @@ def create_app(*, args: Any, build_session_fn: Callable, port: int = 30311) -> F
     templates.env.globals["wash_state"] = state_style
     from mu.design import palette_choices as _palette_choices
     templates.env.globals["wash_palette_choices"] = _palette_choices
+    from mu.design import scenery as _scenery, scenery_choices as _scenery_choices
+    templates.env.globals["wash_scenery_choices"] = _scenery_choices
+    templates.env.globals["wash_scenery_names"] = [name for name in _scenery() if name != "classic"]
     from mu.design import load_tokens as _load_tokens
     templates.env.globals["wash_text_scale"] = (_load_tokens().get("density") or {}).get("text_scale") or {}
     app.state.templates = templates

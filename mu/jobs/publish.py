@@ -596,6 +596,10 @@ def publish_preview(service, job: Job) -> Dict[str, Any]:
         "token": ({"provider": mode, "variable": TOKEN_VARS[mode][0], "source": token_source(mode)}
                   if mode in TOKEN_VARS else None),
         "provider": kind,
+        # Extra sources (mu/jobs/multi_source.py): a draft PR each, or a patch for folders.
+        "sources": [{"name": src["name"], "branch": src.get("branch") or "",
+                     "mode": "patch" if src.get("folder_snapshot") else "pr", "input": src.get("input") or ""}
+                    for src in _sources(job)],
     }
 
 
@@ -633,6 +637,11 @@ def unverified_note(run: Any) -> str:
     from .checks import unverified_causes
     causes = unverified_causes(dict(getattr(run, "summary", None) or {}))
     return f"{UNVERIFIED_PREFIX}: {causes or 'some checks could not run'}"
+
+
+def _sources(job):
+    from .multi_source import sources
+    return sources(job)
 
 
 def open_draft_pr(job: Job, *, run: RunFn, post: PostFn, env: Dict[str, str], verified_head: str,
@@ -733,6 +742,16 @@ def publish_job(service, job_id: str, *, run: Optional[RunFn] = None,
     job = service.get(job_id)
     if job.status != JobStatus.PUBLISHING:
         return 0
+    # Extra sources first (mu/jobs/multi_source.py): one draft PR per source with a remote and
+    # changes; folders keep a patch. Runs whatever the primary's mode (a folder primary has none).
+    from .multi_source import publish as publish_sources
+    source_error = publish_sources(service, job, run=run or _default_run, post=post or _default_post,
+                                   env=with_tokens(env), get=get if get is not None else (_default_get if post is None else None))
+    if source_error:
+        service.require_human(job_id, AttentionReason.PUBLISH_FAILED, f"Publishing failed: {_redact(source_error)[:500]}",
+                              payload={"stage": "publish"})
+        return 27
+    job = service.get(job_id)
     if publish_mode(job) == "none":
         service.transition(job_id, JobStatus.READY_FOR_REVIEW, reason="publishing disabled; skipped")
         _release_environments(service, job_id)

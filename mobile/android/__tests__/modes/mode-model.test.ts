@@ -3,7 +3,7 @@
 // the turn receipt reads as one line under the right assistant message.
 import {
   count, debugNow, debugSentence, debugSteps, dueText, featureCriterionKey, featureNow, featureSentence, lessonGateLine, loopNow,
-  loopSentence, orderNow, placeReceipts, receiptLine, sentence, teacherNow, teacherSentence, type NowItem,
+  loopSentence, orderNow, placeReceipts, receiptLine, sentence, teacherNow, teacherSentence, workDoneBody, workItemActions, type NowItem,
 } from '../../src/components/modes/modeModel';
 import { modeState } from '../../src/theme/status';
 
@@ -165,5 +165,19 @@ describe('turn receipt', () => {
     expect(placed.a4?.status).toBe('unverified');
     expect(placed.a3).toBeUndefined(); // nothing to say
     expect(placed.a1).toBeUndefined();
+  });
+});
+
+describe('work items', () => {
+  it('blocked, in-progress and to-do items each have verbs, the decisive one first', () => {
+    expect(workItemActions({ status: 'blocked' }).map(a => [a.id, a.label])).toEqual([['pending', 'Unblock'], ['done', 'Done…'], ['dropped', 'Drop']]);
+    expect(workItemActions({ status: 'in_progress' })[0]).toEqual({ id: 'done', label: 'Done…', primary: true });
+    expect(workItemActions({ status: 'pending' })[0].label).toBe('Start');
+    expect(workItemActions({ status: 'done' })).toEqual([]);
+  });
+
+  it('Done reads check runs as evidence and keeps any other text as the recorded reason', () => {
+    expect(workDoneBody('r12 r14')).toEqual({ status: 'done', evidence: ['r12', 'r14'], override_reason: '' });
+    expect(workDoneBody('report reviewed, see r3')).toEqual({ status: 'done', evidence: ['r3'], override_reason: 'report reviewed, see r3' });
   });
 });

@@ -63,6 +63,20 @@
             .catch(() => {});
     }
 
+    // The user moves a work item (Plan disclosure, loop Backlog). Done asks why first; in loop
+    // mode the answer is the recorded override unless it cites a passing check run.
+    async function workAction(row, action) {
+        const M = window.MuModeModels;
+        let body = { status: action.id };
+        if (action.id === 'done') {
+            const answer = await ask({ title: `Mark ${row.id} done`,
+                label: 'Why is it done? Cite passing check runs (r12) or give a reason — recorded', confirm: 'Mark done' });
+            if (!answer) return null;
+            body = M.doneBody(answer);
+        }
+        return post(`/api/mode-state/work/${encodeURIComponent(row.id)}`, body);
+    }
+
     function sheet(title, stateParts, body, param) {
         if (!window.WashSheet) return;
         window.WashSheet.open({ title, state: window.MuModes.sentenceHtml(stateParts), body, param });
@@ -95,15 +109,16 @@
             runsById() { return Object.fromEntries((this.state.runs || []).map(r => [r.id, r])); },
             openRun(id) { openRun(typeof id === 'string' ? this.runsById()[id] : id); },
             runRow(run) { return window.MuModes.checkRunRow(run); },
-            async resolveBlocker(blockerId) {
-                const answer = await ask({ title: 'Answer the blocker', label: 'Your answer — the agent sees it on its next turn', confirm: 'Answer' });
+            async resolveBlocker(row) {
+                const answer = await ask({ title: 'Answer the blocker', body: MM().blockerQuestion(row.blocker),
+                    label: 'Your answer — the agent picks it up straight away', confirm: 'Answer' });
                 if (answer === null) return;
-                if (await post(`/api/mode-state/blockers/${encodeURIComponent(blockerId)}/resolve`, { resolution: answer })) {
+                if (await post(`/api/mode-state/blockers/${encodeURIComponent(row.ref)}/resolve`, { resolution: answer })) {
                     await this.load();
                 }
             },
             async act(row, action) {
-                if (action.id === 'resolve') return this.resolveBlocker(row.ref);
+                if (action.id === 'resolve') return this.resolveBlocker(row);
                 if (this.handle) return this.handle(action.id, row);
             },
             async runPrimary() {
@@ -263,6 +278,12 @@
             backlog() { return MM().receipt.planRows(this.state.backlog || []).concat(
                 (this.state.backlog || []).filter(i => i.status === 'done').map(i => ({ id: i.id, status: 'done', glyph: '✓', title: i.title,
                     sub: (i.evidence || []).length ? `done · ${i.evidence.join(', ')}` : 'done' }))); },
+            async workAct(row, action) {
+                if (await workAction(row, action)) {
+                    await this.load();
+                    await Alpine.store('workPlan').load();
+                }
+            },
             openIncrement(inc) {
                 sheet(`${inc.n} ${inc.objective}`, [S().vstyle('loop_increment', inc.result).label], MM().loop.incrementSheet(inc),
                     { key: 'open', value: String(inc.n) });
@@ -372,6 +393,11 @@
                 } catch (e) { /* no session yet */ }
             },
             rows() { return MM().receipt.planRows(this.items); },
+            async act(row, action) {
+                const data = await workAction(row, action);
+                if (data) this.items = data.items || [];
+                if (data && Alpine.store('mode').active === 'loop') await Alpine.store('loop').load();
+            },
             currentTitle() {
                 const cur = this.items.find(i => i.status === 'in_progress');
                 return cur ? cur.title : '';

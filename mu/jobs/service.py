@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 import threading
+import uuid
 from typing import Any, Dict, Iterable, List, Optional
 
 from .core import states as _states
@@ -53,9 +54,14 @@ class JobService:
         # Jobs run in ``workspace_root`` (the session's workspace, resolved by
         # the GUI/mobile router or TUI) or in ``repository``: a URL (cloned into
         # $MUCLI_HOME/repos, see mu/jobs/clone.py) or a local path.
+        from . import attachments as _attachments
         from .clone import apply_repository
+        from .sources import apply_source
 
-        value = apply_repository(dict(payload or {}))  # CloneError is a ValueError
+        # ``source`` (session / repository / folder, mu/jobs/sources.py) resolves first.
+        value = apply_repository(apply_source(dict(payload or {})))  # CloneError is a ValueError
+        # Attached files are validated before anything is created (mu/jobs/attachments.py).
+        pending_attachments = _attachments.resolve(value.get("attachments"))
         repository = str(value.get("workspace_root") or "").strip()
         execution = dict(value.get("execution") or {})
         # "Run in" picker (job_templates.md §3.1): ``execution.template`` names a container
@@ -92,9 +98,16 @@ class JobService:
             except RepositoryError as exc:
                 if "not a git repository" not in str(exc).lower():
                     raise ValueError(f"Repository preflight failed for {repository}: {exc}") from exc
-                # Approved decision: non-git workspaces are allowed; git-only
-                # stages (worktree, drift, publish) are skipped.
-                git_enabled = False
+                # A plain folder runs on a managed git snapshot of it (mu/jobs/folder_snapshot.py):
+                # the job starts from the folder as it is now and its change comes back as a patch.
+                from .folder_snapshot import BRANCH, ensure_snapshot
+
+                snapshot = ensure_snapshot(repository)  # SnapshotError is a ValueError
+                metadata["folder_snapshot"] = snapshot.metadata()
+                repository = snapshot.path
+                base_branch = supplied_base_branch = BRANCH
+                base_sha = supplied_base_sha = snapshot.base_sha
+                execution["publish_mode"] = "none"  # nothing to push to: the patch is the result
         execution["git_enabled"] = bool(execution.get("git_enabled", git_enabled)) and git_enabled
         # Durable job v2: new jobs run plan -> implement -> verify -> review.
         execution.setdefault("pipeline", "staged")
@@ -150,7 +163,17 @@ class JobService:
                 "clean": bool(info.get("clean", False)),
             }
 
-        job = self.create(JobSpec(
+        # Extra editable sources (mu/jobs/multi_source.py): resolved like the primary (clone, folder
+        # snapshot, current HEAD) before the job exists, so a bad source fails creation.
+        from .multi_source import resolve as resolve_sources
+        extra_sources = resolve_sources(value.get("sources"), primary=repository)
+        if extra_sources:
+            metadata["sources"] = extra_sources
+        job_id = uuid.uuid4().hex if pending_attachments else None
+        if pending_attachments:
+            # Stored before the job row exists, so no worker can claim a job whose files are missing.
+            metadata["attachments"] = _attachments.store(job_id, pending_attachments)
+        spec = JobSpec(
             title=str(value.get("title") or ""),
             description=str(value.get("description") or ""),
             repository=repository,
@@ -169,7 +192,13 @@ class JobService:
             environment=dict(value.get("environment") or {}),
             execution=execution,
             metadata=metadata,
-        ))
+        )
+        try:
+            job = self.create(spec, job_id=job_id)
+        except BaseException:
+            if job_id:
+                _attachments.discard(job_id)
+            raise
         if remember_choice and repository:
             from .sandbox.environments import remember_template
             try:

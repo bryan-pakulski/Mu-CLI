@@ -420,6 +420,20 @@ reproducible, themable, and small (about 25 KB WebP).
    for Work and Trace, Meadow for Environments. The ambient wash is the glass
    backdrop. The stronger hero paintings still appear only in hero areas,
    headers, empty states and onboarding.
+   **Scenery** (Settings → Appearance, Wash only) swaps that set for an asset
+   pack (tokens.json `scenery`: Desert, Forest, Ocean, Space). A pack paints
+   each destination listed in its `pages` with that destination's own Paper and
+   Dusk painting (`art/pages/<pack>/`; the shell scene, the standalone page's
+   ambient and the hero roles), uses its general scene anywhere else, and
+   recolours the accent to its pigment; Classic keeps the per-place scenes
+   above. Each pack is a `glass.ambient` scene and `check_contrast.py` also
+   checks every page painting, so text is verified over all of them; a pack
+   with darker passages sets `leaf_clear` so the glass lets less of the
+   painting through. New packs: add the art (scene 800/1600/3840, ambient
+   960/1920/3840, spot 320/1024, per page `<page>-<theme>` 800/1600/3840 and
+   `ambient-<page>-<theme>` 960/1920/3840, Android base and @2x) and a
+   `scenery` entry with its `pages`, then run `scripts/design/build_tokens.py`
+   (it also writes Android's `washArt.generated.ts`).
 3. **Bottom edges dissolve into canvas.** Art never has a hard bottom edge,
    just as Duna's hero dissolves into the page.
 4. **Dusk gets its own paintings.** Do not darken a Paper wash with a filter.

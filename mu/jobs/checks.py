@@ -34,6 +34,14 @@ class Suite:
     cwd: str = ""   # repository-relative working directory
 
 
+def _in_extra_source(job, cwd: str) -> bool:
+    """An absolute check cwd is allowed only inside one of the job's extra sources (mu/jobs/multi_source.py)."""
+    from .multi_source import MOUNT_ROOT, sources
+    parts = Path(cwd).parts  # ("/", "sources", "<name>", ...)
+    return (len(parts) >= 3 and parts[0] == "/" and parts[1] == MOUNT_ROOT.strip("/")
+            and parts[2] in {s["name"] for s in sources(job)})
+
+
 def resolve_suites(job, settings=None):
     from .job_settings import load_settings
     settings = settings if settings is not None else load_settings()
@@ -72,8 +80,10 @@ def resolve_suites(job, settings=None):
             raise ValueError(f"invalid check {suite.name}: {reason}")
         if suite.junit and (Path(suite.junit).is_absolute() or ".." in Path(suite.junit).parts):
             raise ValueError(f"JUnit path must be workspace-relative: {suite.junit}")
-        if suite.cwd and (Path(suite.cwd).is_absolute() or ".." in Path(suite.cwd).parts):
-            raise ValueError(f"check {suite.name}: cwd must be repository-relative: {suite.cwd}")
+        if suite.cwd and (".." in Path(suite.cwd).parts
+                          or (Path(suite.cwd).is_absolute() and not _in_extra_source(job, suite.cwd))):
+            raise ValueError(f"check {suite.name}: cwd must be repository-relative or inside /sources/<name> "
+                             f"of one of the job's sources: {suite.cwd}")
     return list(suites.values())
 
 
@@ -529,6 +539,16 @@ class ChecksStage:
         head = git(job.worktree, "rev-parse", "HEAD")
         initial_dirty = git(job.worktree, "status", "--porcelain")
         baseline_entries = set(status_entries(job.worktree))
+        # Extra sources are mounted read-write too (mu/jobs/multi_source.py): same byproduct rules.
+        from .multi_source import sources as extra_sources
+        source_baselines = {s["name"]: (s["worktree"], set(status_entries(s["worktree"])))
+                            for s in extra_sources(job) if s.get("worktree") and os.path.isdir(s["worktree"])}
+
+        def discard_source_byproducts(label):
+            found = []
+            for name, (worktree, baseline) in source_baselines.items():
+                found += [{**b, "path": f"sources/{name}/{b['path']}"} for b in discard_byproducts(worktree, baseline, label)]
+            return found
         byproducts = []
         trigger = str((self.service.get(job.id).metadata or {}).get("checks_trigger") or "auto")
         if trigger not in ("auto", "recheck", "fix", "repair"):
@@ -550,6 +570,7 @@ class ChecksStage:
         if batched:
             keep_artifacts("suites", batch_started, list(batched))
             byproducts += discard_byproducts(job.worktree, baseline_entries, ",".join(batched))
+            byproducts += discard_source_byproducts(",".join(batched))
         for index, suite in enumerate(suites, 1):
             suite_started = time.monotonic()
             suite_wall = time.time()
@@ -559,6 +580,7 @@ class ChecksStage:
                 keep_artifacts(f"suite-{index}", suite_wall, [suite.name])
                 # Between suites: a suite's byproducts must not leak into the next one.
                 found = discard_byproducts(job.worktree, baseline_entries, suite.name)
+                found += discard_source_byproducts(suite.name)
                 byproducts += found
                 if found:
                     result["byproducts"] = [b["path"] for b in found]
@@ -576,6 +598,8 @@ class ChecksStage:
             from .sandbox.policy import guard_policy
             from .sandbox.runner import _guard
             _guard(job, guard_policy(job, "checks"))
+            from .multi_source import guard as guard_sources
+            guard_sources(job)
         failing = [r for r in results if not r.get("passed")]
         missing_tools = sorted({r["missing_executable"] for r in results if r.get("missing_executable")})
         missing_environments = {r["missing_executable"]: r.get("environment") or "" for r in results if r.get("missing_executable")}

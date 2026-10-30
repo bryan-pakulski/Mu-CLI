@@ -21,10 +21,22 @@
             const s = M().vstyle('blocker', 'open');
             return {
                 id: `blocker:${b.id}`, kind: 'blocker', status: s.status, glyph: s.glyph,
-                title: b.summary, sub: `Needs: ${b.needs || 'your answer'}`, ref: b.id,
+                title: b.summary, sub: `Needs: ${b.needs || 'your answer'}`, ref: b.id, blocker: b,
                 actions: [{ id: 'resolve', label: 'Answer', primary: true }],
             };
         });
+    }
+
+    /* The whole question for the answer dialog: summary, what is needed, the details and every
+     * focused question, never truncated. */
+    function blockerQuestion(b) {
+        if (!b) return '';
+        const lines = [String(b.summary || '')];
+        if (b.needs) lines.push('', `Needs: ${b.needs}`);
+        if (b.details) lines.push('', String(b.details));
+        const qs = (b.questions || []).filter(Boolean);
+        if (qs.length) lines.push('', ...qs.map(q => `• ${q}`));
+        return lines.join('\n').trim();
     }
 
     const security = {
@@ -478,6 +490,28 @@
         },
     };
 
+    // ------------------------------------------------------------------ work items
+
+    /* What the user can do with an open work item, the decisive verb first. Ids are the target
+     * status, except `done`, which asks why (or for passing check runs) first. */
+    function workActions(item) {
+        switch (item && item.status) {
+            case 'blocked': return [{ id: 'pending', label: 'Unblock', primary: true }, { id: 'done', label: 'Done…' }, { id: 'dropped', label: 'Drop' }];
+            case 'in_progress': return [{ id: 'done', label: 'Done…', primary: true }, { id: 'pending', label: 'Not now' }, { id: 'dropped', label: 'Drop' }];
+            case 'pending': return [{ id: 'in_progress', label: 'Start' }, { id: 'done', label: 'Done…' }, { id: 'dropped', label: 'Drop' }];
+            default: return [];
+        }
+    }
+
+    /* The Done dialog's answer → the request body: check run ids (r12) are evidence, the text is
+     * the recorded reason (needed in loop mode when no passing run is cited). */
+    function doneBody(answer) {
+        const text = String(answer || '').trim();
+        const evidence = text.match(/\br\d+\b/g) || [];
+        const reason = text.replace(/\br\d+\b/g, '').replace(/[\s,]+/g, ' ').trim();
+        return { status: 'done', evidence, override_reason: reason ? text : '' };
+    }
+
     // ------------------------------------------------------------------ default (turn receipt)
 
     const receipt = {
@@ -507,10 +541,11 @@
         planRows(items) {
             return (items || []).filter(i => !['done', 'dropped'].includes(i.status)).map(i => {
                 const s = M().vstyle('work_item', i.status);
-                return { id: i.id, status: s.status, glyph: s.glyph, title: i.title, sub: s.label };
+                return { id: i.id, status: s.status, glyph: s.glyph, title: i.title, sub: s.label,
+                    note: i.note || '', actions: workActions(i), item: i };
             });
         },
     };
 
-    root.MuModeModels = { security, debug, feature, loop, teacher, research, receipt, blockerRows };
+    root.MuModeModels = { security, debug, feature, loop, teacher, research, receipt, blockerRows, blockerQuestion, workActions, doneBody };
 })(typeof window !== 'undefined' ? window : globalThis);

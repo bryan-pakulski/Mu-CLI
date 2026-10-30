@@ -25,12 +25,14 @@ sys.path.insert(0, str(ROOT))
 
 from mu.design import (  # noqa: E402
     SEMANTICS, STEPS, THEMES, TOKENS_PATH, VOCABULARY_PATH, destinations, load_tokens, load_vocabulary, palettes,
+    scenery,
 )
 
 CSS_OUT = ROOT / "mu/gui/static/css/wash/tokens.css"
 HLJS_OUT = ROOT / "mu/gui/static/css/wash/hljs-wash.css"
 JS_OUT = ROOT / "mu/gui/static/js/wash_tokens.js"
 TS_OUT = ROOT / "mobile/android/src/theme/wash.generated.ts"
+ART_TS_OUT = ROOT / "mobile/android/src/theme/washArt.generated.ts"
 
 
 def source_hash() -> str:
@@ -122,9 +124,22 @@ def _theme_block(theme: str) -> list[str]:
         # Ambient: the painting flattened at 24% over the canvas (text may sit near it).
         lines.append(f"  --wash-art-ambient-{wash}: image-set(url(\"{art}/ambient-{wash}-{theme}-1920.webp\") 1x, "
                      f"url(\"{art}/ambient-{wash}-{theme}-3840.webp\") 2x);")
+        # Small screens (< 840px) get the 960px ambient.
+        lines.append(f"  --wash-art-ambient-{wash}-sm: image-set(url(\"{art}/ambient-{wash}-{theme}-960.webp\") 1x, "
+                     f"url(\"{art}/ambient-{wash}-{theme}-1920.webp\") 2x);")
         # Scene: the full painting, for behind the glass leaf (the shell's watercolour).
         lines.append(f"  --wash-art-scene-{wash}: image-set(url(\"{art}/{wash}-{theme}-1600.webp\") 1x, "
                      f"url(\"{art}/{wash}-{theme}-3840.webp\") 2x);")
+    for pack, spec in scenery().items():
+        # A pack's own painting per destination (tokens.json scenery pages).
+        for page in spec.get("pages") or []:
+            base = f"{art}/pages/{pack}"
+            lines.append(f"  --wash-art-page-{pack}-{page}: image-set(url(\"{base}/{page}-{theme}-1600.webp\") 1x, "
+                         f"url(\"{base}/{page}-{theme}-3840.webp\") 2x);")
+            lines.append(f"  --wash-art-page-{pack}-{page}-ambient: image-set(url(\"{base}/ambient-{page}-{theme}-1920.webp\") 1x, "
+                         f"url(\"{base}/ambient-{page}-{theme}-3840.webp\") 2x);")
+            lines.append(f"  --wash-art-page-{pack}-{page}-ambient-sm: image-set(url(\"{base}/ambient-{page}-{theme}-960.webp\") 1x, "
+                         f"url(\"{base}/ambient-{page}-{theme}-1920.webp\") 2x);")
     for role, scene in (("hero", "dawn"), ("work", "lagoon"), ("env", "meadow")):
         lines.append(f"  --wash-art-{role}: image-set(url(\"{art}/{scene}-{theme}-1600.webp\") 1x, "
                      f"url(\"{art}/{scene}-{theme}-3840.webp\") 2x);")
@@ -147,6 +162,7 @@ def _palette_block(name: str, mode: str) -> list[str]:
         lines.append(f"  --wash-elevation-{level}: {value.replace('{tint}', tint)};")
     for wash in tokens["glass"]["ambient"]:
         lines.append(f"  --wash-art-ambient-{wash}: none;")
+        lines.append(f"  --wash-art-ambient-{wash}-sm: none;")
         lines.append(f"  --wash-art-scene-{wash}: none;")
     for art in ("hero", "work", "env"):
         lines.append(f"  --wash-art-{art}: none;")
@@ -168,6 +184,43 @@ def _destination_css() -> str:
     for name, spec in dest.items():
         out.append(f'[data-mode="{name}"] {{\n' + block(spec) + "}\n")
     return "\n/* destinations: accent + ambient scene (tokens.json destination) */\n" + "".join(out)
+
+
+def _scenery_css() -> str:
+    """Scenery packs (tokens.json scenery) for the Wash theme: html[data-scenery="<pack>"] paints every
+    destination with the pack's scene and recolours its accent. Flat palettes keep their own look."""
+    out = []
+    for pack, spec in scenery().items():
+        pig = spec.get("accent")
+        if not pig:
+            continue                      # classic: each destination keeps its own scene and accent
+        root = f':root[data-scenery="{pack}"]:not([data-palette])'
+        pages = list(spec.get("pages") or [])
+
+        def hero(page, pack=pack, pages=pages):
+            return f"var(--wash-art-page-{pack}-{page})" if page in pages else f"var(--wash-art-scene-{pack})"
+        out.append(
+            f"\n/* scenery: {spec['label']} */\n{root},\n{root} [data-mode] {{\n"
+            f"  --mu-accent: var(--wash-{pig}-pigment);\n  --mu-accent-ink: var(--wash-{pig}-ink);\n"
+            f"  --mu-accent-wash: var(--wash-{pig}-wash);\n  --mu-ambient-art: var(--wash-art-scene-{pack});\n"
+            f"  --mu-ambient-tint: var(--wash-{pig}-wash);\n}}\n"
+            f"{root} {{\n  --wash-art-hero: {hero('chat')};\n  --wash-art-work: {hero('work')};\n"
+            f"  --wash-art-env: {hero('environments')};\n"
+            + (f"  --mu-clear-scale: {spec['leaf_clear']};\n" if spec.get("leaf_clear") else "") + "}\n"
+            f"{root} body[data-ambient] {{\n  --w-ambient: var(--wash-art-ambient-{pack});\n"
+            f"  --w-ambient-sm: var(--wash-art-ambient-{pack}-sm);\n}}\n"
+            f"{root} .w-empty:not([data-tone]):not([data-variant]) {{\n"
+            f"  --w-spot-paper: url(\"/static/wash/art/spot-{pack}-paper-320.webp\");\n"
+            f"  --w-spot-dusk: url(\"/static/wash/art/spot-{pack}-dusk-320.webp\");\n}}\n")
+        for page in pages:
+            # The destination's own painting: the shell's scene, and the page's ambient wash.
+            out.append(
+                f'{root} [data-mode="{page}"],\n{root}[data-mode="{page}"] {{\n'
+                f"  --mu-ambient-art: var(--wash-art-page-{pack}-{page});\n}}\n"
+                f'{root}[data-mode="{page}"] body[data-ambient] {{\n'
+                f"  --w-ambient: var(--wash-art-page-{pack}-{page}-ambient);\n"
+                f"  --w-ambient-sm: var(--wash-art-page-{pack}-{page}-ambient-sm);\n}}\n")
+    return "\n/* scenery packs (tokens.json scenery) */" + "".join(out) if out else ""
 
 
 def _palette_css() -> str:
@@ -258,6 +311,7 @@ def build_css() -> str:
         + "\n".join("  " + line for line in _theme_block("dusk")) + "\n  }\n}\n"
         + _palette_css()
         + _destination_css()
+        + _scenery_css()
         + "}\n"
     )
 
@@ -347,6 +401,7 @@ def _payload(*, web: bool = True) -> dict:
                             "paper": _flat(spec["light"]), "dusk": _flat(spec["dark"])}
                      for name, spec in palettes().items()},
         "destination": destinations(),
+        "scenery": scenery(),
         "textScale": {k: v for k, v in (tokens.get("density") or {}).get("text_scale", {}).items() if not k.startswith("_")},
     }
 
@@ -410,7 +465,30 @@ def build_ts() -> str:
     return "\n".join(lines)
 
 
-OUTPUTS = {CSS_OUT: build_css, HLJS_OUT: build_hljs, JS_OUT: build_js, TS_OUT: build_ts}
+def build_art_ts() -> str:
+    """Android: the scenery packs' page paintings (tokens.json scenery pages) as static requires
+    (Metro needs literal paths). pageArt[pack][destination][theme] = {hero, ambient}."""
+    lines = [header("//").rstrip("\n"), "", "import type { ImageSourcePropType } from 'react-native';", "",
+             "type PageImages = { hero: ImageSourcePropType; ambient: ImageSourcePropType };", "",
+             "export const pageArt: Record<string, Record<string, Record<'paper' | 'dusk', PageImages>>> = {"]
+    for pack, spec in scenery().items():
+        pages = spec.get("pages") or []
+        if not pages:
+            continue
+        lines.append(f"  {pack}: {{")
+        for page in pages:
+            lines.append(f"    {page}: {{")
+            for theme in THEMES:
+                base = f"../../assets/wash/pages/{pack}"
+                lines.append(f"      {theme}: {{ hero: require('{base}/{page}-{theme}.webp'), "
+                             f"ambient: require('{base}/ambient-{page}-{theme}.webp') }},")
+            lines.append("    },")
+        lines.append("  },")
+    lines += ["};", ""]
+    return "\n".join(lines)
+
+
+OUTPUTS = {CSS_OUT: build_css, HLJS_OUT: build_hljs, JS_OUT: build_js, TS_OUT: build_ts, ART_TS_OUT: build_art_ts}
 
 
 def main() -> int:

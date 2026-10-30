@@ -124,6 +124,19 @@ def record_bash(session: Any, args: Dict[str, Any], result: Any) -> Optional[Any
                            purpose=purpose or "verify", cwd=str((args or {}).get("cwd") or root))
 
 
+def cite_run(result: Any, run: Any) -> Any:
+    """Tell the model the check run id its bash call was recorded as, so it can
+    cite it as evidence (work items, increments, done-when)."""
+    word = "passed" if run.passed else "failed"
+    note = (f"Recorded as check run {run.id} ({word}). Cite it as evidence: evidence=[\"{run.id}\"]."
+            if run.passed else f"Recorded as check run {run.id} ({word}); a failing run is not evidence of done.")
+    if isinstance(result, str):
+        return f"{result.rstrip()}\n{note}"
+    if isinstance(result, dict):
+        return {**result, "check_run": {"id": run.id, "passed": bool(run.passed)}, "check_run_note": note}
+    return result
+
+
 def _turn_start(session: Any) -> float:
     return float(getattr(session, "_turn_started_at", 0.0) or 0.0)
 
@@ -244,7 +257,9 @@ def _install_hook() -> None:
         if getattr(getattr(ctx.session, "session_manager", None), "mode_state", None) is None:
             return None
         try:
-            record_bash(ctx.session, ctx.tool_args or {}, ctx.tool_result)
+            run = record_bash(ctx.session, ctx.tool_args or {}, ctx.tool_result)
+            if run is not None:
+                ctx.tool_result = cite_run(ctx.tool_result, run)
         except Exception:  # noqa: BLE001 — evidence capture must never break bash
             pass
         return None
@@ -256,5 +271,5 @@ def _install_hook() -> None:
 _install_hook()
 
 
-__all__ = ["PURPOSES", "ReceiptState", "build_receipt", "capsule", "finalize", "receipt_line",
+__all__ = ["PURPOSES", "ReceiptState", "build_receipt", "capsule", "cite_run", "finalize", "receipt_line",
            "receipt_state", "record_bash", "validation_commands", "verify_nudge"]

@@ -61,7 +61,7 @@ def security_payload(session):
 
 
 @router.get("/state")
-async def get_security_state(request: Request) -> dict[str, Any]:
+def get_security_state(request: Request) -> dict[str, Any]:
     session = mode_session(request)
     # A chat turn holds the session lock while waiting for approval. Reads must
     # remain available so the panel can show the very decision it is waiting on.
@@ -87,7 +87,7 @@ class RefuteBody(BaseModel):
 
 
 @router.post("/findings/{finding_id}/approve")
-async def approve(request: Request, finding_id: str):
+def approve(request: Request, finding_id: str):
     def action(session, report):
         engine.approve_finding(engine.require_finding(report, finding_id), report=report, owner=session)
         report.events.append({"action": "approve", "finding_id": finding_id, "actor": surface_actor(request)})
@@ -96,7 +96,7 @@ async def approve(request: Request, finding_id: str):
 
 
 @router.post("/findings/{finding_id}/refute")
-async def refute(request: Request, finding_id: str, body: RefuteBody):
+def refute(request: Request, finding_id: str, body: RefuteBody):
     def action(session, report):
         engine.refute_finding(engine.require_finding(report, finding_id), reason=body.reason)
         report.events.append({"action": "refute", "finding_id": finding_id, "actor": surface_actor(request)})
@@ -109,12 +109,12 @@ class RunnerBody(BaseModel):
 
 
 @router.post("/runner")
-async def runner(request: Request, body: RunnerBody):
+def runner(request: Request, body: RunnerBody):
     return _mutate(request, lambda session, report: engine.configure_runner(session, body.runner, actor=surface_actor(request)))
 
 
 @router.post("/report")
-async def report(request: Request):
+def report(request: Request):
     return _mutate(request, lambda session, report: engine.generate_report(report))
 
 
@@ -123,9 +123,9 @@ class OpenBody(BaseModel):
 
 
 @router.post("/open")
-async def open_scan(request: Request, body: OpenBody):
+def open_scan(request: Request, body: OpenBody):
     session, _ = states_for(request)
-    with mode_session_lock(request, session):
+    with mode_session_lock(request, session, exclusive=True):
         try:
             engine.open_report(session, body.scan_id)
             save(session)
@@ -135,7 +135,7 @@ async def open_scan(request: Request, body: OpenBody):
 
 
 @router.get("/artifacts/{artifact_path:path}")
-async def artifact(request: Request, artifact_path: str):
+def artifact(request: Request, artifact_path: str):
     """Read only generated evidence inside the selected session's active scan."""
     import re
     session, _ = states_for(request)

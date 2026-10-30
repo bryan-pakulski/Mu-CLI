@@ -59,7 +59,7 @@ def debug_payload(session: Any) -> Dict[str, Any]:
 
 
 @router.get("/state")
-async def get_debug_state(request: Request) -> Dict[str, Any]:
+def get_debug_state(request: Request) -> Dict[str, Any]:
     session = mode_session(request)
     if session is None or getattr(session.session_manager, "mode_state", None) is None:
         return _empty(False)
@@ -67,7 +67,7 @@ async def get_debug_state(request: Request) -> Dict[str, Any]:
 
 
 @router.post("/cases/{case_id}/select")
-async def select(request: Request, case_id: str) -> Dict[str, Any]:
+def select(request: Request, case_id: str) -> Dict[str, Any]:
     from mu.debug.engine import select_case
     from mu.modes.events import GateError
 
@@ -88,7 +88,7 @@ class CloseBody(BaseModel):
 
 
 @router.post("/close")
-async def close(request: Request, body: CloseBody) -> Dict[str, Any]:
+def close(request: Request, body: CloseBody) -> Dict[str, Any]:
     from mu.debug.engine import close_case
     from mu.modes.events import GateError
 

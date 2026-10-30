@@ -18,6 +18,8 @@ import { budgetSummary } from '../components/jobViews';
 import { ChecksTab, DiffTab, NotesTab, PlanTab, ReviewTab, SessionTab } from '../components/JobTabs';
 import { JOB_TABS, JOB_TAB_LABELS, STEP_TABS, asJobTab, defaultTab, eventTone, parsePatch, runOutcome, shellCommand, type JobTab } from '../components/jobViews';
 import { PrPill, jobKey } from '../components/JobsChrome';
+import { openExternalUrl } from '../api/urlSafety';
+import { saveJobAttachment, saveJobPatch, type SaveOutcome } from '../api/artifactDownload';
 import { useTheme } from '../theme/ThemeContext';
 import { fontWeights, fonts, spacing, toneInk, touchTarget } from '../theme/tokens';
 import { STATUS, duration, money, stateLabel, stateStatus, verdictStyle, when } from '../theme/status';
@@ -40,6 +42,10 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
   const requestedTab = asJobTab(route.params.tab);
   const { colors } = useTheme();
   const toast = useToast();
+  const saved = (out: SaveOutcome) => {
+    if (out.saved) toast(`Saved ${out.name}`, 'ok');
+    else if (out.reason === 'too-large') toast('Too large for the phone. Download it from the web GUI on the computer.', 'attention');
+  };
   const leave = useServerActions();
   const [shellOpen, setShellOpen] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -277,9 +283,48 @@ export function JobDetailScreen({ route, navigation }: JobDetailScreenProps) {
           <PrPill pr={job.pr} testID="job-pr-pill" />
         </View>
         <View style={styles.factsCol}>
-          {job.branch ? <Text variant="monoSm" tone="ink3" accessibilityLabel={`branch ${job.branch}`}>{job.branch}{job.repository ? `  ·  ${job.repository}` : ''}</Text> : null}
+          {job.branch ? <Text variant="monoSm" tone="ink3" accessibilityLabel={`branch ${job.branch}`}>{job.branch}{job.repository && !job.folder_snapshot ? `  ·  ${job.repository}` : ''}</Text> : null}
+          {job.folder_snapshot ? (
+            <View style={styles.attachments} testID="job-folder-snapshot">
+              <Text variant="monoSm" tone="ink3" accessibilityLabel={`folder ${job.folder_snapshot.source_path}`}>{job.folder_snapshot.source_path}</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel="Save the job's patch to phone" style={styles.link} testID="job-save-patch"
+                onPress={() => void saveJobPatch(job.id).then(saved).catch(e => toast(`Couldn't save it: ${e instanceof Error ? e.message : String(e)}`, 'danger'))}>
+                <Text variant="caption" tone="accent">Save patch</Text>
+              </Pressable>
+              <Text variant="caption" tone="ink3">apply in the folder with git apply</Text>
+            </View>
+          ) : null}
           {agentsLabel ? <Text variant="caption" tone="ink3" testID="job-stage-agents">agents: {agentsLabel}</Text> : null}
           {!agentsLabel || stageModels.length ? <Text variant="caption" tone="ink3">models: {stageModels.length ? stageModels.map(([s, m]) => `${s} ${m?.model}`).join(' · ') : 'unset'}</Text> : null}
+          {(job.sources || []).map(src => (
+            <View key={src.name} style={styles.attachments} testID={`job-source-${src.name}`}>
+              <Text variant="monoSm" tone="ink3" accessibilityLabel={`source ${src.name}, ${src.input}`}>/sources/{src.name}</Text>
+              <Text variant="caption" tone="ink3" numberOfLines={1} style={{ flexShrink: 1 }}>{src.input}</Text>
+              {src.pr?.url ? (
+                <Pressable accessibilityRole="link" accessibilityLabel={`Open the pull request for ${src.name}`} style={styles.link}
+                  testID={`job-source-${src.name}-pr`} onPress={() => { void openExternalUrl(src.pr?.url); }}>
+                  <Text variant="caption" tone="accent">PR{src.pr.number ? ` #${src.pr.number}` : ''}</Text>
+                </Pressable>
+              ) : src.branch ? (
+                <Pressable accessibilityRole="button" accessibilityLabel={`Save the patch for ${src.name} to phone`} style={styles.link}
+                  testID={`job-source-${src.name}-patch`}
+                  onPress={() => void saveJobPatch(job.id, src.name).then(saved).catch(e => toast(`Couldn't save it: ${e instanceof Error ? e.message : String(e)}`, 'danger'))}>
+                  <Text variant="caption" tone="accent">Save patch</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ))}
+          {(job.attachments || []).length ? (
+            <View style={styles.attachments} testID="job-attachments">
+              <Text variant="caption" tone="ink3">attachments:</Text>
+              {(job.attachments || []).map(a => (
+                <Pressable key={a.name} accessibilityRole="button" accessibilityLabel={`Save ${a.name} to phone`} style={styles.link}
+                  testID={`job-attachment-${a.name}`} onPress={() => void saveJobAttachment(job.id, a).then(saved).catch(e => toast(`Couldn't save it: ${e instanceof Error ? e.message : String(e)}`, 'danger'))}>
+                  <Text variant="monoSm" tone="accent">{a.name}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
           {job.worktree ? (
             <Pressable accessibilityRole="button" accessibilityLabel="Open a shell in the job's working directory" onPress={() => setShellOpen(true)} style={styles.link} testID="job-open-shell">
               <Text variant="caption" tone="accent">Open a shell</Text>
@@ -493,6 +538,7 @@ const styles = StyleSheet.create({
   content: { padding: spacing.base, gap: spacing.md, paddingBottom: spacing['3xl'] },
   facts: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
   factsCol: { gap: 2 },
+  attachments: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: spacing.sm },
   grow: { flex: 1 },
   col: { gap: spacing.md },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

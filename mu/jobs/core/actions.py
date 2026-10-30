@@ -70,6 +70,9 @@ class JobFacts:
     has_worktree: bool = False
     live_stage: bool = False  # a stage is attached and accepting messages
     git_workspace: bool = True
+    # The job ran on a git snapshot of a plain folder (mu/jobs/folder_snapshot.py): its result is a
+    # patch, so "push" only finishes the job (nothing is pushed) and "markMerged" means the patch is applied.
+    folder_snapshot: bool = False
     push_check_reason: str = "push requires a successful check run"
     pending_approval: Optional[Dict[str, Any]] = None
     has_diff: bool = False  # a diff.patch artifact exists (markViewed)
@@ -309,6 +312,13 @@ def available_actions(facts: JobFacts) -> List[ActionVM]:
             label = "Unkeep environments"
         if cid == "markMerged" and facts.pr_closed:
             label = "Mark done"  # nothing was merged; the human closes the job out
+        confirm, dialog = CONFIRMS.get(cid), DIALOGS.get(cid)
+        if facts.folder_snapshot and cid == "push":
+            label, dialog = "Finish (keep as patch)", None
+            confirm = ("Finish this job? Nothing is pushed: download its patch and apply it in the folder "
+                       "with `git apply <file>`.")
+        if facts.folder_snapshot and cid == "markMerged":
+            label = "Mark done"  # the patch was applied (or not needed)
         input_spec = dict(INPUTS[cid]) if cid in INPUTS else None
         if cid == "saveRepairedTemplate" and facts.environment_repair and input_spec is not None:
             input_spec["value"] = input_default
@@ -324,8 +334,8 @@ def available_actions(facts: JobFacts) -> List[ActionVM]:
             id=cid, label=label, enabled=reason is None, reason=reason or "",
             shortcut=SHORTCUTS.get(cid, ""), primary=(cid == primary),
             danger=cid in ("discard", "delete"), args=args,
-            tone=TONES.get(cid, ""), confirm=CONFIRMS.get(cid),
-            input=input_spec, dialog=DIALOGS.get(cid), hidden=hidden,
+            tone=TONES.get(cid, ""), confirm=confirm,
+            input=input_spec, dialog=dialog, hidden=hidden,
         ))
     return out
 

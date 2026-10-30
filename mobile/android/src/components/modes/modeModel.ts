@@ -4,10 +4,10 @@
 // dates and the default-mode turn receipt line. Screens render these; nothing here touches React.
 
 import type { StatePart } from '../../ui';
-import type { Blocker, CheckRun, TurnReceipt } from '../../api/modeState';
+import type { Blocker, CheckRun, TurnReceipt, WorkItem } from '../../api/modeState';
 import type { DebugState } from '../../api/debug';
 import type { FeaturePlan, FeatureState, FeatureCriterion } from '../../api/feature';
-import type { LoopCriterion, LoopMission, LoopState } from '../../api/loop';
+import type { LoopBudgetMeter, LoopCriterion, LoopMission, LoopState } from '../../api/loop';
 import type { TeacherCourse, TeacherLesson, TeacherReview } from '../../api/teacher';
 import { duration, modeState, money, type Status } from '../../theme/status';
 import type { StepLike } from '../../ui/Stepper';
@@ -80,6 +80,13 @@ export function loopSentence(mission: LoopMission | null | undefined, nowS = Dat
   const cap = Number(mission.budget.max_cost_usd || 0);
   const cost = cap ? `${money(spent)} of ${money(cap)}` : spent ? money(spent) : null;
   return sentence({ text: head, tone }, n ? `increment ${n}` : null, cost, runtimeLeft(mission, nowS));
+}
+
+/** "cost $3.40 of $10" / "increments 12 of 20" / "runtime 1h 5m of 2h". */
+export function meterText(meter: LoopBudgetMeter): string {
+  if (meter.kind === 'cost_usd') return `cost ${money(meter.used)} of ${money(meter.cap)}`;
+  if (meter.kind === 'runtime_s') return `runtime ${duration(meter.used * 1000)} of ${duration(meter.cap * 1000)}`;
+  return `${meter.kind} ${meter.used} of ${meter.cap}`;
 }
 
 /** "Module 2 of 4 · lesson 2.3 · 2 reviews due". */
@@ -192,6 +199,25 @@ export function loopNow(state: LoopState | null | undefined): NowItem[] {
     }
   }
   return orderNow(items);
+}
+
+/** What the user can do with an open work item, the decisive verb first (the web's workActions).
+ * Ids are the target status; `done` asks why (or for passing check runs) first. */
+export function workItemActions(item: Pick<WorkItem, 'status'>): Array<{ id: string; label: string; primary?: boolean }> {
+  switch (item.status) {
+    case 'blocked': return [{ id: 'pending', label: 'Unblock', primary: true }, { id: 'done', label: 'Done…' }, { id: 'dropped', label: 'Drop' }];
+    case 'in_progress': return [{ id: 'done', label: 'Done…', primary: true }, { id: 'pending', label: 'Not now' }, { id: 'dropped', label: 'Drop' }];
+    case 'pending': return [{ id: 'in_progress', label: 'Start' }, { id: 'done', label: 'Done…' }, { id: 'dropped', label: 'Drop' }];
+    default: return [];
+  }
+}
+
+/** The Done answer → the request body: check run ids (r12) are evidence, the text is the recorded reason. */
+export function workDoneBody(answer: string): { status: 'done'; evidence: string[]; override_reason: string } {
+  const text = String(answer || '').trim();
+  const evidence = text.match(/\br\d+\b/g) || [];
+  const reason = text.replace(/\br\d+\b/g, '').replace(/[\s,]+/g, ' ').trim();
+  return { status: 'done', evidence, override_reason: reason ? text : '' };
 }
 
 export function teacherNow(course: TeacherCourse | null | undefined, blockers: Blocker[] = []): NowItem[] {

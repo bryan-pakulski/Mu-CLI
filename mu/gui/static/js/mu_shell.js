@@ -179,6 +179,7 @@
             theme: window.MuTheme ? window.MuTheme.preference() : null,
             decoration: window.MuDecoration ? window.MuDecoration.preference() : null,
             palette: window.MuPalette ? window.MuPalette.preference() : null,
+            scenery: window.MuScenery ? window.MuScenery.preference() : null,
             glass: window.MuGlass ? window.MuGlass.preference() : null,
             blur: window.MuGlassBlur ? window.MuGlassBlur.preference() : null,
             textScale: window.MuTextScale ? window.MuTextScale.preference() : null,
@@ -188,6 +189,7 @@
     window.addEventListener('mucli-theme-change', broadcast);
     window.addEventListener('mucli-decoration-change', broadcast);
     window.addEventListener('mucli-palette-change', broadcast);
+    window.addEventListener('mucli-scenery-change', broadcast);
     window.addEventListener('mucli-glass-change', broadcast);
     window.addEventListener('mucli-text-scale-change', broadcast);
 

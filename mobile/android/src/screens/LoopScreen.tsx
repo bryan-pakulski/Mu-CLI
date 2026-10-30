@@ -8,12 +8,12 @@ import { StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { PanelPage, PanelSection, Fact } from '../components/chat/PanelPage';
 import {
-  CheckRunRow, NowBoard, loopCriterionKey, loopNow, loopSentence, resolveBlockerAction, useCheckRunSheet, useModeActions,
-  type NowItem,
+  CheckRunRow, NowBoard, loopCriterionKey, loopNow, loopSentence, meterText, resolveBlockerAction, useCheckRunSheet, useModeActions,
+  workDoneBody, workItemActions, type NowItem,
 } from '../components/modes';
-import { loopApi, type LoopBudgetMeter, type LoopIncrement, type LoopState } from '../api/loop';
-import { modeStateApi } from '../api/modeState';
-import { duration, modeState, money } from '../theme/status';
+import { loopApi, type LoopIncrement, type LoopState } from '../api/loop';
+import { modeStateApi, type WorkItem } from '../api/modeState';
+import { modeState } from '../theme/status';
 import { spacing } from '../theme/tokens';
 import { Banner, Button, Meter, Row, Sheet, Text, type ServerAction } from '../ui';
 
@@ -24,13 +24,6 @@ const TABS = [
 ];
 
 const STOP: ServerAction = { id: 'stop', label: 'Stop mission', danger: true, confirm: 'Stop the mission? The agent stops working on it; the record stays.' };
-
-/** "cost $3.40 of $10" / "increments 12 of 20" / "runtime 1h 5m of 2h". */
-export function meterText(meter: LoopBudgetMeter): string {
-  if (meter.kind === 'cost_usd') return `cost ${money(meter.used)} of ${money(meter.cap)}`;
-  if (meter.kind === 'runtime_s') return `runtime ${duration(meter.used * 1000)} of ${duration(meter.cap * 1000)}`;
-  return `${meter.kind} ${meter.used} of ${meter.cap}`;
-}
 
 export function LoopScreen() {
   const [state, setState] = useState<LoopState | null>(null);
@@ -55,6 +48,13 @@ export function LoopScreen() {
 
   const control = (action: 'pause' | 'resume') => actions.run({ id: action, label: action === 'pause' ? 'Pause' : 'Resume' }, () => loopApi.control(action));
   const stop = () => actions.run(STOP, () => loopApi.control('stop'));
+
+  // Blocked, in-progress and to-do items each have their verbs; Done asks why (or for passing runs).
+  const workAction = (item: WorkItem, action: { id: string; label: string }) => actions.run(
+    action.id === 'done'
+      ? { id: `work-${item.id}-done`, label: 'Mark done', input: { arg: 'answer', label: `Why is ${item.id} done?`, hint: 'Cite passing check runs (r12) or give a reason — recorded.', multiline: true } }
+      : { id: `work-${item.id}-${action.id}`, label: action.label },
+    args => modeStateApi.setWorkStatus(item.id, action.id === 'done' ? workDoneBody(String(args.answer || '')) : { status: action.id }));
 
   const actionsFor = (item: NowItem) => {
     if (item.kind === 'blocker') {
@@ -124,8 +124,13 @@ export function LoopScreen() {
         <PanelSection title="Backlog" empty="No backlog items.">
           {(state?.backlog || []).map(item => {
             const mark = modeState('work_item', item.status);
+            const verbs = workItemActions(item);
             return <Row key={item.id} status={mark.status} title={item.title} when={mark.label} sub={item.note || undefined}
-              selected={item.id === state?.current_item} testID={`work-${item.id}`} />;
+              selected={item.id === state?.current_item} testID={`work-${item.id}`}
+              actions={verbs.length ? verbs.map(v => (
+                <Button key={v.id} label={v.label} size="md" variant={v.primary ? 'secondary' : 'ghost'}
+                  loading={actions.busy === `work-${item.id}-${v.id}`} onPress={() => void workAction(item, v)} testID={`work-${item.id}-${v.id}`} />
+              )) : undefined} />;
           })}
         </PanelSection>
       ) : null}

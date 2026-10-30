@@ -171,6 +171,10 @@ def build_plan_prompt(job: Job) -> str:
         lines.extend(["", "Acceptance criteria already supplied:", *[f"- {c}" for c in job.acceptance_criteria]])
     if job.validation_commands:
         lines.extend(["", "Validation commands already supplied:", *[f"- {c}" for c in job.validation_commands]])
+    from .attachments import prompt_lines
+    from .multi_source import prompt_lines as source_lines
+    lines.extend(source_lines(job))
+    lines.extend(prompt_lines(job))
     feedback = str((job.metadata or {}).get("replan_feedback") or "").strip()
     if feedback:
         lines.extend(["", "A human rejected the previous plan. Address this feedback:", feedback])
@@ -321,6 +325,8 @@ def budget_patch(patch: str, limit: Optional[int] = None) -> str:
 def build_stage_review_prompt(job: Job, patch: str, stat: str, round_no: int) -> str:
     from .core.artifacts import artifacts_for
     from .core.plan_ops import approved_plan_text
+    from .attachments import prompt_lines
+    from .multi_source import prompt_lines as source_lines
     art = artifacts_for(job)
     checks = art.read_json("checks/summary.json", {}) or {}
     unverified = []
@@ -336,6 +342,8 @@ def build_stage_review_prompt(job: Job, patch: str, stat: str, round_no: int) ->
         f"Title: {job.title}", job.description or "",
         "Approved plan:", approved_plan_text(job) or art.read_text("plan.md") or "",
         "Acceptance criteria:", *job.acceptance_criteria,
+        *source_lines(job),
+        *prompt_lines(job),
         stage_brief(job, "implement"),
         "Checks:", json.dumps(checks), "Diff stat:", stat, "Patch:", budget_patch(patch),
         "Respond with JSON only, with this schema:",
@@ -463,6 +471,9 @@ STAGE_TOOL_ALLOWLIST = frozenset({
     "read_file", "get_chunk", "list_dir", "search_for_string", "search_references",
     "retrieve_relevant_context", "get_workspace_details", "flush",
     "recall", "result_range", "result_head", "result_tail", "result_search",
+    # Read-only for the workspace: renders a page (the sandbox's localhost included) and saves
+    # the screenshot as evidence (mu/tools/agent/browser.py).
+    "browser_snapshot",
 })
 
 

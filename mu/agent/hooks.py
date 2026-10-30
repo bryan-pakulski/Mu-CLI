@@ -11,7 +11,9 @@ Five hook points cover the loop's natural boundaries:
                           enforcement, sandbox checks). Return None to
                           allow normal execution.
   * post_tool           - Tool returned a result. Use for telemetry,
-                          collation, structured-result rewrap.
+                          collation, structured-result rewrap. A hook
+                          may replace `ctx.tool_result`; the caller
+                          returns the final value.
   * on_stop             - The loop is ending (success, max_iter, error).
 
 Registration:

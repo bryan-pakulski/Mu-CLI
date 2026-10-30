@@ -604,8 +604,16 @@
             <template x-for="row in $store.workPlan.rows()" :key="row.id">
                 <li class="w-row">
                     <span class="w-sign" :data-status="row.status" aria-hidden="true" x-text="row.glyph"></span>
-                    <div class="w-row__main"><span class="w-row__title" x-text="row.title"></span></div>
-                    <span class="w-row__when" x-text="row.sub"></span>
+                    <div class="w-row__main">
+                        <span class="w-row__title" x-text="row.title"></span>
+                        <span class="w-row__sub" x-text="row.note ? row.sub + ' · ' + row.note : row.sub"></span>
+                    </div>
+                    <span class="w-row__actions">
+                        <template x-for="action in row.actions" :key="action.id">
+                            <button type="button" class="w-textbtn" :data-tone="action.primary ? null : 'quiet'"
+                                    @click.stop="$store.workPlan.act(row, action)" x-text="action.label"></button>
+                        </template>
+                    </span>
                 </li>
             </template>
         </ul>

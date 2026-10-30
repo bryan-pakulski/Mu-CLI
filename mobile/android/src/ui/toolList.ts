@@ -147,7 +147,9 @@ export type ToolCardItem = {
 export type ToolGroupItem = { type: 'group'; id: string; kind: ToolListKind; cards: ToolCardItem[] };
 export type ThinkingItem = { type: 'thinking'; id: string; text: string; live: boolean };
 export type NoteItem = { type: 'note'; id: string; text: string };
-export type ToolListItem = ToolCardItem | ToolGroupItem | ThinkingItem | NoteItem;
+/** A ``raise_blocker`` call: the agent's question for the user, shown in full (never a tool row). */
+export type QuestionItem = { type: 'question'; id: string; name: string; summary: string; needs: string; details: string; questions: string[] };
+export type ToolListItem = ToolCardItem | ToolGroupItem | ThinkingItem | NoteItem | QuestionItem;
 
 function resultText(ev: ToolEvent): string {
   if (typeof ev.rawText === 'string') return ev.rawText;
@@ -157,12 +159,22 @@ function resultText(ev: ToolEvent): string {
 
 export function buildToolCards(events: ToolEvent[] | null | undefined, options: { running?: boolean } = {}): ToolListItem[] {
   const running = !!options.running;
-  const items: Array<ToolCardItem | ThinkingItem | NoteItem> = [];
-  const pending: ToolCardItem[] = [];
+  const items: Array<ToolCardItem | ThinkingItem | NoteItem | QuestionItem> = [];
+  const pending: Array<ToolCardItem | QuestionItem> = [];
   const list = Array.isArray(events) ? events : [];
   list.forEach((ev, i) => {
     if (!ev) return;
-    if (ev.kind === 'tool_call') {
+    if (ev.kind === 'tool_call' && ev.name === 'raise_blocker') {
+      // A blocker is a question for the user, not a tool row: it stays in view.
+      const ask = (parseArgs(ev.args) || {}) as Record<string, unknown>;
+      const qs = Array.isArray(ask.questions) ? ask.questions : ask.questions ? [ask.questions] : [];
+      const q: QuestionItem = {
+        type: 'question', id: String(ev.id || `q-${i}`), name: 'raise_blocker', summary: String(ask.summary || ''),
+        needs: String(ask.requested_input || ''), details: String(ask.details || ''), questions: qs.map(String),
+      };
+      items.push(q);
+      pending.push(q);
+    } else if (ev.kind === 'tool_call') {
       const kind = kindOf(ev.name);
       const card: ToolCardItem = {
         type: 'card', id: String(ev.id || `tc-${i}`), name: ev.name || 'tool', kind, args: ev.args,
@@ -172,7 +184,7 @@ export function buildToolCards(events: ToolEvent[] | null | undefined, options: 
       items.push(card);
       pending.push(card);
     } else if (ev.kind === 'tool_result') {
-      let match: ToolCardItem | null = null;
+      let match: ToolCardItem | QuestionItem | null = null;
       for (let p = 0; p < pending.length; p += 1) {
         if (!ev.name || pending[p].name === ev.name) { match = pending[p]; pending.splice(p, 1); break; }
       }
@@ -181,6 +193,7 @@ export function buildToolCards(events: ToolEvent[] | null | undefined, options: 
         match = { type: 'card', id: String(ev.id || `tr-${i}`), name: ev.name || 'tool', kind: kindOf(ev.name), args: null, target: '', meta: '', startedAt: 0, state: 'running', hasResult: false };
         items.push(match);
       }
+      if (match.type === 'question') return;
       const text = resultText(ev);
       match.hasResult = true;
       match.resultText = text;

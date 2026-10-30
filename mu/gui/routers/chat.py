@@ -60,6 +60,14 @@ def _run_send(
             try:
                 result = session.send_message(text, origin=origin)
             except KeyboardInterrupt:
+                # Stop landed outside the loop body's own handler: the mission
+                # still stops being worked.
+                try:
+                    from mu.loop.engine import on_interrupt
+
+                    on_interrupt(session)
+                except Exception:  # noqa: BLE001
+                    logger.debug("loop mission pause on interrupt failed", exc_info=True)
                 result = {"status": "interrupted", "error": "User interrupted execution."}
             except Exception as exc:
                 result = {"status": "error", "error": str(exc)}
@@ -350,6 +358,26 @@ async def send_message(request: Request, payload: Dict[str, Any]):
         )
         return {"accepted": True, "kind": "command", "session_name": name}
 
+    return await launch_turn(request.app, session, text, attachments=attachments)
+
+
+async def launch_turn(app, session, text: str, *, attachments: Optional[list] = None) -> Dict[str, Any]:
+    """Run one agent turn for ``session`` in the background.
+
+    The caller has checked the session is not busy. Every client learns the
+    turn started from ``turn_started`` (it carries the user's text, so a
+    turn begun by another tab or by the loop panel shows in the transcript
+    and the composer goes busy) and that it ended from ``turn_complete``.
+    """
+    attachments = list(attachments or [])
+    name = session.session_manager.current_session_name
+    busy = app.state.session_busy_for(name)
+    bus = app.state.bus
+    session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
+    await bus.publish(
+        {"kind": "turn_started", "text": text, "attachments": attachments, "session_name": name}
+    )
+
     if session_type == "container":
         busy.set()
 
@@ -357,7 +385,7 @@ async def send_message(request: Request, payload: Dict[str, Any]):
             artifacts_before = _artifact_snapshot(session)
             try:
                 response = await asyncio.to_thread(
-                    request.app.state.container_supervisor.send_sync,
+                    app.state.container_supervisor.send_sync,
                     name,
                     text,
                     provider=session.provider.name,
@@ -469,7 +497,7 @@ async def send_message(request: Request, payload: Dict[str, Any]):
             "revision": js_safe_revision(getattr(session.session_manager, "revision", 0) or 0),
         }
 
-    lock = request.app.state.session_lock_for(name)
+    lock = app.state.session_lock_for(name)
 
     def _run():
         return _run_send(session, text, lock=lock, busy=busy, session_name=name)

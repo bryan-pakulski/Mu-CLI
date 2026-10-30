@@ -31,14 +31,14 @@ NODE_PATH=mobile/android/node_modules node --test tests/gui/frontend/*.cjs
 |---|---|---|---|---|
 | Agent loop & providers | `tests/agent/` | 12 | 129 | 5 s |
 | Context engineering | `tests/context/` | 13 | 144 | 11 s |
-| Sessions & memory | `tests/sessions/` | 11 | 111 | 3 s |
-| Tools & safety gates | `tests/tools/` | 16 | 202 | 8 s |
+| Sessions & memory | `tests/sessions/` | 12 | 117 | 5 s |
+| Tools & safety gates | `tests/tools/` | 17 | 209 | 30 s |
 | Modes & commands | `tests/modes/` | 13 | 195 | 19 s |
 | Containers | `tests/containers/` | 4 | 31 | 0 s |
-| Engineering jobs | `tests/jobs/` | 20 | 401 | 370 s |
+| Engineering jobs | `tests/jobs/` | 23 | 433 | 430 s |
 | Orchestration | `tests/orchestration/` | 16 | 236 | 39 s |
 | Web GUI | `tests/gui/` | 8 | 87 | 6 s |
-| Design system | `tests/design/` | 3 | 14 | 1 s |
+| Design system | `tests/design/` | 4 | 19 | 2 s |
 | Terminal UI | `tests/terminal/` | 6 | 83 | 6 s |
 | Tracing & costs | `tests/trace/` | 3 | 62 | 1 s |
 
@@ -106,6 +106,7 @@ Must prove:
 - Threads create, coordinate and delete safely
 - The Memory Ledger stores and recalls; two surfaces stay consistent
 - Session files (artifacts, uploads) delete at any time; concurrent registry writers lose nothing
+- A new workspace session creates its missing folder only when asked (mobile), never a relative or secret path
 - Research state is session-owned: concurrent sessions never share it, and it persists with the session
 - Mode state (cases, missions, work items, blockers, checks, receipts) is typed, session-owned and persisted with the session
 
@@ -118,6 +119,7 @@ Must prove:
 | `test_mu_tools_memory.py` | 15 | 0.0 s | Pin the migrated memory + scratchpad tools (`mu/tools/memory/`) |
 | `test_research_state.py` | 4 | 0.1 s | Research state is session-owned: concurrent searches stay apart; it persists; the earlier list shape loads |
 | `test_session_revision.py` | 32 | 0.1 s | Cross-surface continuity phase 1: session revision counter + CAS + If-Match |
+| `test_session_create_workspace.py` | 6 | 1.7 s | `create_workspace`: a missing workspace folder is created on request; unsafe paths never are |
 | `test_session_files.py` | 3 | 2.3 s | Artifact and upload delete during a turn; one shared lock per registry file |
 | `test_session_unreadable_doc.py` | 4 | 0.0 s | SessionManager must never clobber a session.json it cannot read |
 | `test_surface_sync.py` | 13 | 0.7 s | Tests for the CLI-side surface sync watcher (cross-surface phase 2, G1) |
@@ -134,6 +136,7 @@ Must prove:
 - Research reads are clean, bounded and recorded; search results stay candidates until read (loopback pages only)
 - Mode checks (`run_check`) refuse plan mode and secret commands, use no login shell and a scrubbed environment, time out and keep full output out of context
 - Work items keep one item in progress and need passing evidence for done in loop mode
+- `browser_snapshot` reaches localhost only inside a sandbox (container worker, job stage); private and metadata addresses never; steps only on local pages
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
@@ -151,6 +154,7 @@ Must prove:
 | `test_secret_paths.py` | 59 | 0.1 s | Unit tests for the always-on path denylist |
 | `test_secret_scrubber.py` | 20 | 0.0 s | Unit tests for the secret-output scrubber |
 | `test_shell_noninteractive.py` | 6 | 1.1 s | Unattended shell commands must fail prompts fast and clean up descendants |
+| `test_browser_snapshot.py` | 7 | 22 s | Headless screenshots: sandbox-only localhost, devices, dark mode, element capture, steps, job evidence |
 | `test_tool_path_resolution.py` | 6 | 0.0 s | Relative tool paths resolve against the session workspace, not process cwd |
 | `test_work_items.py` | 5 | 0.4 s | Work items replace scratchpad todos |
 
@@ -171,7 +175,7 @@ Must prove:
 | `test_command_surface.py` | 5 | 0.0 s | Pin the slash-command surface so cleanup decisions don't drift |
 | `test_debug_case.py` | 10 | 6.4 s | Debug cases: typed, engine-checked, persisted; edit gate, plan mode and bisect |
 | `test_feature_gates.py` | 10 | 1.3 s | Feature plans: draft → user approval → evidence-backed tasks → review → user completion, every surface through the engine |
-| `test_loop_mission.py` | 9 | 0.7 s | Loop missions: user-owned goal, increments with evidence, real pause, budgets, done-when |
+| `test_loop_mission.py` | 9 | 0.7 s | Loop missions: user-owned goal, increments with evidence (bash runs name their check run), real pause (Stop and leaving loop mode pause it), budgets, done-when |
 | `test_mode_workspace.py` | 9 | 0.0 s | Mode workspace contracts expose evidence without inventing certainty |
 | `test_mu_commands_registry.py` | 23 | 0.0 s | Tests for the new slash-command registry in `mu.commands` |
 | `test_research_ledger.py` | 8 | 0.0 s | Evidence ledger: claims quote sources that were read; confidence counts origins; subtree status |
@@ -208,6 +212,9 @@ Must prove:
 - Checks run, triage, gate dirty trees and keep artifacts
 - Push squashes onto base with a verified tree; publish tokens never reach containers
 - Every stage fails safe
+- New jobs start from a session, a Settings repository or a folder; attached files reach every stage read-only
+- A plain folder runs on a git snapshot (no secrets, dependencies or escaping links); the result is a patch that applies to it
+- Extra sources each get a worktree, a stage-scoped mount with a read-only git pointer, the guard, checkpoints, the diff and a PR or patch
 
 | File | Tests | Time | What it covers |
 |---|---|---|---|
@@ -223,7 +230,10 @@ Must prove:
 | `test_job_harness_docker.py` | 4 | 18.5 s | Claude Code / Codex stages in a real stage container, with fake CLIs speaking the recorded |
 | `test_job_harness_sandbox_docker.py` | 3 | 14.2 s | Sandbox permissions of job stage containers for every agent harness (mucli, Claude Code, Codex), |
 | `test_job_sandbox.py` | 27 | 0.1 s |  |
-| `test_job_sandbox_docker.py` | 2 | 9.7 s | Real isolation smoke tests; require Docker and the locally built shared image |
+| `test_job_sandbox_docker.py` | 5 | 63 s | Real isolation smoke tests (incl. a stage reading a job attachment, one screenshotting its own dev server as evidence, and one editing an extra source with a check run in it); require Docker and the locally built shared image |
+| `test_job_folder_snapshot.py` | 5 | 0.7 s | Plain folders run on a managed git snapshot; the job's patch applies back to the folder |
+| `test_job_multi_source.py` | 9 | 3 s | Several editable sources: resolution, worktrees, mounts, guard, checkpoints, diff, per-source patch and PRs, cleanup |
+| `test_job_sources_attachments.py` | 14 | 0.7 s | New job sources (session / Settings → Repositories / folder) and files attached at creation |
 | `test_job_stage_loop.py` | 9 | 0.1 s | Durable job v2 task 4: plan + review stages and the automated review loop |
 | `test_job_stage_resume_docker.py` | 2 | 17.1 s | A stage stopped by its time limit resumes its own conversation (harness latency plan, 5.1) |
 | `test_job_templates_docker.py` | 1 | 14.1 s | Real template job setup (documentation/plans/job_templates.md §4): a tiny Node repository, a |
@@ -281,7 +291,7 @@ Must prove:
 | `test_device_pairing.py` | 26 | 3.4 s | Device pairing: the store, lockouts, the gate, browser pairing page and cookie, CSRF, revocation |
 | `test_gui_files.py` | 32 | 0.3 s | GUI Files panel — workspace explorer + editor backend |
 | `test_gui_webui_coalescing.py` | 9 | 0.0 s | GUI WebUI delta coalescing |
-| `test_mode_state_api.py` | 6 | 1.2 s | Mode routers on the shared shell: session-scoped records, user actions through the engines |
+| `test_mode_state_api.py` | 6 | 1.2 s | Mode routers on the shared shell: session-scoped records, user actions through the engines (mission, blockers, work items) |
 | `test_research_state_api.py` | 1 | 0.1 s | GET /api/research/state serves the named session's questions, claims, sources and matrix |
 | `test_session_list_awaiting.py` | 2 | 0.5 s | The session list marks every session with a pending prompt |
 | `test_web_persistent_shell.py` | 8 | 1.4 s | The persistent shell (mu/gui/shell.py; Mu revision 2): browsers get one shell document |
@@ -298,6 +308,7 @@ Must prove:
 | File | Tests | Time | What it covers |
 |---|---|---|---|
 | `test_wash_css_contract.py` | 2 | 0.0 s | Wash CSS rules that keep the design system intact (AGENTS.md: colours, type and spacing come |
+| `test_wash_scenery.py` | 5 | 1 s | Scenery packs: every pack ships web and Android art in Paper and Dusk, paints every destination with its own painting, is a contrast-checked scene, recolours to a real pigment and is offered in Settings |
 | `test_wash_tokens.py` | 5 | 1.3 s | Wash token contract: schema, contrast floors, and generated outputs in sync |
 | `test_wash_vocabulary.py` | 6 | 0.0 s | The shared Wash vocabulary covers every job enum the UIs can display |
 

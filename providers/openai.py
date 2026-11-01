@@ -285,7 +285,12 @@ class OpenAIProvider(LLMProvider):
         """
 
         out: List[Dict[str, Any]] = []
-        for msg in messages:
+        # Some saved histories/providers omit IDs. Repair only unambiguous
+        # call/result pairs in this projection; never rewrite durable history
+        # or replace an explicit provider-issued ID.
+        used_ids = {p.tool_call_id for m in messages for p in m.parts if p.tool_call_id}
+        pending_calls: Dict[str, str] = {}
+        for message_index, msg in enumerate(messages):
             if msg.role == "tool":
                 # Emit one OpenAI tool message per tool_result part. OpenAI
                 # requires a tool_call_id to match the originating call.
@@ -293,13 +298,21 @@ class OpenAIProvider(LLMProvider):
                 for part in msg.parts:
                     if part.type != "tool_result":
                         continue
+                    call_id = part.tool_call_id
+                    if not call_id:
+                        matches = [cid for cid, name in pending_calls.items() if name == part.tool_name]
+                        if len(matches) != 1:
+                            raise ValueError("Cannot pair a tool result without an ID: expected exactly one "
+                                             f"unanswered call to {part.tool_name!r}, found {len(matches)}.")
+                        call_id = matches[0]
+                    pending_calls.pop(call_id, None)
                     payload = part.tool_result
                     if isinstance(payload, (dict, list)):
                         payload = tool_result_json(payload)
                     out.append(
                         {
                             "role": "tool",
-                            "tool_call_id": part.tool_call_id or part.tool_name or "",
+                            "tool_call_id": call_id,
                             "content": str(payload),
                         }
                     )
@@ -327,6 +340,10 @@ class OpenAIProvider(LLMProvider):
             role = "user" if msg.role == "user" else "assistant" if msg.role == "assistant" else msg.role
             text_chunks: List[Dict[str, Any]] = []
             tool_calls: List[Dict[str, Any]] = []
+            if role != "tool":
+                # A result can only belong to the immediately preceding call
+                # batch, never to an unrelated older turn with the same name.
+                pending_calls.clear()
 
             for part in msg.parts:
                 if part.type == "text" and part.text:
@@ -363,9 +380,16 @@ class OpenAIProvider(LLMProvider):
                         )
                 elif part.type == "tool_call" and role == "assistant":
                     args = part.tool_args or {}
+                    call_id = part.tool_call_id
+                    if not call_id:
+                        call_id = f"call_mucli_{message_index}_{len(tool_calls)}"
+                        while call_id in used_ids:
+                            call_id += "_"
+                    used_ids.add(call_id)
+                    pending_calls[call_id] = part.tool_name or ""
                     tool_calls.append(
                         {
-                            "id": part.tool_call_id or f"call_{len(tool_calls)}",
+                            "id": call_id,
                             "type": "function",
                             "function": {
                                 "name": part.tool_name or "",
@@ -407,6 +431,10 @@ class OpenAIProvider(LLMProvider):
             }
             for t in tools
         ]
+
+    def _prepare_chat_payload(self, payload, *, thinking, reasoning_effort):
+        """Allow compatible transports to select their supported wire options."""
+        return payload
 
     # --------------------------------------------------------------- streaming
 
@@ -468,6 +496,7 @@ class OpenAIProvider(LLMProvider):
             # Create the stream inside the try so connection / auth /
             # timeout failures take the same StreamEvent(error) path as
             # iteration failures.
+            payload = self._prepare_chat_payload(payload, thinking=thinking, reasoning_effort=reasoning_effort)
             chunk_iter = self._client.chat.completions.create(**payload)
             for chunk in chunk_iter:
                 # Usage chunk (only present when stream_options.include_usage)

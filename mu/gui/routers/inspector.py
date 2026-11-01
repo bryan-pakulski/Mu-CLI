@@ -207,6 +207,7 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "provider_retry_max_total_wait_seconds",
         ),
     ),
+    ("local", ("local_base_url", "local_api_key", "local_request_timeout", "local_context_window", "local_max_tokens")),
     (
         "ollama",
         (
@@ -596,7 +597,7 @@ def _is_secret_var(key: str) -> bool:
     )
 
 
-_OLLAMA_SYNC_KEYS = {"ollama_host", "ollama_mode", "ollama_api_key", "ollama_token_safety_factor"}
+_OLLAMA_SYNC_KEYS = {"ollama_host", "ollama_mode", "ollama_api_key", "ollama_token_safety_factor", "local_base_url", "local_api_key", "local_request_timeout", "local_context_window", "local_max_tokens"}
 
 
 def _sync_provider_if_needed(session: Any, key: str) -> None:

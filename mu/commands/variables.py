@@ -78,7 +78,7 @@ def _sync_provider_if_needed(session: Any, key: str) -> None:
     # Any of these ollama variables changes the running provider's
     # endpoint (host/mode) or auth (api key) or compaction headroom, so
     # re-apply them live rather than waiting for the next session load.
-    if key in {"ollama_host", "ollama_mode", "ollama_api_key", "ollama_token_safety_factor"}:
+    if key in {"ollama_host", "ollama_mode", "ollama_api_key", "ollama_token_safety_factor", "local_base_url", "local_api_key", "local_request_timeout", "local_context_window", "local_max_tokens"}:
         try:
             from mucli import sync_provider_settings
 

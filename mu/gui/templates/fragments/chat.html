@@ -760,7 +760,7 @@
                                     @change="$store.inspector.onProviderChange()">
                                 <option value="">—</option>
                                 <template x-for="p in $store.inspector.providers" :key="p.name">
-                                    <option :value="p.name" x-text="p.name + (p.configured ? '' : ' (not configured)')"></option>
+                                    <option :value="p.name" x-text="(p.label || p.name) + (p.configured ? '' : ' (not configured)')"></option>
                                 </template>
                             </select>
                         </label>
@@ -795,6 +795,22 @@
                                    @change="$store.inspector.onOllamaKeyChange()"
                                    autocomplete="off" />
                         </label>
+                        <div x-show="$store.inspector.currentProvider === 'local'" x-cloak>
+                            <label class="settings-var"><span class="settings-var-key">Server URL</span>
+                                <input class="w-input" type="url" x-model.trim="$store.inspector.localBaseUrl"
+                                       @change="$store.inspector.currentModel = ''; $store.inspector.loadModels('local')"
+                                       placeholder="http://127.0.0.1:8080/v1" aria-label="Local server URL" />
+                            </label>
+                            <label class="settings-var"><span class="settings-var-key">API key (optional)</span>
+                                <input class="w-input" type="password" x-model="$store.inspector.localApiKey" autocomplete="off"
+                                       :placeholder="$store.inspector.localKeySet ? 'key set — type to replace' : 'No key required'"
+                                       @change="$store.inspector.loadModels('local')" />
+                            </label>
+                            <button type="button" class="w-btn" :disabled="$store.inspector.loadingModels"
+                                    @click="$store.inspector.loadModels('local')">Refresh models</button>
+                            <p class="w-field__help">Address on the machine running MuCLI. Models are advertised by that server.</p>
+                        </div>
+                        <p class="w-field__help" role="status" x-show="$store.inspector.modelError" x-text="$store.inspector.modelError"></p>
                         <label class="settings-var">
                             <span class="settings-var-key">Model</span>
                             <select class="settings-var-select w-select__control"

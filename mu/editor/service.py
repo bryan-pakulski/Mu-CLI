@@ -93,6 +93,10 @@ def make_provider(
 
         provider = OpenAIProvider(model_name=model)
         provider._client = provider._client.with_options(timeout=timeout, max_retries=0)
+    elif name == "local":
+        from providers.local import LocalOpenAIProvider
+
+        provider = LocalOpenAIProvider(model_name=model, request_timeout=timeout)
     elif name == "anthropic":
         from providers.anthropic import AnthropicProvider
 
@@ -119,7 +123,7 @@ def make_provider(
             ),
         )
     else:
-        raise ValueError("Provider must be openai, anthropic, gemini, or ollama")
+        raise ValueError("Provider must be openai, anthropic, gemini, ollama, or local")
     return provider
 
 

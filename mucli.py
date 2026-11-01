@@ -24,6 +24,7 @@ from utils.helpers import safe_markup
 from rich.markup import escape as esc
 from utils.logger import logger
 from providers.openai import OpenAIProvider
+from providers.local import LocalOpenAIProvider, DEFAULT_BASE_URL
 from mu.session.session import SessionManager, Session
 from mu.tools._dispatcher import execute_tool
 from mu.ui.rich_ui import RichUI
@@ -189,7 +190,8 @@ from mu.cli.display import (  # noqa: F401
 )
 
 def init_provider(
-    provider_name, model_name, ollama_host=None, ollama_mode=None, ollama_api_key=None
+    provider_name, model_name, ollama_host=None, ollama_mode=None, ollama_api_key=None,
+    local_base_url=None, local_api_key=None,
 ):
     # Init provider contextually
     if provider_name == "ollama":
@@ -199,6 +201,8 @@ def init_provider(
             mode=ollama_mode or "auto",
             api_key=ollama_api_key,
         )
+    elif provider_name == "local":
+        provider = LocalOpenAIProvider(model_name, base_url=local_base_url, api_key=local_api_key)
     elif provider_name == "gemini":
         provider = GeminiProvider(model_name=model_name)
     elif provider_name == "openai":
@@ -217,8 +221,10 @@ def select_provider_and_model(
     ollama_mode=None,
     ollama_api_key=None,
     allow_prompt=True,
+    local_base_url=None,
+    local_api_key=None,
 ):
-    providers = ["anthropic", "gemini", "ollama", "openai"]
+    providers = ["anthropic", "gemini", "ollama", "openai", "local"]
     provider_name = args_provider
 
     if provider_name not in providers:
@@ -229,6 +235,7 @@ def select_provider_and_model(
             [
                 ("gemini", "Gemini", "Google Gemini models"),
                 ("ollama", "Ollama", "Local daemon or Ollama cloud"),
+                ("local", "Local (OpenAI-compatible)", "Discover models on your own model server"),
                 ("openai", "OpenAI", "OpenAI API models"),
                 ("anthropic", "Anthropic", "Anthropic Claude models"),
             ],
@@ -257,12 +264,16 @@ def select_provider_and_model(
             default="local",
         )
 
+    if provider_name == "local" and allow_prompt:
+        local_base_url = Prompt.ask("Local server base URL", default=local_base_url or os.environ.get("LOCAL_LLM_BASE_URL") or DEFAULT_BASE_URL)
+
     provider = init_provider(
         provider_name,
         "",
         ollama_host,
         ollama_mode,
         ollama_api_key,
+        **({"local_base_url": local_base_url, "local_api_key": local_api_key} if provider_name == "local" else {}),
     )
     if not provider:
         raise ValueError(f"Unknown provider: {provider_name}")
@@ -566,7 +577,16 @@ def _delete_session_flow(session_manager, sessions):
     _safe_delete_session(session_manager, target)
 
 
+def local_provider_settings(variables, args=None):
+    url = getattr(args, "local_base_url", None) or variables.get("local_base_url")
+    key = variables.get("local_api_key")
+    return {k: v for k, v in {"local_base_url": url, "local_api_key": key}.items() if v}
+
+
 def sync_provider_settings(session):
+    if isinstance(session.provider, LocalOpenAIProvider):
+        session.provider.apply_session_variables(session.variables)
+        return
     if session.provider is not None and not isinstance(session.provider, OllamaProvider):
         # Other providers read provider-scoped knobs (e.g. openai_xhigh_models,
         # openai_prompt_cache_retention) from the session's variables.
@@ -632,6 +652,7 @@ def build_session(args, ui, allow_prompt=True):
                     ollama_host=ollama_host,
                     ollama_mode=ollama_mode,
                     ollama_api_key=ollama_api_key,
+                    **local_provider_settings(session_manager.variables, args),
                 )
             else:
                 provider = select_provider_and_model(
@@ -640,6 +661,7 @@ def build_session(args, ui, allow_prompt=True):
                     ollama_host=ollama_host,
                     ollama_mode=ollama_mode,
                     ollama_api_key=ollama_api_key,
+                    **local_provider_settings(session_manager.variables, args),
                     allow_prompt=allow_prompt,
                 )
                 session_manager.provider_config = {
@@ -654,6 +676,7 @@ def build_session(args, ui, allow_prompt=True):
                 ollama_host=ollama_host,
                 ollama_mode=ollama_mode,
                 ollama_api_key=ollama_api_key,
+                **local_provider_settings(session_manager.variables, args),
                 allow_prompt=allow_prompt,
             )
             session_manager.new_session(
@@ -677,6 +700,7 @@ def build_session(args, ui, allow_prompt=True):
                     ollama_host=ollama_host,
                     ollama_mode=ollama_mode,
                     ollama_api_key=ollama_api_key,
+                    **local_provider_settings(session_manager.variables, args),
                 )
                 if provider is None:
                     raise ValueError(f"Unknown provider: {provider_name}")
@@ -687,6 +711,7 @@ def build_session(args, ui, allow_prompt=True):
                     ollama_host=ollama_host,
                     ollama_mode=ollama_mode,
                     ollama_api_key=ollama_api_key,
+                    **local_provider_settings(session_manager.variables, args),
                     allow_prompt=allow_prompt,
                 )
             session_manager.provider_config = {
@@ -701,11 +726,13 @@ def build_session(args, ui, allow_prompt=True):
                 ollama_host=ollama_host,
                 ollama_mode=ollama_mode,
                 ollama_api_key=ollama_api_key,
+                **local_provider_settings(session_manager.variables, args),
             )
         elif provider_name and model_name:
             provider = init_provider(
                 provider_name, model_name, ollama_host=ollama_host,
                 ollama_mode=ollama_mode, ollama_api_key=ollama_api_key,
+                **local_provider_settings(session_manager.variables, args),
             )
 
         if not provider:
@@ -722,6 +749,12 @@ def build_session(args, ui, allow_prompt=True):
         ui=ui,
         debug=args.debug,
     )
+
+    if provider.name == "local":
+        if created_new_session and provider._client.api_key != "local":
+            session.variables["local_api_key"] = provider._client.api_key
+        session.variables["local_base_url"] = provider.BASE_URL
+        session.session_manager.save_history(session.folder_context)
 
     if created_new_session and provider.name == "ollama":
         selected_ollama_mode = getattr(provider, "_mu_ollama_mode", None)
@@ -939,10 +972,11 @@ def main():
 
     parser = argparse.ArgumentParser(description="Interactive AI CLI")
     parser.add_argument("--model", default=None, help="Default model")
+    parser.add_argument("--local-base-url", help="Local OpenAI-compatible server URL (default: http://127.0.0.1:8080/v1)")
     parser.add_argument(
         "--provider",
         default=None,
-        choices=["anthropic", "gemini", "ollama", "openai"],
+        choices=["anthropic", "gemini", "ollama", "openai", "local"],
         help="LLM provider to use",
     )
     parser.add_argument(

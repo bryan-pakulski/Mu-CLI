@@ -53,3 +53,15 @@ it('replays a queued offline switch as POST', async () => {
   expect(request.method).toBe('POST');
   expect(request.body).toMatchObject({ provider: 'openai', model: 'gpt-6' });
 });
+
+
+it('discovers and switches a local endpoint without putting its key in the URL', async () => {
+  await providersApi.discoverLocal('http://127.0.0.1:8080/v1', 'local-secret');
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(String(url)).toContain('/api/providers/local/discover');
+  expect(String(url)).not.toContain('local-secret');
+  expect(init.method).toBe('POST');
+  expect(JSON.parse(init.body)).toEqual({local_base_url:'http://127.0.0.1:8080/v1',local_api_key:'local-secret'});
+  await providersApi.switch('local', 'glm-5.3-flash', undefined, undefined, undefined, 'http://127.0.0.1:8080/v1', 'local-secret');
+  expect(lastSwitchRequest().body).toMatchObject({provider:'local', model:'glm-5.3-flash', local_base_url:'http://127.0.0.1:8080/v1',local_api_key:'local-secret'});
+});

@@ -1604,6 +1604,7 @@ def run_turn(session, text, *, origin="user"):
                             "type": "tool_call",
                             "tool_name": part.tool_name,
                             "tool_args": part.tool_args,
+                            "tool_call_id": part.tool_call_id,
                             "thought_signature": part.thought_signature,
                         }
                     )
@@ -2860,6 +2861,7 @@ def run_turn(session, text, *, origin="user"):
                 tool_result_part = {
                     "type": "tool_result",
                     "tool_name": part.tool_name,
+                    "tool_call_id": part.tool_call_id,
                     "tool_result": result,
                     "cache_key": cache_key,
                 }

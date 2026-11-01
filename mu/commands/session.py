@@ -175,7 +175,7 @@ def _new_session(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
 
     if allow_prompt:
         try:
-            from mucli import select_provider_and_model
+            from mucli import select_provider_and_model, local_provider_settings
 
             ollama_host = session.variables.get("ollama_host")
             new_provider = select_provider_and_model(
@@ -187,6 +187,7 @@ def _new_session(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
                 ollama_mode=None,
                 ollama_api_key=session.variables.get("ollama_api_key") or None,
                 allow_prompt=allow_prompt,
+                **local_provider_settings(session.variables),
             )
             session.provider = new_provider
         except ImportError:
@@ -200,6 +201,11 @@ def _new_session(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
         session.provider.model_name,
         session_type=session_type,
     )
+    if session.provider.name == "local":
+        if session.provider._client.api_key != "local":
+            session.variables["local_api_key"] = session.provider._client.api_key
+        session.variables["local_base_url"] = session.provider.BASE_URL
+        session.session_manager.save_history(session.folder_context)
     if session.provider.name == "ollama" and selected_ollama_mode:
         session.variables["ollama_mode"] = selected_ollama_mode
         if selected_ollama_mode == "local":

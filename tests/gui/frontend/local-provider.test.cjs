@@ -1,0 +1,37 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
+const { JSDOM } = require('jsdom');
+
+test('local picker discovers via POST, shows errors, refreshes and switches with its endpoint', async t => {
+  const dom = new JSDOM('', {url:'http://localhost',runScripts:'outside-only',pretendToBeVisual:true});
+  const {window} = dom;
+  t.after(() => window.close());
+  await new Promise(resolve => window.addEventListener('load', resolve));
+  const stores = new Map();
+  window.Alpine = {store(name,value) {if(value !== undefined)stores.set(name,value);return stores.get(name);}};
+  const requests=[];
+  let discovery={models:['glm-5.3-flash']};
+  window.fetch=async (url,options={})=>{requests.push({url,options});return {ok:true,json:async()=>url.includes('/switch')?{model:'glm-5.3-flash'}:discovery};};
+  window.eval(readFileSync(resolve(__dirname,'../../../mu/gui/static/js/app.js'),'utf8'));
+  window.document.dispatchEvent(new window.Event('alpine:init'));
+  const picker=stores.get('inspector');
+  stores.set('toast',{show(){}}); stores.set('effort',{load(){}});
+  picker.currentProvider='local'; picker.localBaseUrl='http://localhost:8080/v1';picker.localApiKey='local-secret';
+  await picker.loadModels('local');
+  assert.deepEqual(Array.from(picker.models),['glm-5.3-flash']);
+  assert.equal(requests[0].url,'/api/providers/local/discover');
+  assert.equal(requests[0].options.method,'POST');
+  assert.equal(JSON.parse(requests[0].options.body).local_api_key,'local-secret');
+  discovery={models:[],error:'Server stopped'};
+  await picker.loadModels('local');
+  assert.equal(picker.models.length,0);assert.equal(picker.modelError,'Server stopped');
+  discovery={models:['glm-5.3-flash','second-model']};
+  await picker.loadModels('local');
+  assert.equal(picker.models.length,2);assert.equal(picker.modelError,'');
+  picker.currentModel='glm-5.3-flash';
+  await picker.onModelChange();
+  const request=requests.find(r=>r.url==='/api/providers/switch');
+  assert.deepEqual(JSON.parse(request.options.body),{provider:'local',model:'glm-5.3-flash',local_base_url:'http://localhost:8080/v1',local_api_key:'local-secret'});
+});

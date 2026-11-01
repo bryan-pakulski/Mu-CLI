@@ -2,6 +2,7 @@ import { api } from './client';
 
 export interface ProviderInfo {
   name: string;
+  label?: string;
   configured: boolean;
   requires: string;
   cloud_key_set?: boolean;
@@ -11,6 +12,8 @@ export interface CurrentProvider {
   provider: string | null;
   model: string | null;
   ollama_api_key_set: boolean;
+  local_base_url?: string;
+  local_api_key_set?: boolean;
   /** Session effort for agent turns; "" = provider default. */
   effort?: string;
   /** Provider-neutral levels the server accepts (mapped per provider). */
@@ -62,9 +65,11 @@ export const providersApi = {
     api.get<{ models: string[]; error?: string }>(`/api/providers/${encodeURIComponent(name)}/models`, {
       query: { ollama_mode: ollamaMode, ollama_api_key: ollamaApiKey },
     }),
+  discoverLocal: (baseUrl: string, apiKey?: string) => api.post<{ models: string[]; error?: string }>('/api/providers/local/discover', {local_base_url: baseUrl, local_api_key: apiKey || undefined}),
   getCurrent: () => api.get<CurrentProvider>('/api/providers/current'),
-  switch: (provider: string, model: string, ollamaHost?: string, ollamaMode?: string, ollamaApiKey?: string) =>
+  switch: (provider: string, model: string, ollamaHost?: string, ollamaMode?: string, ollamaApiKey?: string, localBaseUrl?: string, localApiKey?: string) =>
     api.post<Record<string, unknown>>('/api/providers/switch', {
       provider, model, ollama_host: ollamaHost, ollama_mode: ollamaMode, ollama_api_key: ollamaApiKey,
+      local_base_url: localBaseUrl, local_api_key: localApiKey || undefined,
     }),
 };

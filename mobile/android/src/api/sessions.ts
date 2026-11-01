@@ -174,6 +174,8 @@ export interface CreateSessionOptions {
   ollamaMode?: 'local' | 'cloud';
   ollamaHost?: string;
   ollamaApiKey?: string;
+  localBaseUrl?: string;
+  localApiKey?: string;
   container?: ContainerCreateOptions;
   /** Create the workspace folder on the host when it does not exist yet (instead of a 400). */
   createWorkspace?: boolean;
@@ -229,6 +231,8 @@ export const sessionsApi = {
       session_type: options?.sessionType || 'workspace',
       workspace,
       create_workspace: options?.createWorkspace || undefined,
+      local_base_url: options?.localBaseUrl,
+      local_api_key: options?.localApiKey,
       ollama_mode: options?.ollamaMode,
       ollama_host: options?.ollamaHost,
       ollama_api_key: options?.ollamaApiKey,

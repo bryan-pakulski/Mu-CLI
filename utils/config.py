@@ -158,6 +158,11 @@ VARIABLE_SCHEMA = {
         "type": str,
         "default": "workspace",
     },  # chat | workspace | container
+    "local_base_url": {"type": str, "default": ""},
+    "local_api_key": {"type": str, "default": ""},
+    "local_request_timeout": {"type": float, "default": 900.0},
+    "local_context_window": {"type": int, "default": 0},  # 0 uses discovery, then a conservative 4096.
+    "local_max_tokens": {"type": int, "default": 2048},
     "ollama_host": {
         "type": str,
         "default": "",

@@ -604,6 +604,14 @@ def estimate_model_cost(
         })
         return base
 
+    if provider_name == "local":
+        base.update({"pricing_key": model, "billing": "local", "source": "local",
+                     "api_cost_usd": 0.0, "rates": {},
+                     "cost_components": {key: 0.0 for key in
+                         ("input_usd", "uncached_input_usd", "cached_input_usd", "output_usd", "total_usd")},
+                     "note": "Self-hosted endpoint; host compute is excluded."})
+        return base
+
     pricing = _resolve(provider_name, model)
 
     if provider_name == "ollama":

@@ -1,19 +1,23 @@
 // Provider and model (More → Provider and model): the model for the active session. Offline
 // switches join the outbound queue and replay on reconnect (G5 §3.6).
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { queueIfOffline, useConnectionStore } from '../store/connection';
 import { providersApi, type ProviderInfo } from '../api/providers';
 import { spacing } from '../theme/tokens';
-import { EmptyState, ErrorState, PageHeader, Row, Rows, Skeleton, Text, useToast } from '../ui';
+import { EmptyState, ErrorState, PageHeader, Row, Rows, Skeleton, Text, TextField, Button, useToast } from '../ui';
 
 export function ProvidersScreen() {
   const navigation = useNavigation<any>();
   const toast = useToast();
   const { activeProvider, activeModel, setActiveProviderModel } = useConnectionStore();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const modelRequest = useRef(0);
+  const [localUrl, setLocalUrl] = useState('http://127.0.0.1:8080/v1');
+  const [localKey, setLocalKey] = useState('');
+  const [localKeySet, setLocalKeySet] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [provider, setProvider] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
@@ -22,15 +26,20 @@ export function ProvidersScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadModels = useCallback(async (name: string) => {
+  const loadModels = useCallback(async (name: string, baseUrl?: string, key?: string) => {
+    const request = ++modelRequest.current;
     setLoadingModels(true);
     try {
-      setModels((await providersApi.listModels(name)).models || []);
+      const result = name === 'local' && baseUrl ? await providersApi.discoverLocal(baseUrl, key) : await providersApi.listModels(name);
+      if (request !== modelRequest.current) return;
+      setModels(result.models || []);
+      if (result.error) toast(result.error, 'danger');
     } catch (e) {
+      if (request !== modelRequest.current) return;
       setModels([]);
       toast(`Couldn't load models: ${e instanceof Error ? e.message : String(e)}`, 'danger');
     } finally {
-      setLoadingModels(false);
+      if (request === modelRequest.current) setLoadingModels(false);
     }
   }, [toast]);
 
@@ -39,6 +48,9 @@ export function ProvidersScreen() {
       setError(null);
       const [list, current] = await Promise.all([providersApi.list(), providersApi.getCurrent()]);
       setProviders(list.providers);
+      setLocalUrl(current.local_base_url || 'http://127.0.0.1:8080/v1');
+      setLocalKeySet(!!current.local_api_key_set);
+      setLocalKey('');
       setProvider(current.provider || null);
       setModel(current.model || null);
       if (current.provider) void loadModels(current.provider);
@@ -57,19 +69,20 @@ export function ProvidersScreen() {
     setProvider(name);
     setModel(null);
     setModels([]);
-    void loadModels(name);
+    void loadModels(name, name === 'local' ? localUrl : undefined, localKey);
   };
 
   const chooseModel = async (name: string) => {
     if (!provider) return;
     setModel(name);
-    if (await queueIfOffline('provider_switch', { provider, model: name })) {
+    if (provider !== 'local' && await queueIfOffline('provider_switch', { provider, model: name })) {
       setActiveProviderModel(provider, name);
       toast(`Offline: switching to ${provider} · ${name} when reconnected`, 'attention');
       return;
     }
     try {
-      await providersApi.switch(provider, name);
+      if (provider === 'local') await providersApi.switch(provider, name, undefined, undefined, undefined, localUrl, localKey);
+      else await providersApi.switch(provider, name);
       setActiveProviderModel(provider, name);
       toast(`Now using ${provider} · ${name}`, 'ok');
     } catch (e) {
@@ -93,10 +106,17 @@ export function ProvidersScreen() {
         <Rows>
           {providers.map(p => (
             <Row key={p.name} testID={`provider-${p.name}`} selected={p.name === provider} status={p.name === provider ? 'done' : undefined}
-              title={p.name} sub={p.configured ? 'Ready' : `Needs ${p.requires || 'configuration'}`}
+              title={p.label || p.name} sub={p.configured ? 'Ready' : `Needs ${p.requires || 'configuration'}`}
               onPress={p.configured ? () => chooseProvider(p.name) : undefined} />
           ))}
         </Rows>
+        {provider === 'local' ? <>
+          <Text variant="label" tone="ink2">Local server URL</Text>
+          <TextField accessibilityLabel="Local server URL" value={localUrl} onChangeText={value => {setLocalUrl(value); modelRequest.current++; setLoadingModels(false); setModels([]); setModel(null);}} autoCapitalize="none" autoCorrect={false} />
+          <Text variant="xs" dim>Address on the computer running MuCLI.</Text>
+          <TextField accessibilityLabel="Local API key" value={localKey} onChangeText={setLocalKey} secureTextEntry placeholder={localKeySet ? 'Key set · enter to replace' : 'API key (optional)'} />
+          <Button title="Refresh models" onPress={() => void loadModels('local', localUrl, localKey)} />
+        </> : null}
         {provider ? (
           <>
             <Text variant="label" tone="ink2" accessibilityRole="header">Model</Text>

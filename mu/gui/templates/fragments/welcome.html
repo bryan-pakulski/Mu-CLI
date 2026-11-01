@@ -141,7 +141,7 @@
                         <select x-model="form.provider" @change="onProviderChange()">
                             <option value="">Select a provider</option>
                             <template x-for="p in providers" :key="p.name">
-                                <option :value="p.name" x-text="p.name + (p.configured ? '' : ' · unconfigured')"></option>
+                                <option :value="p.name" x-text="(p.label || p.name) + (p.configured ? '' : ' · unconfigured')"></option>
                             </template>
                         </select>
                     </label>
@@ -154,6 +154,16 @@
                         <input type="password" x-model="form.ollamaApiKey" @change="loadModels()"
                                :placeholder="form.ollamaKeySet ? 'key available — type to replace' : 'API key'" autocomplete="off">
                     </label>
+                    <div x-show="form.provider === 'local'" x-cloak>
+                        <label class="wizard-field w-field"><span>Server URL</span>
+                            <input type="url" x-model.trim="form.localBaseUrl" @change="loadModels()" placeholder="http://127.0.0.1:8080/v1">
+                            <small>Address on the machine running MuCLI.</small>
+                        </label>
+                        <label class="wizard-field w-field"><span>API key (optional)</span>
+                            <input type="password" x-model="form.localApiKey" @change="loadModels()" autocomplete="off" :placeholder="form.localKeySet ? 'key set — type to replace' : 'No key required'">
+                        </label>
+                        <button type="button" class="w-btn" @click="loadModels()" :disabled="loadingModels">Refresh models</button>
+                    </div>
                     <label class="wizard-field w-field"><span>Model</span>
                         <select x-model="form.model" x-show="models.length">
                             <option value="">Select a model</option>
@@ -323,7 +333,7 @@ function welcomeView() {
             return true;
         },
         resetForm() {
-            this.form = {name:'', sessionType:'workspace', provider:'', model:'', workspace:'', ollamaMode:'local', ollamaApiKey:'', ollamaKeySet:false,
+            this.form = {name:'', sessionType:'workspace', provider:'', model:'', workspace:'', ollamaMode:'local', ollamaApiKey:'', ollamaKeySet:false, localBaseUrl:'http://127.0.0.1:8080/v1', localApiKey:'', localKeySet:false,
                 containerSource:'new', existingContainer:'', containerName:'', templateName:'', dockerfile:(this.defaults && this.defaults.dockerfile)||'',
                 egressAllow:((this.defaults && this.defaults.egress_allow)||[]).join('\n'), egressDeny:((this.defaults && this.defaults.egress_deny)||[]).join('\n'), mounts:[],
                 gpuMode:'none', gpuSelection:'', devices:[], deviceHost:'', deviceTarget:'', devicePermissions:'rwm', devicePreset:''};
@@ -357,14 +367,17 @@ function welcomeView() {
         hardwareSummary(){ const gpu=this.form.gpuMode==='all'?'all GPUs':this.form.gpuMode==='selected'?`GPU ${this.form.gpuSelection||'selection required'}`:'no GPU'; return `${gpu} · ${this.form.devices.length} device${this.form.devices.length===1?'':'s'}`; },
         addDevice(){ const host=String(this.form.deviceHost||'').trim(); const target=String(this.form.deviceTarget||host).trim(); if(!host||!target)return; if(this.form.devices.some(x=>x.host_path===host||x.container_path===target))return; this.form.devices.push({host_path:host,container_path:target,permissions:this.form.devicePermissions||'rwm'}); this.form.deviceHost='';this.form.deviceTarget='';this.form.devicePreset=''; },
         addDevicePreset(){ if(!this.form.devicePreset)return; this.form.deviceHost=this.form.devicePreset;this.form.deviceTarget=this.form.devicePreset;this.addDevice(); },
-        async onProviderChange(){ this.form.model=''; if(this.form.provider==='ollama'){this.form.ollamaMode='local';this.form.ollamaApiKey='';} await this.loadModels(); },
+        async onProviderChange(){ this.form.model=''; if(this.form.provider==='local'){try {const d=await (await fetch('/api/providers/current')).json();this.form.localBaseUrl=d.local_base_url||'http://127.0.0.1:8080/v1';this.form.localKeySet=!!d.local_api_key_set;}catch(_){}} if(this.form.provider==='ollama'){this.form.ollamaMode='local';this.form.ollamaApiKey='';} await this.loadModels(); },
+        localConnection(){const body={local_base_url:this.form.localBaseUrl};if(this.form.localApiKey)body.local_api_key=this.form.localApiKey;return body;},
         async setOllamaMode(mode){ this.form.ollamaMode=mode; this.form.model=''; await this.loadModels(); },
+        modelRequest: 0,
         async loadModels(){
+            const request = ++this.modelRequest;
             this.models=[]; this.modelError=null; this.form.model=''; if(!this.form.provider)return;
             if(this.form.provider==='ollama'&&this.form.ollamaMode==='cloud'&&!this.form.ollamaApiKey&&!this.form.ollamaKeySet){this.modelError='Enter an Ollama cloud API key to list models.';return;}
             this.loadingModels=true;
-            try { let url=`/api/providers/${encodeURIComponent(this.form.provider)}/models`; if(this.form.provider==='ollama'){const q=new URLSearchParams({ollama_mode:this.form.ollamaMode}); if(this.form.ollamaApiKey)q.set('ollama_api_key',this.form.ollamaApiKey); url+=`?${q}`;} const r=await fetch(url); const d=await r.json(); this.models=d.models||[]; this.modelError=d.error||null; if(this.models.length)this.form.model=this.models[0]; }
-            catch(e){this.modelError=String(e);} finally{this.loadingModels=false;}
+            try { let url=`/api/providers/${encodeURIComponent(this.form.provider)}/models`; if(this.form.provider==='ollama'){const q=new URLSearchParams({ollama_mode:this.form.ollamaMode}); if(this.form.ollamaApiKey)q.set('ollama_api_key',this.form.ollamaApiKey); url+=`?${q}`;} const r=this.form.provider==='local' ? await fetch('/api/providers/local/discover', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.localConnection())}) : await fetch(url); const d=await r.json(); if(request !== this.modelRequest)return; this.models=d.models||[]; this.modelError=d.error||d.detail||null; if(this.models.length)this.form.model=this.models[0]; }
+            catch(e){if(request === this.modelRequest)this.modelError=String(e);} finally{if(request === this.modelRequest)this.loadingModels=false;}
         },
         async loadSession(name){
             this.error=null;
@@ -386,6 +399,7 @@ ${problem.text}`;
             // Compatibility marker used by integration checks: background_container: this.form.sessionType === "container"
             const body={name:this.form.name,provider:this.form.provider,model:this.form.model,activate:true,session_type:this.form.sessionType,background_container:this.form.sessionType==='container'};
             if(this.form.sessionType==='workspace'&&this.form.workspace)body.workspace=this.form.workspace;
+            if(this.form.provider==='local')Object.assign(body,this.localConnection());
             if(this.form.provider==='ollama'){body.ollama_mode=this.form.ollamaMode;body.ollama_host=this.form.ollamaMode==='cloud'?'https://ollama.com':'';if(this.form.ollamaApiKey)body.ollama_api_key=this.form.ollamaApiKey;}
             if(this.form.sessionType==='container'){
                 body.container_source=this.form.containerSource;

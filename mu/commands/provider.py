@@ -79,7 +79,7 @@ def model_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
 
 @command(
     "/provider",
-    help="Switch provider (openai|gemini|anthropic|ollama). Interactive picker if no arg.",
+    help="Switch provider (openai|gemini|anthropic|ollama|local). Interactive picker if no arg.",
 )
 def provider_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     arg = (args or "").strip()
@@ -88,7 +88,7 @@ def provider_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
             ok=False, message="Non-interactive mode requires /provider <name>."
         )
     try:
-        from mucli import print_splash, select_provider_and_model
+        from mucli import print_splash, select_provider_and_model, local_provider_settings, sync_provider_settings
 
         selecting_ollama = arg.lower() == "ollama" or (not arg and allow_prompt)
         ollama_host = session.variables.get("ollama_host")
@@ -100,6 +100,7 @@ def provider_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
             ollama_mode=ollama_mode,
             ollama_api_key=session.variables.get("ollama_api_key") or None,
             allow_prompt=allow_prompt,
+            **local_provider_settings(session.variables),
         )
         if session.provider.name == "ollama":
             mode = getattr(session.provider, "_mu_ollama_mode", None)
@@ -107,6 +108,9 @@ def provider_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
                 session.variables["ollama_mode"] = mode
                 if mode == "local":
                     session.variables["ollama_host"] = ""
+        if session.provider.name == "local":
+            session.variables["local_base_url"] = session.provider.BASE_URL
+        sync_provider_settings(session)
         session.session_manager.provider_config = {
             "provider": session.provider.name,
             "model": session.provider.model_name,

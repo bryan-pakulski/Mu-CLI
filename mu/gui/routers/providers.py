@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -15,7 +16,7 @@ from utils.model_pricing import (
 
 router = APIRouter()
 
-KNOWN_PROVIDERS: List[str] = ["openai", "gemini", "anthropic", "ollama"]
+KNOWN_PROVIDERS: List[str] = ["openai", "gemini", "anthropic", "ollama", "local"]
 
 
 def _safe_init(
@@ -24,8 +25,13 @@ def _safe_init(
     ollama_host: str | None = None,
     ollama_mode: str | None = None,
     ollama_api_key: str | None = None,
+    local_base_url: str | None = None,
+    local_api_key: str | None = None,
 ):
     try:
+        if name == "local":
+            from providers.local import LocalOpenAIProvider
+            return LocalOpenAIProvider(model_name, base_url=local_base_url, api_key=local_api_key)
         if name == "ollama":
             from providers.ollama import OllamaProvider, _resolve_host
 
@@ -74,6 +80,43 @@ class SwitchRequest(BaseModel):
     ollama_host: Optional[str] = None
     ollama_mode: Optional[str] = None
     ollama_api_key: Optional[str] = None
+    local_base_url: Optional[str] = None
+    local_api_key: Optional[str] = None
+
+
+class LocalDiscoveryRequest(BaseModel):
+    local_base_url: Optional[str] = None
+    local_api_key: Optional[str] = None
+
+
+def _local_settings(request, overrides=None):
+    session = request.app.state.session_by_name()
+    variables = getattr(session, "variables", {}) or {}
+    result = {key: variables.get(key) for key in ("local_base_url", "local_api_key")}
+    if overrides is not None:
+        result.update({key: value for key, value in overrides.model_dump().items()
+                       if key in result and value is not None})
+    return result
+
+
+async def _discover_local(settings):
+    from providers.local import LocalOpenAIProvider
+    try:
+        provider = LocalOpenAIProvider(**{"base_url": settings.get("local_base_url"),
+                                         "api_key": settings.get("local_api_key")})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    try:
+        models = await asyncio.to_thread(provider.get_available_models)
+        return {"models": models, "error": provider.discovery_error or None, "base_url": provider.BASE_URL}
+    finally:
+        provider._client.close()
+
+
+@router.post("/local/discover")
+async def discover_local(req: LocalDiscoveryRequest, request: Request):
+    # Keys travel in the request body, never a query string or response.
+    return await _discover_local(_local_settings(request, req))
 
 
 @router.get("")
@@ -105,6 +148,8 @@ async def list_providers() -> Dict[str, Any]:
                 "cloud_key_set": bool(os.environ.get("OLLAMA_API_KEY")),
                 "requires": "ollama daemon (OLLAMA_HOST optional) or OLLAMA_API_KEY for cloud",
             },
+            {"name": "local", "label": "Local (OpenAI-compatible)", "configured": True,
+             "requires": "OpenAI-compatible model server (default http://127.0.0.1:8080/v1)"},
         ]
     }
 
@@ -137,6 +182,8 @@ async def reset_model_pricing() -> Dict[str, Any]:
 async def list_models(name: str, request: Request) -> Dict[str, Any]:
     if name not in KNOWN_PROVIDERS:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {name}")
+    if name == "local":
+        return await _discover_local(_local_settings(request))
     overrides = _ollama_discovery_overrides(request) if name == "ollama" else {}
     provider = _safe_init(
         name,
@@ -159,8 +206,13 @@ async def list_models(name: str, request: Request) -> Dict[str, Any]:
 @router.get("/current")
 async def current_provider(request: Request) -> Dict[str, Any]:
     session = request.app.state.session_by_name()
+    from providers.local import DEFAULT_BASE_URL
+    settings = _local_settings(request)
+    local = {"local_base_url": settings.get("local_base_url") or os.environ.get("LOCAL_LLM_BASE_URL") or DEFAULT_BASE_URL,
+             "local_api_key_set": bool(settings.get("local_api_key") or os.environ.get("LOCAL_LLM_API_KEY"))}
     if session is None:
         return {
+            **local,
             "provider": None,
             "model": None,
             "ollama_api_key_set": bool(os.environ.get("OLLAMA_API_KEY")),
@@ -168,6 +220,7 @@ async def current_provider(request: Request) -> Dict[str, Any]:
     cfg = session.session_manager.provider_config
     from mu.agent.retry import EFFORT_LEVELS
     return {
+        **local,
         "provider": cfg.get("provider"),
         "model": cfg.get("model"),
         "ollama_api_key_set": bool(
@@ -192,12 +245,24 @@ async def switch_provider(req: SwitchRequest, request: Request) -> Dict[str, Any
     if session is None:
         raise HTTPException(status_code=409, detail="No active session to switch.")
 
+    if not req.model.strip():
+        raise HTTPException(status_code=400, detail="Select a model.")
+    local = _local_settings(request, req) if req.provider == "local" else {}
+    if local:
+        from providers.local import normalize_base_url
+        try:
+            if local.get("local_base_url"):
+                local["local_base_url"] = normalize_base_url(local["local_base_url"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
     provider = _safe_init(
         req.provider,
         req.model,
         req.ollama_host,
         req.ollama_mode,
         req.ollama_api_key,
+        **local,
     )
     if provider is None:
         raise HTTPException(
@@ -210,6 +275,10 @@ async def switch_provider(req: SwitchRequest, request: Request) -> Dict[str, Any
         "provider": req.provider,
         "model": req.model,
     }
+    if req.provider == "local":
+        session.variables.update({key: value for key, value in local.items() if value is not None})
+        session.variables["local_base_url"] = provider.BASE_URL
+        provider.apply_session_variables(session.variables)
     if req.provider == "ollama":
         if req.ollama_mode:
             session.variables["ollama_mode"] = req.ollama_mode

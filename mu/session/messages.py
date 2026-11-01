@@ -308,6 +308,7 @@ def build_messages_from_history(
                         type="tool_call",
                         tool_name=p["tool_name"],
                         tool_args=tool_args,
+                        tool_call_id=p.get("tool_call_id"),
                         thought_signature=p.get("thought_signature"),
                     )
                 )
@@ -336,6 +337,7 @@ def build_messages_from_history(
                         MessagePart(
                             type="tool_result",
                             tool_name=p.get("tool_name", "tool"),
+                            tool_call_id=p.get("tool_call_id"),
                             tool_result=_compact_tool_result_ref({**p, "cache_key": cache_key}),
                             media_inputs=media_inputs,
                         )
@@ -345,6 +347,7 @@ def build_messages_from_history(
                         MessagePart(
                             type="tool_result",
                             tool_name=p.get("tool_name", "tool"),
+                            tool_call_id=p.get("tool_call_id"),
                             tool_result=_lean_tool_result(
                                 p.get("tool_result", "")
                             ),

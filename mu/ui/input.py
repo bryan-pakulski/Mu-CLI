@@ -381,7 +381,7 @@ class InputHandler:
         model_completer = DynamicModelCompleter(self)
 
         provider_completer = NestedCompleter.from_nested_dict(
-            {"anthropic": None, "gemini": None, "ollama": None, "openai": None}
+            {"anthropic": None, "gemini": None, "ollama": None, "openai": None, "local": None}
         )
 
         tool_command_completer = NestedCompleter.from_nested_dict(

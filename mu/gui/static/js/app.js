@@ -2667,7 +2667,7 @@ ${problem.text}`, "error", 16000);
                                               dynamic: { "": "path_file" } },
                                 } },
             "/model":         { dynamic: { "": "models" } },
-            "/provider":      { subs: ["anthropic", "gemini", "ollama", "openai"] },
+            "/provider":      { subs: ["anthropic", "gemini", "ollama", "openai", "local"] },
             "/ollama":        { subs: ["status", "models", "options", "pull"] },
             "/set":           { subs: ["layer"], dynamic: { "": "variables", layer: "layer_ids" } },
             "/get":           { dynamic: { "": "variables", layer: "layer_ids" },
@@ -4864,6 +4864,12 @@ ${problem.text}`, "error", 16000);
         ollamaMode: "local",
         ollamaApiKey: "",
         ollamaKeySet: false,
+        localBaseUrl: "http://127.0.0.1:8080/v1",
+        localApiKey: "",
+        localKeySet: false,
+        modelError: "",
+        loadingModels: false,
+        modelRequest: 0,
 
         async loadVariables() {
             const r = await fetch("/api/variables");
@@ -4988,6 +4994,9 @@ ${problem.text}`, "error", 16000);
             this.currentProvider = d.provider || "";
             this.currentModel = d.model || "";
             this.ollamaKeySet = !!d.ollama_api_key_set;
+            this.localBaseUrl = d.local_base_url || "http://127.0.0.1:8080/v1";
+            this.localKeySet = !!d.local_api_key_set;
+            this.localApiKey = "";
             if (this.currentProvider === "ollama") {
                 await this._loadOllamaState();
             }
@@ -5033,13 +5042,29 @@ ${problem.text}`, "error", 16000);
             }
             return `?${parts.join("&")}`;
         },
+        localConnection() {
+            const body = { local_base_url: this.localBaseUrl };
+            if (this.localApiKey) body.local_api_key = this.localApiKey;
+            return body;
+        },
         async loadModels(provider) {
-            const suffix = provider === "ollama" ? this._ollamaDiscoveryParams() : "";
-            const r = await fetch(
-                `/api/providers/${encodeURIComponent(provider)}/models${suffix}`,
-            );
-            const d = await r.json();
-            this.models = d.models || [];
+            const request = ++this.modelRequest;
+            this.loadingModels = true;
+            this.modelError = "";
+            try {
+                const suffix = provider === "ollama" ? this._ollamaDiscoveryParams() : "";
+                const r = provider === "local"
+                    ? await fetch("/api/providers/local/discover", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(this.localConnection())})
+                    : await fetch(`/api/providers/${encodeURIComponent(provider)}/models${suffix}`);
+                const d = await r.json();
+                if (request !== this.modelRequest) return;
+                this.models = d.models || [];
+                this.modelError = d.error || d.detail || (!r.ok ? "Model discovery failed." : "");
+            } catch (_) {
+                if (request === this.modelRequest) { this.models = []; this.modelError = "Unable to reach the model discovery service."; }
+            } finally {
+                if (request === this.modelRequest) this.loadingModels = false;
+            }
         },
         async onProviderChange() {
             // provider dropdown changed — reload models for new provider
@@ -5116,6 +5141,7 @@ ${problem.text}`, "error", 16000);
                 provider: this.currentProvider,
                 model: this.currentModel,
             };
+            if (this.currentProvider === "local") Object.assign(body, this.localConnection());
             // For ollama, carry the chosen mode + key (and the derived
             // host) so the hot-swapped provider starts on the right
             // endpoint with the right auth, and they persist for reload.

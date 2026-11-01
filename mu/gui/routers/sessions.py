@@ -803,21 +803,25 @@ def _busy_session_names(request: Request) -> set[str]:
     return out
 
 
-def _ollama_seed_vars(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Pull the ollama mode/host/key the GUI sent in a create/load
-    payload, if any. Empty/absent values are dropped so defaults stand."""
+def _provider_seed_vars(payload: Dict[str, Any], inherited=None) -> Dict[str, Any]:
+    """Persist the selected local connection, including an existing masked key."""
     out: Dict[str, Any] = {}
-    for key in ("ollama_mode", "ollama_host", "ollama_api_key"):
-        val = payload.get(key)
+    keys = ("local_base_url", "local_api_key") if payload.get("provider") == "local" else ("ollama_mode", "ollama_host", "ollama_api_key")
+    for key in keys:
+        val = payload.get(key, (inherited or {}).get(key))
         if val is not None and str(val).strip() != "":
             out[key] = str(val).strip()
+    if out.get("local_base_url"):
+        from providers.local import normalize_base_url
+        try:
+            out["local_base_url"] = normalize_base_url(out["local_base_url"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
     return out
 
 
-def _apply_ollama_vars(session, ollama_vars: Dict[str, Any]) -> None:
-    """Seed ollama mode/host/key onto a freshly-built session's variables
-    and re-sync the running provider so a cloud session created from the
-    welcome modal starts on ollama.com with its key."""
+def _apply_provider_vars(session, ollama_vars: Dict[str, Any]) -> None:
+    """Apply and persist connection variables after a session has loaded."""
     if not ollama_vars or session is None:
         return
     session.variables.update(ollama_vars)
@@ -1634,7 +1638,9 @@ async def create_session(request: Request, payload: Dict[str, Any]):
             workspace = os.path.normpath(workspace)
             create_workspace = True
 
-    ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
+    active = request.app.state.session_by_name() if provider == "local" else None
+    inherited = getattr(active, "variables", {}) if active else {}
+    ollama_vars = _provider_seed_vars(payload, inherited) if provider in {"ollama", "local"} else {}
     variables: Dict[str, Any] = {**ollama_vars, "session_type": session_type}
     if session_type == "container":
         variables.update(
@@ -1981,9 +1987,9 @@ async def load_session(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     session = state.session_by_name(name)
-    ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
+    ollama_vars = _provider_seed_vars(payload) if provider in {"ollama", "local"} else {}
     if ollama_vars:
-        _apply_ollama_vars(session, ollama_vars)
+        _apply_provider_vars(session, ollama_vars)
     if session is not None:
         session.session_manager.container_config = dict(container_config or {})
         session.variables["session_type"] = session_type

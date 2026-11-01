@@ -12,6 +12,7 @@ Terminal-first multi-provider coding assistant.
   - `OLLAMA_API_KEY` for the hosted Ollama service (optional — self-hosted
     Ollama only needs `OLLAMA_HOST` and a running instance, below)
   - running Ollama instance for local models
+  - an OpenAI-compatible local server via the `local` provider (no cloud API key required)
 
 ## Installation
 ```bash
@@ -33,6 +34,41 @@ Run `mucli` to start. You'll get a session picker — choose `[+ New Session]` (
 /workspace folder /path/to/your/repo
 explain how authentication works in this codebase
 ```
+
+## Local OpenAI-compatible models
+
+Select **Local (OpenAI-compatible)** in the terminal provider picker, the browser's
+new-session/model picker, or Android's provider screen. Enter your server's API
+base URL (default `http://127.0.0.1:8080/v1`), optionally enter its API key, then
+refresh models and select a model advertised by `GET /v1/models`. The address is
+relative to the computer running MuCLI, including when using a phone or remote browser.
+Discovery queries the selected server; it does not scan network hosts or download weights.
+
+```bash
+# The optimized GLM runner, in another terminal:
+cd ~/dev/projects/ai/model-recompiler
+./serve
+
+# Connect MuCLI:
+cd ~/dev/projects/ai/Mu-CLI
+python3 mucli.py --provider local --model glm-5.3-flash --session local-glm
+# A different server:
+python3 mucli.py --provider local --local-base-url http://127.0.0.1:1234/v1
+```
+
+Endpoint and optional key are saved with the session. `LOCAL_LLM_BASE_URL` and
+`LOCAL_LLM_API_KEY` supply defaults; cloud `OPENAI_*` settings are independent.
+The adapter uses Chat Completions with streaming text, reasoning and function tools.
+It never redirects failed discovery to cloud models. Model support for tools varies.
+
+Advertised `context_window` (or `max_model_len`) bounds MuCLI's existing context
+budget automatically. With this runner, the GLM window is 102,400 tokens. A server
+without context metadata defaults conservatively to 4,096; use
+`/set local_context_window <tokens>` for a verified limit. An override cannot exceed
+an advertised limit. `local_max_tokens` defaults to 2,048, and
+`local_request_timeout` to 900 seconds. The existing tokenizer drift and response
+reserve rules still apply. This initial adapter supports text inputs; it does not
+use the Responses API or assume multimodal support from a model's name.
 
 ## Neovim integration
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { ProviderInfo, providersApi } from '../api/providers';
 import { containersApi, ManagedContainer, ContainerTemplateSummary } from '../api/containers';
@@ -41,6 +41,10 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
   const [provider, setProvider] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState('');
+  const [localUrl, setLocalUrl] = useState('http://127.0.0.1:8080/v1');
+  const [localKey, setLocalKey] = useState('');
+  const [localKeySet, setLocalKeySet] = useState(false);
+  const modelRequest = useRef(0);
   const [ollamaMode, setOllamaMode] = useState<'local' | 'cloud'>('local');
   const [ollamaApiKey, setOllamaApiKey] = useState('');
   const [ollamaKeySet, setOllamaKeySet] = useState(false);
@@ -71,6 +75,8 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
 
   const reset = useCallback(() => {
     setStep(1); setSessionType('workspace'); setName(''); setWorkspace(''); setProvider(''); setModels([]); setModel('');
+    setLocalUrl('http://127.0.0.1:8080/v1'); setLocalKey(''); setLocalKeySet(false);
+    modelRequest.current++;
     setOllamaMode('local'); setOllamaApiKey(''); setContainerSource('new'); setExistingContainer(''); setContainerName('');
     setTemplateName(''); setMounts([]); setMountHost(''); setMountTarget('/workspace/project'); setMountMode('rw');
     setHardware(null); setGpuRequest(''); setDevices([]); setContainerEditor(null);
@@ -105,21 +111,32 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
     loadInitial();
   }, [loadInitial, reset, visible]);
 
+  useEffect(() => {
+    if (!visible || provider !== 'local') return;
+    let cancelled = false;
+    providersApi.getCurrent().then(current => {
+      if (!cancelled) { setLocalUrl(current.local_base_url || 'http://127.0.0.1:8080/v1'); setLocalKeySet(!!current.local_api_key_set); }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [provider, visible]);
+
   const loadModels = useCallback(async () => {
+    const request = ++modelRequest.current;
     if (!provider) return;
     if (provider === 'ollama' && ollamaMode === 'cloud' && !ollamaApiKey && !ollamaKeySet) {
       setModels([]); setModel(''); return;
     }
     setLoadingModels(true); setError(null);
     try {
-      const response = await providersApi.listModels(provider, provider === 'ollama' ? ollamaMode : undefined, provider === 'ollama' && ollamaMode === 'cloud' ? ollamaApiKey : undefined);
+      const response = provider === 'local' ? await providersApi.discoverLocal(localUrl, localKey) : await providersApi.listModels(provider, provider === 'ollama' ? ollamaMode : undefined, provider === 'ollama' && ollamaMode === 'cloud' ? ollamaApiKey : undefined);
+      if (request !== modelRequest.current) return;
       setModels(response.models || []);
       setModel(response.models?.[0] || '');
       if (response.error) setError(response.error);
     } catch (cause) {
-      setError(`Model discovery failed: ${String(cause)}`);
-    } finally { setLoadingModels(false); }
-  }, [ollamaApiKey, ollamaKeySet, ollamaMode, provider]);
+      if (request === modelRequest.current) setError(`Model discovery failed: ${String(cause)}`);
+    } finally { if (request === modelRequest.current) setLoadingModels(false); }
+  }, [ollamaApiKey, ollamaKeySet, ollamaMode, provider, localUrl, localKey]);
 
   useEffect(() => { if (visible && provider) loadModels(); }, [loadModels, provider, visible]);
   useEffect(() => { if (sessionType === 'container' && name.trim() && !containerName) setContainerName(`mucli-${name.trim()}`); }, [containerName, name, sessionType]);
@@ -168,6 +185,8 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
         sessionType,
         // A workspace folder that doesn't exist yet is created by the server.
         createWorkspace: sessionType === 'workspace' && Boolean(workspace.trim()),
+        localBaseUrl: provider === 'local' ? localUrl : undefined,
+        localApiKey: provider === 'local' ? localKey || undefined : undefined,
         ollamaMode: provider === 'ollama' ? ollamaMode : undefined,
         ollamaApiKey: provider === 'ollama' ? ollamaApiKey.trim() || undefined : undefined,
         container: sessionType === 'container' ? {
@@ -218,9 +237,10 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
           {step === 2 ? <>
             <Text variant="sm" dim style={styles.intro}>Select the provider and model for this session.</Text>
             <FieldLabel label="Provider" />
-            <View style={styles.choiceList}>{providers.map(item => <Pressable key={item.name} onPress={() => setProvider(item.name)} style={[styles.choiceRow, { backgroundColor: provider === item.name ? colors.accent.wash : colors.raised, borderColor: provider === item.name ? colors.accent.ink : colors.hairline }]}><Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{item.name}</Text><Text variant="xs" dim>{item.configured ? 'configured' : 'unconfigured'}</Text></Pressable>)}</View>
+            <View style={styles.choiceList}>{providers.map(item => <Pressable key={item.name} onPress={() => setProvider(item.name)} style={[styles.choiceRow, { backgroundColor: provider === item.name ? colors.accent.wash : colors.raised, borderColor: provider === item.name ? colors.accent.ink : colors.hairline }]}><Text variant="sm" style={{ fontWeight: fontWeights.semibold }}>{item.label || item.name}</Text><Text variant="xs" dim>{item.configured ? 'configured' : 'unconfigured'}</Text></Pressable>)}</View>
             {provider === 'ollama' ? <View style={styles.segment}><Segment label="Local" selected={ollamaMode === 'local'} onPress={() => setOllamaMode('local')} /><Segment label="Cloud" selected={ollamaMode === 'cloud'} onPress={() => setOllamaMode('cloud')} /></View> : null}
             {provider === 'ollama' && ollamaMode === 'cloud' ? <><FieldLabel label="Ollama cloud API key" optional={ollamaKeySet} /><TextField value={ollamaApiKey} onChangeText={setOllamaApiKey} onBlur={loadModels} secureTextEntry placeholder={ollamaKeySet ? 'Key available · enter to replace' : 'API key'} style={[styles.input]} /></> : null}
+            {provider === 'local' ? <><FieldLabel label="Local server URL" /><TextField value={localUrl} onChangeText={setLocalUrl} autoCapitalize="none" autoCorrect={false} style={[styles.input]} /><Text variant="xs" dim>Address on the computer running MuCLI.</Text><FieldLabel label="Local API key" optional /><TextField value={localKey} onChangeText={setLocalKey} secureTextEntry placeholder={localKeySet ? 'Key set · enter to replace' : 'API key (optional)'} style={[styles.input]} /><Pressable onPress={loadModels}><Text>Refresh models</Text></Pressable></> : null}
             <FieldLabel label="Model" />
             {loadingModels ? <View style={{ marginVertical: spacing.base }}><InkDrop /></View> : <View style={styles.choiceList}>{models.slice(0, 30).map(item => <Pressable key={item} onPress={() => setModel(item)} style={[styles.choiceRow, { backgroundColor: model === item ? colors.accent.wash : colors.raised, borderColor: model === item ? colors.accent.ink : colors.hairline }]}><Text variant="sm" numberOfLines={1}>{item}</Text>{model === item ? <Icon name="check" size="md" color={colors.accent.ink} /> : null}</Pressable>)}</View>}
             {!models.length && !loadingModels ? <TextField value={model} onChangeText={setModel} autoCapitalize="none" autoCorrect={false} placeholder="Enter model name" style={[styles.input]} /> : null}

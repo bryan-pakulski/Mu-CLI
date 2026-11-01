@@ -8,6 +8,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Request
 
 from mu.session.visibility import is_user_visible_session
+from mu.threads.model import ensure_thread_meta, thread_parents
 
 from . import sessions as legacy
 
@@ -42,10 +43,15 @@ async def list_user_sessions(request: Request):
 
     state = request.app.state
     paths = []
+    metas = {}
     for path in legacy._session_dirs():
         name = os.path.basename(os.path.dirname(path))
-        if is_user_visible_session(name, _saved_data(name)):
+        data = _saved_data(name)
+        if is_user_visible_session(name, data):
             paths.append(path)
+            metas[name] = ensure_thread_meta(name, data.get("thread_meta"))
+    # Threads list under their group's root session, not as sessions.
+    parents = thread_parents(metas)
 
     loaded = {name for name in state.sessions.keys() if _visible(state, name)}
     busy = {name for name in legacy._busy_session_names(request) if _visible(state, name)}
@@ -61,13 +67,16 @@ async def list_user_sessions(request: Request):
         # Sessions with a pending prompt: they need the person (◆ in every client).
         "awaiting_input": sorted(awaiting),
         "sessions": [
-            legacy._summarize(
-                path,
-                current=current,
-                loaded=loaded,
-                busy_names=busy,
-                awaiting_names=awaiting,
-            )
+            {
+                **legacy._summarize(
+                    path,
+                    current=current,
+                    loaded=loaded,
+                    busy_names=busy,
+                    awaiting_names=awaiting,
+                ),
+                "thread_parent": parents.get(os.path.basename(os.path.dirname(path)), ""),
+            }
             for path in paths
         ],
     }

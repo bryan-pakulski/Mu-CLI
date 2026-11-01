@@ -79,6 +79,9 @@ const MUCLI_SESSION_TYPE_ICON_NAMES = Object.freeze({ workspace: "folder", conta
 // provider/tool messages. Scan bounded raw-turn pages until each explicit
 // history load has found a useful checkpoint batch.
 const WEB_HISTORY_PAGE_TURNS = 200;
+// A slot that went busy this recently is spared by the server-busy reconcile:
+// the server marks a session busy only once the turn thread starts.
+const LOCAL_BUSY_GRACE_MS = 10000;
 const WEB_HISTORY_CHECKPOINT_BATCH = 5;
 const WEB_HISTORY_CHECKPOINT_SCAN_PAGES = 6;
 
@@ -1298,6 +1301,31 @@ document.addEventListener("alpine:init", () => {
             return !!(this.chats[name] && this.chats[name].busy);
         },
 
+        // Reconcile slots with the server's busy list (hello / session poll).
+        // The server is authoritative both ways: a listed session goes busy,
+        // and a slot the server no longer lists is a turn that ended while
+        // this tab missed its turn_complete (stream released in the
+        // background, or a dropped connection) — close it and reload the
+        // saved history. A slot that only just went busy is spared briefly.
+        syncServerBusy(busyNames) {
+            const busy = new Set(busyNames || []);
+            for (const name of busy) {
+                const slot = this._slot(name);
+                slot.busy = true;
+                // A turn is in flight on the server but the live trace may
+                // not exist yet (history reload built only completed traces).
+                this._ensureBusyTrace(slot);
+            }
+            const now = Date.now();
+            for (const [name, slot] of Object.entries(this.chats)) {
+                if (!slot.busy || busy.has(name)) continue;
+                if (now - (slot.busySince || 0) < LOCAL_BUSY_GRACE_MS) continue;
+                slot.busy = false;
+                slot.pendingReload = true;   // finishTurn flushes it as a forced reload
+                this.finishTurn(name);
+            }
+        },
+
         // ---------- send + history -----------------------------------
 
         // Are we parked at (or near) the bottom of the chat feed?
@@ -1806,7 +1834,10 @@ document.addEventListener("alpine:init", () => {
             // A command can be submitted alongside an active turn. Do not
             // toggle the slot's existing busy state; the server handles the
             // command path independently of normal turn submission.
-            if (!isCommand) slot.busy = true;
+            if (!isCommand) {
+                slot.busy = true;
+                slot.busySince = Date.now();
+            }
             try {
                 const resp = await fetch("/api/chat/send", {
                     method: "POST",
@@ -2034,19 +2065,73 @@ document.addEventListener("alpine:init", () => {
             this.busy = data.busy || [];
             this.outcomes = { ...(data.outcomes || {}), ...this._liveOutcomes() };
             const chat = Alpine.store("chat");
-            // Sync server-reported busy into chat slots so the UI shows
-            // "generating" after a page refresh mid-turn.
-            for (const name of this.busy) {
-                const slot = chat._slot(name);
-                slot.busy = true;
-                // Ensure a live trace exists so the "thinking" header and
-                // elapsed timer render immediately on refresh mid-turn.
-                chat._ensureBusyTrace(slot);
-            }
+            // Server busy is authoritative: shows "generating" after a
+            // refresh mid-turn and ends turns whose turn_complete was missed.
+            chat.syncServerBusy(this.busy);
             // First load — sync the chat store's focus pointer.
             if (!chat.currentName && this.current) chat.focus(this.current);
         },
         isLoaded(name) { return (this.loaded || []).includes(name); },
+        // Sessions with their threads: a thread lists beneath its group's
+        // root session (the server's thread_parent), never as a session.
+        get tree() {
+            const byName = new Map((this.list || []).map(s => [s.name, { ...s, threads: [] }]));
+            const roots = [];
+            for (const s of byName.values()) {
+                const parent = s.thread_parent && byName.get(s.thread_parent);
+                if (parent) parent.threads.push(s); else roots.push(s);
+            }
+            for (const s of roots) s.threads.sort((a, b) => (a.thread_created_at || 0) - (b.thread_created_at || 0));
+            return roots;
+        },
+        // Sidebar families for a filter: each session with its threads. A
+        // session shows when it or one of its threads matches; a match on the
+        // session keeps all its threads, otherwise only the matching ones.
+        families(q = "") {
+            const needle = String(q || "").trim().toLowerCase();
+            const hit = s => !needle || s.name.toLowerCase().includes(needle)
+                || String(s.thread_title || "").toLowerCase().includes(needle);
+            return this.tree.flatMap(s => {
+                if (hit(s)) return [s];
+                const threads = s.threads.filter(hit);
+                return threads.length ? [{ ...s, threads }] : [];
+            });
+        },
+        // The same, flat: a session with its threads directly below.
+        rows(q = "") {
+            return this.families(q).flatMap(s => [s, ...s.threads]);
+        },
+        // Thread families collapse so a long list stays short. Collapsed by
+        // default, except the family holding the open thread; the person's
+        // own choice wins and is remembered; a filter opens every match.
+        expanded: (() => {
+            try { return JSON.parse(localStorage.getItem("mucli-sessions-expanded") || "{}") || {}; }
+            catch (e) { return {}; }
+        })(),
+        isExpanded(family, q = "") {
+            if (String(q || "").trim()) return true;
+            const chosen = (this.expanded || {})[family.name];
+            if (chosen !== undefined) return chosen;
+            const current = Alpine.store("chat").currentName || this.current;
+            return (family.threads || []).some(t => t.name === current);
+        },
+        setExpanded(name, open) {
+            this.expanded = { ...this.expanded, [name]: !!open };
+            try { localStorage.setItem("mucli-sessions-expanded", JSON.stringify(this.expanded)); }
+            catch (e) { /* private mode */ }
+        },
+        toggleFamily(family, q = "") {
+            this.setExpanded(family.name, !this.isExpanded(family, q));
+        },
+        // What a collapsed family's hidden threads are doing, for its count:
+        // attention (one needs you) > running > neutral.
+        familyTone(family) {
+            const prompts = Alpine.store("prompts").queue || [];
+            const threads = family.threads || [];
+            if (threads.some(t => prompts.some(p => p.session_name === t.name))) return "attention";
+            if (threads.some(t => this.isBusy(t.name))) return "running";
+            return null;
+        },
         // Outcomes seen live in this tab win over the (older) server snapshot.
         _liveOutcomes() {
             return Object.fromEntries(Object.entries(this.outcomes || {}).filter(([, o]) => o && o.live));
@@ -2093,6 +2178,10 @@ document.addEventListener("alpine:init", () => {
                    Alpine.store("chat").isBusy(name);
         },
         async switchTo(name) {
+            const target = (this.list || []).find(s => s.name === name);
+            if (target && target.thread_parent && (this.expanded || {})[target.thread_parent] === false) {
+                this.setExpanded(target.thread_parent, true);
+            }
             // In-memory? Just refocus locally and ask the server to flip
             // its focus pointer. No page reload, so the previously-active
             // session keeps streaming its turn into its own slot.
@@ -2257,7 +2346,12 @@ ${problem.text}`, "error", 16000);
                 this.error = String(e || "activity load failed");
             }
         },
-        async create() {
+        // Unread peer messages for a thread of the current group (0 otherwise).
+        unread(sessionName) {
+            const row = (this.roster || []).find(t => t.session_name === sessionName);
+            return (row && row.unread_count) || 0;
+        },
+        async create(parentName = null) {
             const title = window.prompt("New thread title", "New thread");
             if (title == null || !title.trim()) return;
             try {
@@ -2265,7 +2359,7 @@ ${problem.text}`, "error", 16000);
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        parent_session_name: this.currentName,
+                        parent_session_name: parentName || this.currentName,
                         title: title.trim(),
                         activate: true,
                     }),
@@ -6202,18 +6296,7 @@ function bootSSE() {
             let data;
             try { data = JSON.parse(ev.data); } catch { return; }
             if (data && data.kind === "hello") {
-                const busyNames = data.busy || [];
-                const chat = Alpine.store("chat");
-                for (const name of busyNames) {
-                    const slot = chat._slot(name);
-                    slot.busy = true;
-                    // A turn is in flight on the server but the live trace
-                    // may not exist yet (history reload built only completed
-                    // traces). Ensure a running trace so the "thinking" header
-                    // + elapsed show immediately instead of waiting for the
-                    // next tool event.
-                    chat._ensureBusyTrace(slot);
-                }
+                Alpine.store("chat").syncServerBusy(data.busy);
                 return;
             }
             // Orchestration wants the operator: refresh the sidebar badge (wash_shell.js).
@@ -6286,6 +6369,7 @@ function routeEvent(ev) {
             if (!slot.busy) {
                 chat.addUser(String(ev.text || ""), name, ev.attachments || []);
                 slot.busy = true;
+                slot.busySince = Date.now();
                 chat._ensureBusyTrace(slot);
             }
             break;
@@ -6334,14 +6418,20 @@ function routeEvent(ev) {
         case "thread_claim_released":
         case "thread_claim_handoff":
         case "thread_conflict":
-        case "thread_claim_override":
         case "thread_created":
+            // The new thread lists under its parent session in the sidebar.
+            Alpine.store("sessions").load();
+            Alpine.store("threads").load();
+            break;
+        case "thread_claim_override":
         case "thread_wake_started":
+        case "thread_wake_finished":
             Alpine.store("threads").load();
             break;
         case "orch_continuation_started":
             // A run this orchestration chat proposed finished; the server resumes the chat.
             slot.busy = true;
+            slot.busySince = Date.now();
             break;
         case "orch_continuation_finished":
             slot.busy = false;

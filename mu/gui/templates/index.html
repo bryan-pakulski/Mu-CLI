@@ -39,60 +39,97 @@
 
 {#- Rail Sessions (Mu §3.2, G§9.20): one line per session — name, a running
     dot, the count of prompts waiting for you; no avatars (the type shows on
-    hover). The heading's + starts a new session. Threads of the current
-    session sit above (also in the session header's ⋯ menu): the heading and
-    its + always show; rows list once the session has several threads. Rows are role=button
-    with keyboard support; unload / delete show on hover or focus. -#}
+    hover). The heading's + starts a new session. A session's threads are not
+    sessions of their own: they nest beneath the session they were started
+    from (`$store.sessions.families`, the server's `thread_parent`) on a guide
+    line, and the family collapses behind the chevron (→/← too). Collapsed by
+    default except the family holding the open thread; a collapsed family's
+    count turns running / needs-you when a hidden thread is. A session's row
+    offers + thread (also in the session header's ⋯ menu). Rows are
+    role=button with keyboard support; actions show on hover or focus. -#}
 {% block sidebar_extra %}{% if session_active %}
+{%- macro session_row(thread) -%}
+<div class="nav-item w-session"
+     :class="{ active: s.name === $store.chat.currentName, busy: $store.sessions.isBusy(s.name) }"
+     :aria-current="s.name === $store.chat.currentName ? 'true' : null"
+     :data-session-type="s.session_type || 'workspace'"
+     {% if thread %}data-thread{% else %}:aria-expanded="s.threads.length ? String($store.sessions.isExpanded(s, q)) : null"
+     @keydown.arrow-right.prevent="s.threads.length && $store.sessions.setExpanded(s.name, true)"
+     @keydown.arrow-left.prevent="s.threads.length && $store.sessions.setExpanded(s.name, false)"{% endif %}
+     @click="$store.sessions.switchTo(s.name); $store.layout.closeMobileSidebar()"
+     @keydown.enter.prevent="$el.click()"
+     @keydown.space.prevent="$el.click()"
+     role="button" tabindex="0"
+     {% if thread -%}
+     :title="(s.thread_title || s.name) + ' · thread of ' + s.thread_parent + ($store.sessions.state(s.name) ? ' · ' + $store.sessions.state(s.name).hint : '')"
+     {%- else -%}
+     :title="s.name + ' · ' + (s.session_type || 'workspace') + ' session' + (s.threads.length ? ' · ' + s.threads.length + (s.threads.length === 1 ? ' thread' : ' threads') : '') + ($store.sessions.state(s.name) ? ' · ' + $store.sessions.state(s.name).hint : '')"
+     {%- endif %}>
+    {% if not thread -%}
+    <button type="button" class="w-session__twisty" x-show="s.threads.length"
+            :aria-expanded="String($store.sessions.isExpanded(s, q))"
+            :aria-label="($store.sessions.isExpanded(s, q) ? 'Hide threads of ' : 'Show threads of ') + s.name"
+            @click.stop="$store.sessions.toggleFamily(s, q)"
+            @keydown.enter.stop @keydown.space.stop>{{ w.icon("chevron-right", size="sm") }}</button>
+    <span class="w-session__twisty" data-spacer x-show="!s.threads.length" aria-hidden="true"></span>
+    <span class="w-session__type" aria-hidden="true"
+          x-html="sessionTypeIconMarkup(s.session_type || 'workspace', 'w-icon')"></span>
+    <span class="name w-session__name" x-text="s.name"></span>
+    {%- else -%}
+    <span class="w-session__type" aria-hidden="true">{{ w.icon("git-branch", size="sm") }}</span>
+    <span class="name w-session__name" x-text="s.thread_title || s.name"></span>
+    {%- endif %}
+    <span class="w-session__status">
+        {% if not thread -%}
+        <span class="w-count w-session__threadcount"
+              x-show="s.threads.length && !$store.sessions.isExpanded(s, q)"
+              :data-tone="$store.sessions.familyTone(s)"
+              x-text="s.threads.length"
+              :aria-label="s.threads.length + (s.threads.length === 1 ? ' thread' : ' threads') + ($store.sessions.familyTone(s) === 'attention' ? ', one needs you' : $store.sessions.familyTone(s) === 'running' ? ', running' : '')"></span>
+        {%- else -%}
+        <span class="w-session__unread" x-show="$store.threads.unread(s.name)"
+              x-text="$store.threads.unread(s.name)"
+              :aria-label="$store.threads.unread(s.name) + ' unread'"></span>
+        {%- endif %}
+        <span class="w-count w-session__waiting" data-tone="attention"
+              x-show="$store.prompts.queue.filter(p => p.session_name === s.name).length"
+              x-text="$store.prompts.queue.filter(p => p.session_name === s.name).length"
+              :aria-label="$store.prompts.queue.filter(p => p.session_name === s.name).length + ' waiting for you'"></span>
+        <template x-if="$store.sessions.state(s.name)">
+            <span class="w-session__state" :data-state="$store.sessions.state(s.name).key"
+                  :data-tone="$store.sessions.state(s.name).tone"
+                  :aria-label="$store.sessions.state(s.name).hint">
+                <span class="w-inkdrop" data-size="sm" data-tone="running" aria-hidden="true"
+                      x-show="$store.sessions.state(s.name).key === 'running'"></span>
+                <span class="w-session__state-glyph" aria-hidden="true"
+                      x-show="$store.sessions.state(s.name).glyph && $store.sessions.state(s.name).key !== 'running'"
+                      x-text="$store.sessions.state(s.name).glyph"></span>
+                <span class="w-session__state-label w-sr-only" x-text="$store.sessions.state(s.name).label"></span>
+            </span>
+        </template>
+    </span>
+    <span class="row-actions w-session__actions">
+        {% if not thread -%}
+        <button type="button" class="row-action w-session__action"
+                title="New thread" :aria-label="'New thread in ' + s.name"
+                @click.stop="$store.threads.create(s.name)">{{ w.icon("git-branch", size="sm") }}</button>
+        {%- endif %}
+        <button type="button" class="row-action w-session__action"
+                x-show="$store.sessions.isLoaded(s.name) && s.name !== $store.chat.currentName"
+                title="Unload {{ 'thread' if thread else 'session' }}" :aria-label="'Unload ' + s.name"
+                @click.stop="$store.sessions.unload(s.name)">unload</button>
+        <button type="button" class="row-action row-action-danger w-session__action" data-tone="danger"
+                :disabled="s.name === $store.chat.currentName"
+                title="Delete {{ 'thread' if thread else 'session' }}" :aria-label="'Delete ' + s.name"
+                {% if thread -%}
+                @click.stop="$store.confirm.ask(`Delete thread '${s.thread_title || s.name}'?`, $event, () => $store.sessions.remove(s.name), {danger:true})"
+                {%- else -%}
+                @click.stop="$store.confirm.ask(`Delete session '${s.name}'?` + (s.threads.length ? ' Its threads stay.' : ''), $event, () => $store.sessions.remove(s.name), {danger:true})"
+                {%- endif %}>×</button>
+    </span>
+</div>
+{%- endmacro %}
 <div class="sidebar product-sidebar w-chat-sidebar">
-    <section class="nav-section sessions-only-section w-threads-section" aria-labelledby="w-threads-title">
-        <div class="nav-section-title w-sessions__head">
-            <span class="w-sessions__title" id="w-threads-title">Threads</span>
-            <button type="button" class="w-sessions__add" @click="$store.threads.create()"
-                    title="New thread" aria-label="New thread">{{ w.icon("plus", size="sm") }}</button>
-        </div>
-        <p class="w-threads__empty" x-show="$store.threads.groupRoster.length <= 1" x-cloak>
-            This session has one thread. <button type="button" class="w-textbtn" @click="$store.threads.create()">New thread</button> runs another beside it.</p>
-        <ul class="w-sessions" x-show="$store.threads.groupRoster.length > 1" x-cloak>
-            <template x-for="t in $store.threads.groupRoster" :key="t.thread_id">
-                <li>
-                    <div class="nav-item w-session"
-                         role="button" tabindex="0"
-                         :aria-current="t.session_name === $store.chat.currentName ? 'true' : null"
-                         :data-busy="($store.sessions.isBusy(t.session_name) || $store.threads.statusClass(t.status)) ? '' : null"
-                         :class="{
-                            active: t.session_name === $store.chat.currentName,
-                            loaded: $store.sessions.isLoaded(t.session_name),
-                            busy: $store.sessions.isBusy(t.session_name) || $store.threads.statusClass(t.status)
-                         }"
-                         @click="t.session_name !== $store.chat.currentName && $store.threads.switchTo(t)"
-                         @keydown.enter.prevent="$el.click()"
-                         @keydown.space.prevent="$el.click()"
-                         :title="t.title + ' · ' + t.status + (t.current_goal ? ' · ' + t.current_goal : '')">
-                        <span class="w-session__icon thread-status-dot" :class="$store.threads.statusClass(t.status)" aria-hidden="true">
-                            {{ w.icon("git-branch", size="sm") }}
-                        </span>
-                        <span class="name w-session__name" x-text="t.title || t.session_name"></span>
-                        <span class="w-session__status">
-                            <span class="w-inkdrop" data-size="sm" data-tone="running" x-show="$store.sessions.isBusy(t.session_name)" aria-hidden="true"></span>
-                            <span class="thread-unread w-session__unread" x-show="t.unread_count" x-text="t.unread_count"
-                                  :aria-label="t.unread_count + ' unread'"></span>
-                            <span class="prompt-badge w-session__attention"
-                                  x-show="$store.prompts.queue.some(p => p.session_name === t.session_name) && t.session_name !== $store.chat.currentName"
-                                  title="Awaiting your input" aria-label="Awaiting your input">◆</span>
-                        </span>
-                        <span class="w-session__actions">
-                            <button type="button" class="row-action thread-delete w-session__action" data-tone="danger"
-                                    x-show="t.session_name !== $store.chat.currentName && !$store.sessions.isBusy(t.session_name) && !$store.threads.statusClass(t.status)"
-                                    @click.stop="$store.confirm.ask(`Delete thread '${t.title || t.session_name}'?`, $event, () => $store.threads.remove(t), {danger:true})"
-                                    title="Delete thread"
-                                    aria-label="Delete thread">×</button>
-                        </span>
-                    </div>
-                </li>
-            </template>
-        </ul>
-    </section>
     <section class="nav-section sessions-only-section sidebar-other-sessions" aria-labelledby="w-sessions-title"
              x-data="{ q: '' }">
         <div class="nav-section-title w-sessions__head">
@@ -106,49 +143,15 @@
                x-show="$store.sessions.list.length > 8" x-cloak x-model="q"
                @keydown.escape.stop="q = ''">
         <ul class="w-sessions">
-            <template x-for="s in $store.sessions.list.filter(x => !q || x.name.toLowerCase().includes(q.trim().toLowerCase()))" :key="s.name">
-                <li>
-                    <div class="nav-item w-session"
-                         :class="{ active: s.name === $store.chat.currentName, busy: $store.sessions.isBusy(s.name) }"
-                         :aria-current="s.name === $store.chat.currentName ? 'true' : null"
-                         :data-session-type="s.session_type || 'workspace'"
-                         @click="$store.sessions.switchTo(s.name); $store.layout.closeMobileSidebar()"
-                         @keydown.enter.prevent="$el.click()"
-                         @keydown.space.prevent="$el.click()"
-                         role="button" tabindex="0"
-                         :title="s.name + ' · ' + (s.session_type || 'workspace') + ' session' + ($store.sessions.state(s.name) ? ' · ' + $store.sessions.state(s.name).hint : '')">
-                        <span class="w-session__type" aria-hidden="true"
-                              x-html="sessionTypeIconMarkup(s.session_type || 'workspace', 'w-icon')"></span>
-                        <span class="name w-session__name" x-text="s.name"></span>
-                        <span class="w-session__status">
-                            <span class="w-count w-session__waiting" data-tone="attention"
-                                  x-show="$store.prompts.queue.filter(p => p.session_name === s.name).length"
-                                  x-text="$store.prompts.queue.filter(p => p.session_name === s.name).length"
-                                  :aria-label="$store.prompts.queue.filter(p => p.session_name === s.name).length + ' waiting for you'"></span>
-                            <template x-if="$store.sessions.state(s.name)">
-                                <span class="w-session__state" :data-state="$store.sessions.state(s.name).key"
-                                      :data-tone="$store.sessions.state(s.name).tone"
-                                      :aria-label="$store.sessions.state(s.name).hint">
-                                    <span class="w-inkdrop" data-size="sm" data-tone="running" aria-hidden="true"
-                                          x-show="$store.sessions.state(s.name).key === 'running'"></span>
-                                    <span class="w-session__state-glyph" aria-hidden="true"
-                                          x-show="$store.sessions.state(s.name).glyph && $store.sessions.state(s.name).key !== 'running'"
-                                          x-text="$store.sessions.state(s.name).glyph"></span>
-                                    <span class="w-session__state-label w-sr-only" x-text="$store.sessions.state(s.name).label"></span>
-                                </span>
-                            </template>
-                        </span>
-                        <span class="row-actions w-session__actions">
-                            <button type="button" class="row-action w-session__action"
-                                    x-show="$store.sessions.isLoaded(s.name) && s.name !== $store.chat.currentName"
-                                    title="Unload session" :aria-label="'Unload session ' + s.name"
-                                    @click.stop="$store.sessions.unload(s.name)">unload</button>
-                            <button type="button" class="row-action row-action-danger w-session__action" data-tone="danger"
-                                    :disabled="s.name === $store.chat.currentName"
-                                    title="Delete session" :aria-label="'Delete session ' + s.name"
-                                    @click.stop="$store.confirm.ask(`Delete session '${s.name}'?`, $event, () => $store.sessions.remove(s.name), {danger:true})">×</button>
-                        </span>
-                    </div>
+            <template x-for="s in $store.sessions.families(q)" :key="s.name">
+                <li class="w-session-family">
+                    {{ session_row(false) }}
+                    <ul class="w-session__threads" role="group" :aria-label="'Threads of ' + s.name"
+                        x-show="s.threads.length && $store.sessions.isExpanded(s, q)" x-cloak>
+                        <template x-for="s in s.threads" :key="s.name">
+                            <li>{{ session_row(true) }}</li>
+                        </template>
+                    </ul>
                 </li>
             </template>
         </ul>

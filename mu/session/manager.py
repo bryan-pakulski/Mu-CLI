@@ -40,6 +40,7 @@ from mu.threads.model import (
     ThreadMeta,
     ensure_thread_meta,
     new_child_thread_meta,
+    thread_parents,
 )
 from mu.workspace.folder_context import FolderContext
 from utils.config import (
@@ -1578,17 +1579,20 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         if self.current_session_name and not os.path.exists(self._get_filepath(self.current_session_name)):
             self.save_history()
 
-        files = glob.glob(os.path.join(_history_dir(), "sessions", "*", "session.json"))
         if self.ui:
             # We might want a specific UI method for listing sessions
             self.ui.show_info("\n=== Available Conversations ===")
-            for f in files:
-                name = os.path.basename(os.path.dirname(f))
+            for entry in self.get_session_tree():
+                name = entry["name"]
                 indicator = "*" if name == self.current_session_name else " "
                 mod_time = datetime.datetime.fromtimestamp(
-                    os.path.getmtime(f)
+                    entry["modified_unix"]
                 ).strftime("%Y-%m-%d %H:%M")
-                self.ui.show_info(f" {indicator} {name:<20} ({mod_time})")
+                if entry["thread_parent"]:
+                    label = f"  ↳ {entry['title']} [{name}]"
+                    self.ui.show_info(f" {indicator} {label:<20} ({mod_time})")
+                else:
+                    self.ui.show_info(f" {indicator} {name:<20} ({mod_time})")
 
     def get_session_list(self):
         files = glob.glob(os.path.join(_history_dir(), "sessions", "*", "session.json"))
@@ -1621,6 +1625,53 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                     continue
             result.append((name, st))
         return sorted(result, key=lambda pair: pair[0])
+
+    def get_session_tree(self):
+        """Saved sessions with each session's threads listed beneath it.
+
+        Returns ``[{name, session_type, title, thread_parent, modified_unix}, …]``:
+        top-level sessions by name, each followed by its threads oldest first.
+        ``thread_parent`` is the session a thread lists under ("" for a
+        top-level session), per ``thread_parents``.
+        """
+        rows = {}
+        metas = {}
+        for f in glob.glob(os.path.join(_history_dir(), "sessions", "*", "session.json")):
+            name = os.path.basename(os.path.dirname(f))
+            try:
+                with open(f, "r") as fh:
+                    data = json.load(fh)
+                mtime = os.path.getmtime(f)
+            except (OSError, ValueError):
+                data, mtime = {}, 0.0
+            if not isinstance(data, dict):
+                data = {}
+            if not is_user_visible_session(name, data):
+                continue
+            meta = ensure_thread_meta(name, data.get("thread_meta"))
+            metas[name] = meta
+            rows[name] = {
+                "name": name,
+                "session_type": str(
+                    (data.get("variables") or {}).get("session_type") or "workspace"
+                ),
+                "title": meta.title,
+                "thread_parent": "",
+                "modified_unix": mtime,
+            }
+        children: dict[str, list[str]] = {}
+        for name, parent in thread_parents(metas).items():
+            rows[name]["thread_parent"] = parent
+            if parent:
+                children.setdefault(parent, []).append(name)
+        tree = []
+        for name in sorted(n for n in rows if not rows[n]["thread_parent"]):
+            tree.append(rows[name])
+            for child in sorted(
+                children.get(name, []), key=lambda n: (metas[n].created_at, n)
+            ):
+                tree.append(rows[child])
+        return tree
 
     def delete_session(self, name):
         logger.info(f"Deleting session: {name}")

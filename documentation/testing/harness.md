@@ -2,7 +2,7 @@
 
 mucli's tests validate the product's core requirements. They are grouped by pillar, one folder each, and every test exercises behaviour. This page lists what each pillar must prove and the files that prove it. AGENTS.md has the rules in short.
 
-**Size:** 1,688 tests in 124 files, plus 40 node tests in `tests/gui/frontend/`. A full run takes about 7 minutes: ~6.1 min is the Docker suites, the rest ~85 s.
+**Size:** 1,688 tests in 124 files, plus 59 node tests in `tests/gui/frontend/`. A full run takes about 7 minutes: ~6.1 min is the Docker suites, the rest ~85 s.
 
 ```bash
 python3 -m pytest tests/ -q                 # everything (Docker required)
@@ -92,7 +92,7 @@ Must prove:
 | `test_prompt_prefix_stability.py` | 8 | 0.1 s | Byte-stable system prompt across iterations and turns; turn context and runtime state placement |
 | `test_result_store.py` | 13 | 0.0 s | Durable ResultStore tests (spec #1, #6, #11) |
 | `test_selective_context.py` | 16 | 0.3 s | Model context edits preserve durable evidence and measure the wire projection |
-| `test_token_estimator.py` | 21 | 0.5 s | Pin the token estimator and its integration with /memory layers |
+| `test_token_estimator.py` | 22 | 0.9 s | Pin the token estimator and its integration with /memory layers |
 | `test_tool_call_arg_stub.py` | 8 | 0.0 s | context_packaging_v2 / P2-T5: stub oversized tool-call args once consumed |
 | `test_turn_fold.py` | 9 | 0.0 s | context_packaging_v2 / P2-T4: turn-boundary fold |
 | `test_turn_roll.py` | 10 | 0.0 s | context_packaging_v2 / P2-T6: roll an over-budget finished turn into L2 |
@@ -103,7 +103,7 @@ Must prove:
 
 - Sessions save/load with revision CAS; unreadable docs are never overwritten
 - History pages correctly on every surface
-- Threads create, coordinate and delete safely
+- Threads create, coordinate and delete safely, and list beneath their parent session (web and terminal), never as sessions of their own
 - The Memory Ledger stores and recalls; two surfaces stay consistent
 - Session files (artifacts, uploads) delete at any time; concurrent registry writers lose nothing
 - A new workspace session creates its missing folder only when asked (mobile), never a relative or secret path
@@ -123,7 +123,7 @@ Must prove:
 | `test_session_files.py` | 3 | 2.3 s | Artifact and upload delete during a turn; one shared lock per registry file |
 | `test_session_unreadable_doc.py` | 4 | 0.0 s | SessionManager must never clobber a session.json it cannot read |
 | `test_surface_sync.py` | 13 | 0.7 s | Tests for the CLI-side surface sync watcher (cross-surface phase 2, G1) |
-| `test_threads.py` | 13 | 0.1 s |  |
+| `test_threads.py` | 17 | 0.1 s |  |
 
 ### Tools & safety gates — `tests/tools/`
 

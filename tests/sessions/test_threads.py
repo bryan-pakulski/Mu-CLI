@@ -441,3 +441,99 @@ def test_idle_wake_scheduler_scans_commit_nothing_and_pending_wakes_still_claim(
     finally:
         watcher.close()
         scheduler.stop()
+
+
+def test_threads_list_under_their_root_session_and_survive_its_deletion():
+    from mu.threads.model import thread_parents
+
+    root = ensure_thread_meta("root")
+    child = new_child_thread_meta(root, title="Child")
+    grandchild = new_child_thread_meta(child, title="Grandchild")
+    solo = ensure_thread_meta("solo")
+    members = {"root": root, "child": child, "grandchild": grandchild, "solo": solo}
+
+    assert thread_parents(members) == {
+        "root": "", "child": "root", "grandchild": "root", "solo": "",
+    }
+    # The root session is deleted: the oldest surviving thread takes its place.
+    del members["root"]
+    assert thread_parents(members) == {"child": "", "grandchild": "child", "solo": ""}
+
+
+def _thread_family(tmp_path, monkeypatch):
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path))
+    manager = SessionManager()
+    manager.new_session("parent", "openai", "model-x")
+    manager.save_history()
+    manager.create_thread(title="Fix parser", session_name="parser-fix")
+    manager.create_thread(title="Write docs", session_name="docs")
+    other = SessionManager()
+    other.new_session("alpha", "openai", "model-x")
+    other.save_history()
+    return manager
+
+
+def test_session_tree_lists_threads_beneath_their_parent(tmp_path, monkeypatch):
+    manager = _thread_family(tmp_path, monkeypatch)
+
+    tree = [(e["name"], e["thread_parent"], e["title"]) for e in manager.get_session_tree()]
+
+    assert tree == [
+        ("alpha", "", "alpha"),
+        ("parent", "", "parent"),
+        ("parser-fix", "parent", "Fix parser"),
+        ("docs", "parent", "Write docs"),
+    ]
+
+
+def test_session_list_api_names_each_threads_parent(tmp_path, monkeypatch):
+    import threading
+    import types
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import mu.gui.routers  # noqa: F401  (registers the visibility-filtered list route)
+    from mu.gui.prompts import PromptStore
+    from mu.gui.routers import sessions
+
+    _thread_family(tmp_path, monkeypatch)
+    app = FastAPI()
+    app.include_router(sessions.router, prefix="/api/sessions")
+    app.state.current_session_name = "parent"
+    app.state.sessions = {}
+    app.state.session_busy = {}
+    app.state.bus = types.SimpleNamespace(outcomes={})
+    app.state.prompts = PromptStore()
+
+    rows = TestClient(app).get("/api/sessions").json()["sessions"]
+
+    assert {r["name"]: r["thread_parent"] for r in rows} == {
+        "alpha": "", "parent": "", "parser-fix": "parent", "docs": "parent",
+    }
+    titles = {r["name"]: r["thread_title"] for r in rows}
+    assert titles["parser-fix"] == "Fix parser"
+
+
+def test_tui_picker_shows_threads_under_their_session(tmp_path, monkeypatch):
+    import mucli
+
+    manager = _thread_family(tmp_path, monkeypatch)
+    menus = []
+    answers = iter(["sessions", "docs", "load"])
+
+    def choose(title, options, **kwargs):
+        menus.append((title, options, kwargs))
+        return next(answers)
+
+    monkeypatch.setattr("mucli.prompt_choice", choose)
+
+    assert mucli.choose_session(manager) == ("load", "docs")
+    title, options, kwargs = menus[1]
+    assert [value for value, _, _ in options] == [
+        "alpha", "parent", "parser-fix", "docs", "__back__",
+    ]
+    labels = {value: label for value, label, _ in options}
+    assert "Write docs" in labels["docs"] and labels["docs"].startswith(" ")
+    assert kwargs["subtitle"] == "2 saved sessions · 2 threads"
+    assert menus[2][1][0][1] == "Load thread"

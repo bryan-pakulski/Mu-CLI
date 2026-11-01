@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 import threading
 from typing import Any, Optional
 
@@ -74,8 +75,38 @@ def estimate_tokens(text: Any, model: Optional[str] = None) -> int:
             return 0
     if len(text) >= _MEMO_MIN_CHARS:
         return _memo_count(text, (model or "").lower())
-    encoder = _get_encoder(model)
-    return len(encoder.encode(text, disallowed_special=()))
+    return _encoded_len(_get_encoder(model), text)
+
+
+# tiktoken's pre-tokenizer regex backtracks on one long run of letters or of symbols
+# (a "=====" rule, "xxxx…" filler, a giant identifier): cost grows quadratically with the
+# run (100k chars ≈ 3 s) until it raises "Max stack size exceeded", which callers then
+# counted as 0 tokens. Such runs are counted in short slices instead; ordinary text
+# (prose, code, base64 — no long runs) is still encoded in one call, unchanged. Slicing
+# can only add tokens at the seams, so the estimate never under-counts.
+_FALLBACK_SLICE_CHARS = 1024
+_LONG_RUN = re.compile(r"[^\W\d_]{%d,}|[^\s\w]{%d,}" % (_FALLBACK_SLICE_CHARS, _FALLBACK_SLICE_CHARS))
+
+
+def _sliced_len(encoder, text: str) -> int:
+    return sum(
+        len(encoder.encode(text[i:i + _FALLBACK_SLICE_CHARS], disallowed_special=()))
+        for i in range(0, len(text), _FALLBACK_SLICE_CHARS)
+    )
+
+
+def _encoded_len(encoder, text: str) -> int:
+    if len(text) >= _FALLBACK_SLICE_CHARS and _LONG_RUN.search(text):
+        total, last = 0, 0
+        for run in _LONG_RUN.finditer(text):
+            total += _encoded_len(encoder, text[last:run.start()]) if run.start() > last else 0
+            total += _sliced_len(encoder, run.group())
+            last = run.end()
+        return total + (_encoded_len(encoder, text[last:]) if last < len(text) else 0)
+    try:
+        return len(encoder.encode(text, disallowed_special=()))
+    except ValueError:
+        return _sliced_len(encoder, text)
 
 
 # The agent loop re-estimates the same large strings (history entries, system prompt,
@@ -86,8 +117,7 @@ _MEMO_MIN_CHARS = 2048
 
 @functools.lru_cache(maxsize=4096)
 def _memo_count(text: str, model_key: str) -> int:
-    encoder = _get_encoder(model_key or None)
-    return len(encoder.encode(text, disallowed_special=()))
+    return _encoded_len(_get_encoder(model_key or None), text)
 
 
 def clear_cache() -> None:

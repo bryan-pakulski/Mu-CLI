@@ -88,4 +88,39 @@ def new_child_thread_meta(parent: ThreadMeta, *, title: str) -> ThreadMeta:
     )
 
 
-__all__ = ["ThreadMeta", "ensure_thread_meta", "new_child_thread_meta"]
+def thread_parents(members: Mapping[str, ThreadMeta]) -> dict[str, str]:
+    """Map each session name to the session it lists under ("" = top level).
+
+    Session lists show a thread group as one entry: the group's root (the
+    member with no parent thread, i.e. the session the threads were started
+    from, or the oldest member once that session is deleted) with every
+    other member beneath it. Threads of threads still list under the root.
+    """
+
+    groups: dict[str, list[str]] = {}
+    for name, meta in members.items():
+        groups.setdefault(meta.group_id, []).append(name)
+    parents = {name: "" for name in members}
+    for names in groups.values():
+        if len(names) < 2:
+            continue
+        root = min(
+            names,
+            key=lambda n: (
+                bool(members[n].parent_thread_id),
+                members[n].created_at,
+                n,
+            ),
+        )
+        for name in names:
+            if name != root:
+                parents[name] = root
+    return parents
+
+
+__all__ = [
+    "ThreadMeta",
+    "ensure_thread_meta",
+    "new_child_thread_meta",
+    "thread_parents",
+]

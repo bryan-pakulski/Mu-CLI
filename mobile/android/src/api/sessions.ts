@@ -122,6 +122,12 @@ export interface SessionSummary {
   modified_unix: number;
   session_type?: SessionType;
   container_name?: string | null;
+  thread_id?: string;
+  thread_group_id?: string;
+  thread_title?: string;
+  thread_created_at?: number;
+  /** The session this thread lists under ("" for a session of its own). */
+  thread_parent?: string;
 }
 
 export interface SessionListResponse {

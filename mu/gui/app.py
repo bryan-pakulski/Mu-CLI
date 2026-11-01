@@ -423,7 +423,8 @@ def _run_thread_wake(app: FastAPI, coordinator, wake: dict) -> bool:
     busy = app.state.session_busy_for(name)
     if busy.is_set():
         return False
-    app.state.bus.publish_threadsafe(
+    bus = app.state.bus
+    bus.publish_threadsafe(
         {
             "kind": "thread_wake_started",
             "session_name": name,
@@ -431,6 +432,12 @@ def _run_thread_wake(app: FastAPI, coordinator, wake: dict) -> bool:
             "thread_id": target["thread_id"],
         }
     )
+    # A wake is a turn like any other: clients go busy on turn_started and
+    # only leave it on turn_complete, so both must be sent.
+    bus.publish_threadsafe(
+        {"kind": "turn_started", "text": _THREAD_WAKE_PROMPT, "attachments": [], "session_name": name}
+    )
+    result: Any = {"ok": False, "status": "error", "error": "Thread wake failed."}
     session_type = str(
         session.variables.get("session_type", "workspace") or "workspace"
     ).lower()
@@ -438,7 +445,7 @@ def _run_thread_wake(app: FastAPI, coordinator, wake: dict) -> bool:
         if session_type == "container":
             busy.set()
             try:
-                app.state.container_supervisor.send_sync(
+                result = app.state.container_supervisor.send_sync(
                     name,
                     _THREAD_WAKE_PROMPT,
                     provider=session.provider.name,
@@ -453,7 +460,7 @@ def _run_thread_wake(app: FastAPI, coordinator, wake: dict) -> bool:
             finally:
                 busy.clear()
         else:
-            chat._run_send(
+            result = chat._run_send(
                 session,
                 _THREAD_WAKE_PROMPT,
                 lock=app.state.session_lock_for(name),
@@ -466,15 +473,9 @@ def _run_thread_wake(app: FastAPI, coordinator, wake: dict) -> bool:
             actor_thread_id=target["thread_id"],
             message_id=str(wake.get("message_id") or ""),
         )
-        app.state.bus.publish_threadsafe(
-            {
-                "kind": "history_refresh",
-                "session_name": name,
-                "thread_group_id": coordinator.group_id,
-            }
-        )
         return True
     except Exception as exc:
+        result = {"ok": False, "status": "error", "error": str(exc)[:1000]}
         coordinator.record_event(
             "thread_wake_failed",
             actor_thread_id=target["thread_id"],
@@ -482,6 +483,29 @@ def _run_thread_wake(app: FastAPI, coordinator, wake: dict) -> bool:
             payload={"error": str(exc)[:1000]},
         )
         return False
+    finally:
+        bus.publish_threadsafe(
+            {
+                "kind": "turn_complete",
+                "result": chat._summarize_result(result),
+                "session_name": name,
+            }
+        )
+        bus.publish_threadsafe(
+            {
+                "kind": "history_refresh",
+                "session_name": name,
+                "thread_group_id": coordinator.group_id,
+            }
+        )
+        bus.publish_threadsafe(
+            {
+                "kind": "thread_wake_finished",
+                "session_name": name,
+                "thread_group_id": coordinator.group_id,
+                "thread_id": target["thread_id"],
+            }
+        )
 
 
 def _run_orch_continuation(app: FastAPI, name: str, runs: list) -> bool:

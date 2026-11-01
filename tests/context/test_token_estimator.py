@@ -264,6 +264,21 @@ def test_compaction_budget_shrinks_when_non_l5_layers_grow(session):
     )
 
 
+def test_long_single_character_runs_are_counted_not_dropped():
+    """tiktoken's regex slows quadratically on one long run of letters or
+    symbols ('=====' rules, filler) and then raises; the estimate must still
+    count that text, quickly, and never call it empty."""
+    import time
+
+    from utils.token_estimator import clear_cache, estimate_tokens
+
+    clear_cache()
+    started = time.monotonic()
+    assert estimate_tokens("x" * 1_000_000) >= 125_000
+    assert estimate_tokens("=" * 300_000, "gpt-4o") >= 4_000
+    assert time.monotonic() - started < 10
+
+
 def test_compaction_budget_zero_when_no_capacity(session):
     """When non-L5 layers alone exceed the window, there is no real
     history capacity — the budget must be 0 (not a fabricated floor);

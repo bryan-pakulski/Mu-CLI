@@ -441,31 +441,53 @@ def choose_session(session_manager):
             "workspace": "▱",
             "container": "◇",
         }
-        sessions_typed = session_manager.get_session_list_with_type()
-        session_options = [
-            (
-                name,
-                f"{_session_type_glyph.get(st, '▱')} {name}",
-                f"{st} · Load or manage this session",
-            )
-            for name, st in sessions_typed
-        ]
+        # Threads list beneath the session they were started from.
+        tree = session_manager.get_session_tree()
+        session_options = []
+        for entry in tree:
+            name, st = entry["name"], entry["session_type"]
+            if entry["thread_parent"]:
+                session_options.append(
+                    (
+                        name,
+                        f"   ↳ {entry['title']}",
+                        f"thread of {entry['thread_parent']} · {name}",
+                    )
+                )
+            else:
+                session_options.append(
+                    (
+                        name,
+                        f"{_session_type_glyph.get(st, '▱')} {name}",
+                        f"{st} · Load or manage this session",
+                    )
+                )
         session_options.append(
             ("__back__", "Back", "Return to the MuCLI launcher")
         )
+        roots = sum(1 for entry in tree if not entry["thread_parent"])
+        threads = len(tree) - roots
+        subtitle = f"{roots} saved session{'s' if roots != 1 else ''}"
+        if threads:
+            subtitle += f" · {threads} thread{'s' if threads != 1 else ''}"
         selected = prompt_choice(
             "Saved sessions",
             session_options,
-            default=sessions[0],
-            subtitle=f"{len(sessions)} saved session{'s' if len(sessions) != 1 else ''}",
+            default=tree[0]["name"] if tree else sessions[0],
+            subtitle=subtitle,
         )
         if selected == "__back__":
             continue
+        kind = (
+            "thread"
+            if any(e["name"] == selected and e["thread_parent"] for e in tree)
+            else "session"
+        )
         session_action = prompt_choice(
             selected,
             [
-                ("load", "Load session", "Open this session"),
-                ("delete", "Delete session", "Permanently remove its saved state"),
+                ("load", f"Load {kind}", f"Open this {kind}"),
+                ("delete", f"Delete {kind}", "Permanently remove its saved state"),
                 ("back", "Back", "Return to the session list"),
             ],
             default="load",
@@ -473,7 +495,7 @@ def choose_session(session_manager):
         if session_action == "back":
             continue
         if session_action == "delete":
-            if prompt_confirm(f"Delete session {selected!r}?", default=False):
+            if prompt_confirm(f"Delete {kind} {selected!r}?", default=False):
                 _safe_delete_session(session_manager, selected)
             continue
         return "load", selected

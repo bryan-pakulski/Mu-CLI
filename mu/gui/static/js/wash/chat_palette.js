@@ -27,14 +27,16 @@
         var sessions = store('sessions');
         var chat = store('chat');
         if (!sessions || !Array.isArray(sessions.list)) return [];
-        return sessions.list.map(function (s) {
+        return sessions.rows().map(function (s) {
             var current = chat && s.name === chat.currentName;
+            // A thread reads as "parent › title", under its session.
+            var thread = !!s.thread_parent;
             return {
                 id: 'session:' + s.name,
                 group: 'Sessions',
-                label: s.name,
-                hint: current ? 'Current' : (s.session_type || ''),
-                icon: s.session_type === 'container' ? 'box' : (s.session_type === 'chat' ? 'message-circle' : 'folder'),
+                label: thread ? s.thread_parent + ' › ' + (s.thread_title || s.name) : s.name,
+                hint: current ? 'Current' : (thread ? 'thread' : (s.session_type || '')),
+                icon: thread ? 'git-branch' : (s.session_type === 'container' ? 'box' : (s.session_type === 'chat' ? 'message-circle' : 'folder')),
                 enabled: !current,
                 run: function () { sessions.switchTo(s.name); },
             };

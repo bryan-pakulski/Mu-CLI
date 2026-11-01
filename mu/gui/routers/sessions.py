@@ -532,6 +532,7 @@ def _summarize(
         "thread_id": thread_meta.thread_id,
         "thread_group_id": thread_meta.group_id,
         "thread_title": thread_meta.title,
+        "thread_created_at": thread_meta.created_at,
     }
 
 

@@ -209,13 +209,6 @@
     .chat-history .msg.interim-leaving { animation: interim-handoff-out var(--wash-motion-small) var(--wash-ease-small) both; }
     @keyframes interim-handoff-in { from { opacity: 0; transform: translateY(4px); filter: blur(3px); } to { opacity: 1; transform: none; filter: none; } }
     @keyframes interim-handoff-out { from { opacity: 1; } to { opacity: 0.55; } }
-    .turn-worked-breadcrumb {
-        margin-top: var(--wash-space-2);
-        color: var(--wash-ink-3);
-        font-size: var(--wash-type-caption-size);
-        font-variant-numeric: tabular-nums;
-        user-select: none;
-    }
     .chat-history .msg.command .cmd-head { display: flex; align-items: center; gap: var(--wash-space-2); flex-wrap: wrap; }
     .chat-history .msg.command .cmd-name { color: var(--wash-ink); font-family: var(--wash-font-mono); font-size: var(--wash-type-mono-size); font-weight: 500; }
     .chat-history .msg.command .cmd-message { color: var(--wash-ink-3); font-size: var(--wash-type-caption-size); }

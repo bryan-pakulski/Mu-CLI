@@ -1301,7 +1301,10 @@ def _get_history_sync(
                     seen_visualization_ids.add(artifact_id)
             parts_out.extend(subagent_exact.get((idx, source_part_index), []))
         parts_out.extend(subagent_fallback.get(idx, []))
-        turns.append({"index": idx, "role": role, "parts": parts_out})
+        projected = {"index": idx, "role": role, "parts": parts_out}
+        if isinstance(turn.get("turn_stats"), dict):
+            projected["stats"] = turn["turn_stats"]
+        turns.append(projected)
 
     # Legacy artifacts predate stable timeline anchors. Preserve their old
     # publish-result matching path, but do not let them consume a slot that

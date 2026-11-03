@@ -9,81 +9,14 @@
     // (static/css/wash/patterns/chat.css); nothing is injected at runtime.
 
     function hasLiveTranscript(slot) {
-        return (slot.turns || []).some(turn => (
+        const flat = [];
+        const walk = items => { for (const turn of items || []) { flat.push(turn); if (turn.role === 'collapse') walk(turn.childTurns); } };
+        walk(slot.turns);
+        return flat.some(turn => (
             (turn.role === 'assistant' && turn.streaming)
             || (turn.role === 'trace' && turn.running && (turn.events || []).length > 0)
             || (turn.role === 'subagent_panel' && turn.running)
         ));
-    }
-
-    function lastFinalAssistant(slot) {
-        for (let index = slot.turns.length - 1; index >= 0; index -= 1) {
-            const turn = slot.turns[index];
-            if (turn.role === 'user') break;
-            if (turn.role === 'assistant' && !turn.streaming && String(turn.text || '').trim()) {
-                return turn;
-            }
-        }
-        return null;
-    }
-
-    function workedFingerprintMap(slot) {
-        const map = new Map();
-        let userText = '';
-        for (const turn of slot.turns || []) {
-            if (turn.role === 'user') userText = String(turn.text || '');
-            if (turn.role === 'assistant' && turn.workedMs && !turn.streaming) {
-                map.set(`${userText}\u0000${String(turn.text || '')}`, Number(turn.workedMs));
-            }
-        }
-        return map;
-    }
-
-    function restoreWorkedFingerprints(slot, map) {
-        if (!map || !map.size) return;
-        let userText = '';
-        for (const turn of slot.turns || []) {
-            if (turn.role === 'user') userText = String(turn.text || '');
-            if (turn.role === 'assistant' && !turn.streaming) {
-                const value = map.get(`${userText}\u0000${String(turn.text || '')}`);
-                if (value) turn.workedMs = value;
-            }
-        }
-    }
-
-    function formatWorkedDuration(ms) {
-        const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
-        const minutes = Math.floor(totalSeconds / 60);
-        const seconds = totalSeconds % 60;
-        return minutes > 0
-            ? `Worked for ${minutes}m ${seconds}s`
-            : `Worked for ${seconds}s`;
-    }
-
-    function decorateWorkedDurations(chat, name) {
-        const target = name || chat.currentName;
-        if (!target || target !== chat.currentName) return;
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-            if (target !== chat.currentName) return;
-            const slot = chat._slot(target);
-            const assistants = (slot.turns || []).filter(turn => turn.role === 'assistant' && !turn.streaming);
-            const nodes = Array.from(document.querySelectorAll('.chat-history > .turn-wrap > .msg.assistant'));
-            assistants.forEach((turn, index) => {
-                const node = nodes[index];
-                if (!node) return;
-                let crumb = node.querySelector(':scope > .turn-worked-breadcrumb');
-                if (!turn.workedMs) {
-                    if (crumb) crumb.remove();
-                    return;
-                }
-                if (!crumb) {
-                    crumb = document.createElement('div');
-                    crumb.className = 'turn-worked-breadcrumb';
-                    node.appendChild(crumb);
-                }
-                crumb.textContent = formatWorkedDuration(turn.workedMs);
-            });
-        }));
     }
 
     function nullableRate(raw, label) {
@@ -346,7 +279,6 @@
                 if (!target) return;
 
                 const slot = this._slot(target);
-                const worked = workedFingerprintMap(slot);
                 const wasBusy = !!slot.busy;
 
                 // A page refresh during a running turn starts with only an empty
@@ -364,14 +296,12 @@
                 });
 
                 const hydrated = this._slot(target);
-                restoreWorkedFingerprints(hydrated, worked);
                 if (hydrated.historyHydrated) hydrated.__authoritativeHydrated = true;
 
                 if (wasBusy) {
                     hydrated.busy = true;
                     this._ensureBusyTrace(hydrated);
                 }
-                decorateWorkedDurations(this, target);
                 return result;
             };
 
@@ -385,7 +315,6 @@
                     if (!slot.__authoritativeHydrated || !slot.historyHydrated) {
                         await chat.loadHistory(current, { force: true });
                     }
-                    decorateWorkedDurations(chat, current);
                 }
                 return result;
             };
@@ -397,56 +326,6 @@
                 const slot = chat._slot(name);
                 slot.__authoritativeHydrated = false;
                 await chat.loadHistory(name, { force: true });
-                decorateWorkedDurations(chat, name);
-                return result;
-            };
-
-            const originalFocus = chat.focus.bind(chat);
-            chat.focus = function (name) {
-                const result = originalFocus(name);
-                decorateWorkedDurations(this, name);
-                return result;
-            };
-
-            const originalSend = chat.send.bind(chat);
-            chat.send = async function (text) {
-                const name = this.currentName;
-                const slot = this._slot(name);
-                const trimmed = String(text || '').trim();
-                const track = !!name && !this.isSlashCommand(trimmed) && this.canSend(trimmed);
-                if (track && !slot.busy) slot.__turnStartedAt = Date.now();
-                const result = await originalSend(text);
-                if (track && !slot.busy) delete slot.__turnStartedAt;
-                return result;
-            };
-
-            const originalAddCommandResult = chat.addCommandResult.bind(chat);
-            chat.addCommandResult = function (result, name) {
-                this._slot(name).__skipWorkedFinish = true;
-                return originalAddCommandResult(result, name);
-            };
-
-            const originalFinishTurn = chat.finishTurn.bind(chat);
-            chat.finishTurn = function (name) {
-                const slot = this._slot(name);
-                const startedAt = Number(slot.__turnStartedAt || 0);
-                const skipWorked = !!slot.__skipWorkedFinish;
-                slot.__skipWorkedFinish = false;
-
-                const result = originalFinishTurn(name);
-
-                if (startedAt && !skipWorked) {
-                    const finalResponse = lastFinalAssistant(slot);
-                    if (finalResponse) {
-                        finalResponse.workedMs = Math.max(0, Date.now() - startedAt);
-                        delete slot.__turnStartedAt;
-                    } else if (!slot.busy) {
-                        // Terminal error/interruption with no completed assistant
-                        // response is not a fully completed turn.
-                        delete slot.__turnStartedAt;
-                    }
-                }
-                decorateWorkedDurations(this, name);
                 return result;
             };
 

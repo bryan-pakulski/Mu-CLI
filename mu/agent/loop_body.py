@@ -470,6 +470,7 @@ def run_turn(session, text, *, origin="user"):
     session._inline_choice_nudged = False
     session._verify_nudged = False
     session._turn_started_at = time.time()
+    session._turn_api_seconds = 0.0
     session._hook_abort_requested = False
     session._hook_abort_reason = None
     # Fix #13: reset the consolidation guard each turn so a max-iterations
@@ -1528,6 +1529,7 @@ def run_turn(session, text, *, origin="user"):
                     f"Generating ({session.provider.model_name}) it {iteration}/{max_iterations}"
                     f" | {build_live_status_line(session)}"
                 )
+            _api_started = time.monotonic()
             if session.ui:
                 with session.ui.show_status(status_msg):
                     response = _generate_with_overflow_recovery(
@@ -1547,6 +1549,10 @@ def run_turn(session, text, *, origin="user"):
                     tools=active_tools if expose_tools else None,
                     turn_start_index=turn_start_index,
                 )
+            _api_elapsed = time.monotonic() - _api_started
+            session._turn_api_seconds = float(getattr(session, "_turn_api_seconds", 0.0) or 0.0) + _api_elapsed
+            _counts = session.session_manager.token_counts
+            _counts["api_seconds"] = float(_counts.get("api_seconds", 0.0) or 0.0) + _api_elapsed
 
             # A pre-provider hook or overflow recovery can compact after
             # the initial estimate. Use its refreshed wire estimate for the

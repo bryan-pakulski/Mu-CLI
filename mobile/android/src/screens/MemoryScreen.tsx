@@ -18,9 +18,12 @@ import {
   RecallReceipt,
   memoryApi,
 } from '../api/memory';
+import { sessionsApi } from '../api/sessions';
+import { useConnectionStore } from '../store/connection';
+import { formatSeconds, formatTokenCount, formatUsd } from '../ui/turnStats';
 import { radii, spacing, touchTarget } from '../theme/tokens';
 import {
-  Button, Chip, ContextRing, EmptyState, Field, LayerBar, Pre, Pressable, Row, Rows, Segmented, Sheet, Skeleton, Text, TextField,
+  Button, Chip, ContextRing, StatStrip, EmptyState, Field, LayerBar, Pre, Pressable, Row, Rows, Segmented, Sheet, Skeleton, Text, TextField,
   layerTone, useServerActions, useToast,
 } from '../ui';
 
@@ -40,6 +43,9 @@ export function MemoryScreen() {
   const toast = useToast();
   const actions = useServerActions();
   const [tab, setTab] = useState<MemoryTab>('memories');
+  const activeSessionName = useConnectionStore(state => state.activeSessionName);
+  // Session totals (tokens, API time, wall time, cost) for the context tab.
+  const [totals, setTotals] = useState<Record<string, number> | null>(null);
   const [snapshot, setSnapshot] = useState<MemorySnapshot | null>(null);
   const [contextTimeline, setContextTimeline] = useState<ContextTimeline | null>(null);
   const [contextView, setContextView] = useState<ContextView>('heatmap');
@@ -73,6 +79,9 @@ export function MemoryScreen() {
       ]);
       setLedger(durable);
       setSnapshot(context);
+      sessionsApi.getActive(activeSessionName || undefined)
+        .then(active => setTotals((active.tokens as Record<string, number>) || null))
+        .catch(() => setTotals(null));
       setContextTimeline(timeline);
       if (timeline.points.length) {
         setSelectedContextPoint(timeline.points[timeline.points.length - 1]);
@@ -83,7 +92,7 @@ export function MemoryScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [query]);
+  }, [query, activeSessionName]);
 
   useFocusEffect(useCallback(() => {
     setLoading(true);
@@ -237,6 +246,14 @@ export function MemoryScreen() {
         <EmptyState title="Context observatory is ready" message="Send a prompt. Each provider call will appear as a new heatmap column." />
       ) : (
         <>
+          {totals ? (
+            <StatStrip testID="session-totals" items={[
+              { label: 'Tokens', value: formatTokenCount(Number(totals.total) || 0) },
+              { label: 'API time', value: formatSeconds(Number(totals.api_seconds) || 0) || '0s' },
+              { label: 'Wall time', value: formatSeconds(Number(totals.wall_seconds) || 0) || '0s' },
+              { label: 'Cost', value: formatUsd(Number(totals.total_cost) || 0) },
+            ]} />
+          ) : null}
           <PanelSection title="Current composition">
             <Text variant="caption" tone="ink3">Provider-visible context, captured at every model call.</Text>
             <View style={styles.composition}>

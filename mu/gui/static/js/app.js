@@ -307,16 +307,18 @@ document.addEventListener("alpine:init", () => {
         },
         // MUCLI_SINGLE_TRACE_LIVE_INTERIM_V1: one authoritative running trace per session.
         _currentTrace(slot) {
-            for (let index = slot.turns.length - 1; index >= 0; index -= 1) {
-                const turn = slot.turns[index];
+            const turns = this._flattenTimeline(slot.turns);
+            for (let index = turns.length - 1; index >= 0; index -= 1) {
+                const turn = turns[index];
                 if (turn.role === "trace") return turn;
             }
             return null;
         },
         _activeTrace(slot) {
             let active = null;
-            for (let index = slot.turns.length - 1; index >= 0; index -= 1) {
-                const turn = slot.turns[index];
+            const turns = this._flattenTimeline(slot.turns);
+            for (let index = turns.length - 1; index >= 0; index -= 1) {
+                const turn = turns[index];
                 if (turn.role !== "trace" || !turn.running) continue;
                 if (active === null) {
                     active = turn;
@@ -338,12 +340,12 @@ document.addEventListener("alpine:init", () => {
             return Boolean(active && active.id === turn.id);
         },
         _hasStreamingAssistant(slot) {
-            return slot.turns.some(turn =>
+            return this._flattenTimeline(slot.turns).some(turn =>
                 turn.role === "assistant" && turn.streaming
             );
         },
         _closeStreamingAssistants(slot, exceptId = null) {
-            for (const turn of slot.turns) {
+            for (const turn of this._flattenTimeline(slot.turns)) {
                 if (
                     turn.role === "assistant"
                     && turn.streaming
@@ -359,7 +361,7 @@ document.addEventListener("alpine:init", () => {
             if (trace) return trace;
             // Reload reconstructs the current tool/thinking block as history.
             // Resume that block instead of adding a second "thinking" row.
-            const previous = this._lastTurn(slot);
+            const previous = this._latestTurn(slot);
             if (previous?.role === "trace" && Number.isInteger(previous.historyIndex)) {
                 previous.running = true;
                 previous.startedAt = Date.now();
@@ -376,6 +378,7 @@ document.addEventListener("alpine:init", () => {
                 elapsed: null,
             };
             slot.turns.push(trace);
+            this._layoutLive(slot);
             return trace;
         },
         _ensureBusyTrace(slot) {
@@ -385,7 +388,7 @@ document.addEventListener("alpine:init", () => {
             return this._ensureTrace(slot);
         },
         _closeTrace(slot) {
-            for (const trace of slot.turns) {
+            for (const trace of this._flattenTimeline(slot.turns)) {
                 if (trace.role !== "trace" || !trace.running) continue;
                 trace.running = false;
                 trace.elapsed = trace.elapsed || (
@@ -395,123 +398,93 @@ document.addEventListener("alpine:init", () => {
                 );
             }
         },
-        _isLiveTimelineTurn(turn) {
-            return (
-                (turn.role === "assistant" && turn.streaming)
-                || (turn.role === "trace" && turn.running)
-                || (turn.role === "subagent_panel" && turn.running)
-            );
-        },
         _isTimelineAnchor(turn) {
-            return turn && (
+            return Boolean(turn) && (
                 turn.role === "visualization"
                 || turn.role === "subagent_panel"
             );
         },
-        _collapseSummary(childTurns) {
-            let totalElapsed = 0;
-            let totalTokens = 0;
-            for (const child of childTurns) {
-                if (child.elapsed) totalElapsed += parseFloat(child.elapsed) || 0;
-                if (child.tokens) totalTokens += Number(child.tokens) || 0;
-            }
-            return {
-                count: childTurns.length,
-                elapsed: totalElapsed > 0 ? `${totalElapsed.toFixed(1)}s` : "",
-                tokens: totalTokens > 0
-                    ? (totalTokens >= 1000
-                        ? `${(totalTokens / 1000).toFixed(1)}k`
-                        : String(totalTokens))
-                    : "",
+        // Rows carry the order they first appeared in. An interim answer folds into
+        // the activity row after the tool calls that followed it, so the row sorts
+        // by this to stay chronological; unseen rows slot in where they stand.
+        _stampOrder(items) {
+            let previous = null;
+            const pending = [];
+            const flush = (next) => {
+                const count = pending.length;
+                const low = previous ?? (next ?? 0) - count - 1;
+                const high = next ?? low + count + 1;
+                pending.forEach((turn, i) => { turn.order = low + (high - low) * (i + 1) / (count + 1); });
+                pending.length = 0;
             };
-        },
-        _pushCollapsedSegments(target, turns, options) {
-            const opts = options || {};
-            let segment = [];
-            let segmentIndex = 0;
-            const flush = () => {
-                if (!segment.length) return;
-                const childTurns = segment;
-                segment = [];
-                const groupKey = `${opts.groupKey || "group"}:${segmentIndex++}`;
-                const summary = this._collapseSummary(childTurns);
-                target.push({
-                    id: `${opts.idPrefix || "collapse"}-${segmentIndex}`,
-                    role: "collapse",
-                    groupKey,
-                    userId: opts.userId || "",
-                    live: Boolean(opts.live),
-                    childTurns,
-                    ...summary,
-                    open: opts.openByKey && opts.openByKey.has(groupKey)
-                        ? Boolean(opts.openByKey.get(groupKey))
-                        : Boolean(opts.defaultOpen),
-                });
-            };
-            for (const turn of turns) {
-                if (this._isTimelineAnchor(turn)) {
-                    flush();
-                    target.push(turn);
+            for (const turn of items) {
+                if (typeof turn.order === "number") {
+                    if (pending.length) flush(turn.order);
+                    previous = turn.order;
                 } else {
-                    segment.push(turn);
+                    pending.push(turn);
                 }
             }
-            flush();
+            if (pending.length) flush(null);
         },
-        _foldLiveInterim(slot, currentId = null) {
+        _latestTurn(slot) {
+            let latest = null;
+            for (const turn of this._flattenTimeline(slot.turns)) {
+                if (!latest || (turn.order ?? Infinity) >= (latest.order ?? Infinity)) latest = turn;
+            }
+            return latest;
+        },
+        // One exchange reads: the prompt, one activity row holding everything the
+        // agent did (tool calls, thinking, interim answers, diffs, approvals,
+        // notes) with its time/tokens/cost, the visualizations and sub-agent
+        // panels it produced, then its latest answer; errors close the exchange.
+        _layoutExchange(userTurn, items, known) {
+            let final = null;
+            for (let i = items.length - 1; i >= 0; i -= 1) {
+                if (items[i].role === "assistant" && items[i].text) { final = items[i]; break; }
+            }
+            const activity = [], anchors = [], tail = [];
+            for (const turn of items) {
+                if (turn === final) continue;
+                if (turn.role === "error" || (turn.role === "assistant" && turn.streaming && !turn.text)) tail.push(turn);
+                else if (this._isTimelineAnchor(turn)) anchors.push(turn);
+                else activity.push(turn);
+            }
+            const byOrder = (a, b) => a.order - b.order;
+            activity.sort(byOrder);
+            anchors.sort(byOrder);
+            const out = [];
+            if (activity.length || userTurn.stats) {
+                const id = `activity-${userTurn.id}`;
+                const row = known.get(id) || { id, role: "collapse", userId: userTurn.id, open: false };
+                row.childTurns = activity;
+                row.stats = userTurn.stats || null;
+                out.push(row);
+            }
+            out.push(...anchors);
+            if (final) out.push(final);
+            out.push(...tail);
+            return out;
+        },
+        // Live: re-lay the exchange in flight so new activity joins its row and
+        // the latest answer stays last.
+        _layoutLive(slot) {
             let userIndex = -1;
-            for (let index = slot.turns.length - 1; index >= 0; index -= 1) {
-                if (slot.turns[index].role === "user") {
-                    userIndex = index;
-                    break;
-                }
+            for (let i = slot.turns.length - 1; i >= 0; i -= 1) {
+                if (slot.turns[i].role === "user") { userIndex = i; break; }
             }
             if (userIndex < 0) return;
-
-            const userTurn = slot.turns[userIndex];
-            const openByKey = new Map();
-            const flatten = (items) => {
-                const flattened = [];
-                for (const item of items) {
-                    if (item.role === "collapse") {
-                        if (item.groupKey) openByKey.set(item.groupKey, Boolean(item.open));
-                        flattened.push(...flatten(item.childTurns || []));
-                    } else {
-                        flattened.push(item);
-                    }
-                }
-                return flattened;
-            };
-            const tail = flatten(slot.turns.slice(userIndex + 1));
-            let currentIndex = -1;
-            for (let index = tail.length - 1; index >= 0; index -= 1) {
-                const turn = tail[index];
-                if (
-                    turn.role === "assistant"
-                    && ((currentId && turn.id === currentId) || (!currentId && turn.streaming))
-                ) {
-                    currentIndex = index;
-                    break;
-                }
-            }
-            // No successor response exists yet. The previous response stays
-            // fully readable while tools/thinking continue in the background.
-            if (currentIndex < 0) return;
-
-            const regrouped = [];
-            this._pushCollapsedSegments(regrouped, tail.slice(0, currentIndex), {
-                idPrefix: `live-collapse-${userTurn.id}`,
-                groupKey: `live:${userTurn.id}`,
-                userId: userTurn.id,
-                live: true,
-                openByKey,
-            });
-            regrouped.push(...tail.slice(currentIndex));
-            slot.turns.splice(userIndex + 1, slot.turns.length - userIndex - 1, ...regrouped);
+            const tail = slot.turns.slice(userIndex + 1);
+            const known = new Map(tail.filter(t => t.role === "collapse").map(t => [t.id, t]));
+            const flat = this._flattenTimeline(tail);
+            this._stampOrder(flat);
+            slot.turns.splice(userIndex + 1, tail.length, ...this._layoutExchange(slot.turns[userIndex], flat, known));
         },
+        // A finished answer stays readable until its successor has text; then it
+        // retires into the activity row.
         _beginAssistantHandoff(slot, current, name) {
             if (!current || !current.text) return;
-            let currentIndex = slot.turns.indexOf(current);
+            const currentIndex = slot.turns.indexOf(current);
             if (currentIndex < 0) return;
             let hasPrevious = false;
             for (let index = currentIndex - 1; index >= 0; index -= 1) {
@@ -528,100 +501,37 @@ document.addEventListener("alpine:init", () => {
             slot.handoffTimer = setTimeout(() => {
                 slot.handoffTimer = null;
                 current.entering = false;
-                for (const turn of slot.turns) turn.leaving = false;
-                this._foldLiveInterim(slot, current.id);
+                for (const turn of this._flattenTimeline(slot.turns)) turn.leaving = false;
+                this._layoutLive(slot);
                 if (!name || name === this.currentName) this.scroll();
             }, 260);
         },
-
-        // ---------- collapse intermediate turns ----------------------
-        // Group intermediate assistant + trace turns between a user msg
-        // and the final assistant response into a collapsible heading.
-        // Visualizations stay inline (trickle up, not contained).
-        // Called on turn_complete (finishTurn) and loadHistory.
+        // Lays out every exchange (turn end, history load, paging). `previousTurns`
+        // only supplies the activity rows' open state.
         _groupIntermediateTurns(slot, previousTurns = slot.turns) {
-            const previous = Array.isArray(previousTurns) ? previousTurns : [];
-            const previousOpen = new Map();
-            const previousLiveOpen = new Map();
-            for (const turn of previous) {
-                if (turn.role === "collapse" && turn.groupKey) {
-                    previousOpen.set(turn.groupKey, Boolean(turn.open));
-                }
-                if (turn.role === "collapse" && turn.live && turn.userId) {
-                    previousLiveOpen.set(turn.userId, Boolean(turn.open));
-                }
+            const known = new Map();
+            for (const turn of [...(previousTurns || []), ...slot.turns]) {
+                if (turn && turn.role === "collapse") known.set(turn.id, turn);
             }
-
-            const flatten = (items) => {
-                const result = [];
-                for (const item of items) {
-                    if (item.role === "collapse") result.push(...flatten(item.childTurns || []));
-                    else result.push(item);
-                }
-                return result;
-            };
-
-            // `previousTurns` is UI-state input only. Hydration and paging
-            // replace slot.turns before calling this helper, so grouping the
-            // previous array silently discards the page that just arrived.
-            const turns = flatten(slot.turns);
+            const flat = this._flattenTimeline(slot.turns);
+            this._stampOrder(flat);
             const grouped = [];
             let index = 0;
-            while (index < turns.length) {
-                const userTurn = turns[index];
-                if (userTurn.role !== "user") {
-                    grouped.push(userTurn);
-                    index += 1;
-                    continue;
-                }
-
-                grouped.push(userTurn);
-                let nextUserIndex = index + 1;
-                while (nextUserIndex < turns.length && turns[nextUserIndex].role !== "user") {
-                    nextUserIndex += 1;
-                }
-
-                const exchange = turns.slice(index + 1, nextUserIndex);
-                let finalOffset = -1;
-                for (let offset = exchange.length - 1; offset >= 0; offset -= 1) {
-                    const candidate = exchange[offset];
-                    if (candidate.role === "assistant" && !candidate.streaming) {
-                        finalOffset = offset;
-                        break;
-                    }
-                }
-
-                if (finalOffset > 0) {
-                    const finalResponse = exchange[finalOffset];
-                    const groupKey = JSON.stringify([userTurn.text || "", finalResponse.text || ""]);
-                    const openByKey = new Map(previousOpen);
-                    // Compatibility with the former one-collapse-per-exchange
-                    // shape: carry its disclosure state into every segment.
-                    const defaultOpen = (
-                        previousOpen.get(groupKey)
-                        ?? previousLiveOpen.get(userTurn.id)
-                        ?? false
-                    );
-                    this._pushCollapsedSegments(grouped, exchange.slice(0, finalOffset), {
-                        idPrefix: `collapse-${userTurn.id}-${finalResponse.id}`,
-                        groupKey,
-                        userId: userTurn.id,
-                        live: false,
-                        openByKey,
-                        defaultOpen,
-                    });
-                    grouped.push(finalResponse, ...exchange.slice(finalOffset + 1));
-                } else {
-                    grouped.push(...exchange);
-                }
-                index = nextUserIndex;
+            while (index < flat.length && flat[index].role !== "user") grouped.push(flat[index++]);
+            while (index < flat.length) {
+                const user = flat[index];
+                let next = index + 1;
+                while (next < flat.length && flat[next].role !== "user") next += 1;
+                grouped.push(user, ...this._layoutExchange(user, flat.slice(index + 1, next), known));
+                index = next;
             }
             slot.turns = grouped;
         },
-        _findById(slot, id) { return slot.turns.find((t) => t.id === id); },
+        _findById(slot, id) { return this._flattenTimeline(slot.turns).find((t) => t.id === id); },
         _lastByRole(slot, role) {
-            for (let i = slot.turns.length - 1; i >= 0; i--) {
-                if (slot.turns[i].role === role) return slot.turns[i];
+            const turns = this._flattenTimeline(slot.turns);
+            for (let i = turns.length - 1; i >= 0; i--) {
+                if (turns[i].role === role) return turns[i];
             }
             return null;
         },
@@ -1632,6 +1542,7 @@ document.addEventListener("alpine:init", () => {
                             streaming: false,
                             attachments: [],
                             historyIndex: turn.index,
+                            stats: turn.role === "user" ? (turn.stats || null) : null,
                         });
                     } else if (part.type === "attachment" && turn.role === "user") {
                         let targetMessage = null;
@@ -1651,6 +1562,7 @@ document.addEventListener("alpine:init", () => {
                                 streaming: false,
                                 attachments: [],
                                 historyIndex: turn.index,
+                                stats: turn.stats || null,
                             };
                             rebuiltTurns.push(targetMessage);
                         }
@@ -3260,7 +3172,7 @@ ${problem.text}`, "error", 16000);
         },
     });
 
-    Alpine.store("tokens", { input: 0, output: 0, total: 0, total_cost: 0 });
+    Alpine.store("tokens", { input: 0, output: 0, total: 0, total_cost: 0, api_seconds: 0, wall_seconds: 0 });
 
     // Live context fill for the top-bar meter (G§9.14). Display only: fed by
     // every focused-session `context_snapshot` (the pre_provider_call hook)
@@ -3300,6 +3212,19 @@ ${problem.text}`, "error", 16000);
                 if (!r.ok) return;
                 this.apply(await r.json());
             } catch (e) { /* the meter stays empty until the first snapshot */ }
+            await this.primeTotals(name);
+        },
+        // Session totals (tokens, cost, API and wall time) for the context panel;
+        // turn_complete keeps them current afterwards.
+        async primeTotals(name) {
+            try {
+                const target = name || Alpine.store("chat").currentName;
+                const query = target ? `?session_name=${encodeURIComponent(target)}` : "";
+                const r = await fetch(`/api/sessions/active${query}`);
+                if (!r.ok) return;
+                const d = await r.json();
+                if (d && d.tokens) Object.assign(Alpine.store("tokens"), d.tokens);
+            } catch (e) { /* totals stay at their last value */ }
         },
     });
 
@@ -6614,6 +6539,10 @@ function routeEvent(ev) {
             if (isFocused && ev.result && ev.result.tokens) {
                 Object.assign(tokens, ev.result.tokens);
             }
+            if (ev.result && ev.result.turn_stats) {
+                const prompt = chat._lastByRole(slot, "user");
+                if (prompt) prompt.stats = ev.result.turn_stats;
+            }
             slot.busy = false;
             chat.finishTurn(name);
             Alpine.store("sessions").recordOutcome(name, (ev.result && ev.result.status) || "completed",
@@ -6763,25 +6692,51 @@ function summarizeTrace(t, _tick) {
     return dur ? `${label} · ${dur}` : label;
 }
 
-// "Worked for 2m 4s · 14 steps" — the interim-turn collapse row (G§9.7).
-function summarizeCollapse(t) {
+// The activity row's overview: "Worked for 2m 4s · 14 steps · 38.2k tokens · $0.42".
+// Finished turns use the server's stats; a running turn counts from its first trace.
+function formatSeconds(seconds) {
+    if (!(seconds > 0)) return "";
+    if (seconds < 10) return `${seconds.toFixed(1)}s`;
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ${Math.round(seconds % 60)}s`;
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+function formatTokenCount(n) {
+    n = Number(n) || 0;
+    if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return String(n);
+}
+function formatUsd(v) {
+    v = Number(v) || 0;
+    return v >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(v >= 0.01 ? 3 : 4)}`;
+}
+function summarizeCollapse(t, _tick) {
     const children = (t && t.childTurns) || [];
     let steps = 0;
+    let startedAt = 0;
+    let running = false;
     for (const child of children) {
         if (child.role === "trace") {
             steps += (child.events || []).filter(ev => ev.kind === "tool_call").length;
+            if (child.startedAt && (!startedAt || child.startedAt < startedAt)) startedAt = child.startedAt;
+            running = running || Boolean(child.running);
         } else if (child.role !== "assistant") {
             steps += 1;
         }
     }
-    if (!steps) steps = children.length;
-    const stepText = `${steps} step${steps === 1 ? "" : "s"}`;
-    const seconds = parseFloat(t && t.elapsed);
-    if (!(seconds > 0)) return stepText;
-    const minutes = Math.floor(seconds / 60);
-    const rest = Math.round(seconds % 60);
-    const worked = minutes > 0 ? `${minutes}m ${rest}s` : `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
-    return `Worked for ${worked} · ${stepText}`;
+    const stats = t && t.stats;
+    if (stats && Number.isFinite(Number(stats.tool_calls))) steps = Math.max(steps, Number(stats.tool_calls));
+    const parts = [`${steps} step${steps === 1 ? "" : "s"}`];
+    const seconds = stats ? Number(stats.wall_seconds) : (running && startedAt ? (Date.now() - startedAt) / 1000 : 0);
+    const time = formatSeconds(seconds);
+    if (stats) {
+        const tokens = (Number(stats.input) || 0) + (Number(stats.output) || 0);
+        if (tokens) parts.push(`${formatTokenCount(tokens)} tokens`);
+        if (Number(stats.cost) > 0) parts.push(formatUsd(stats.cost));
+    }
+    return `${running ? "Working" : "Worked"}${time ? ` for ${time}` : ""} · ${parts.join(" · ")}`;
 }
 
 // Resolved-prompt breadcrumb helpers (G§9.9 "✓ Approved · write_file routes.py · 14:02").

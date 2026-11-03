@@ -50,6 +50,7 @@ import { Pressable } from '../ui/Pressable';
 import { Text } from '../ui/Text';
 import { ToolCard } from '../ui/ToolCard';
 import { useGlass } from '../ui/Glass';
+import { formatSeconds, formatTokenCount, formatUsd } from '../ui/turnStats';
 
 export type ChatScreenProps = {
   mode: { name: string; label: string };
@@ -106,7 +107,6 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
   const [input, setInput] = useState('');
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [selectedAttachments, setSelectedAttachments] = useState<AttachmentDescriptor[]>([]);
-  const [workedById, setWorkedById] = useState<Record<string, number>>({});
   const [activeMessageIndex, setActiveMessageIndex] = useState(0);
   const [atEnd, setAtEnd] = useState(true);
 
@@ -119,8 +119,6 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
   const followOutputRef = useRef(true);
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const visualizationActiveRef = useRef(false);
-  const previousStreamingRef = useRef(false);
-  const turnStartedAtRef = useRef<number | null>(null);
   const completion = useCommandCompletion();
 
   // The inline card is the surface while the transcript is on screen.
@@ -219,25 +217,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
     flatListRef.current?.scrollToEnd({ animated: true });
   }, []);
 
-  // Wall-clock "Worked for" breadcrumbs, only for turns this client watched.
   useEffect(() => {
-    const was = previousStreamingRef.current;
-    if (!was && streaming) turnStartedAtRef.current = Date.now();
-    if (was && !streaming && turnStartedAtRef.current) {
-      const completed = [...messages].reverse().find(m => m.role === 'assistant' && !m.streaming && m.text.trim().length > 0);
-      if (completed) {
-        const elapsed = Math.max(0, Date.now() - turnStartedAtRef.current);
-        setWorkedById(current => ({ ...current, [completed.id]: elapsed }));
-      }
-      turnStartedAtRef.current = null;
-    }
-    previousStreamingRef.current = streaming;
-  }, [messages, streaming]);
-
-  useEffect(() => {
-    setWorkedById({});
-    previousStreamingRef.current = false;
-    turnStartedAtRef.current = null;
     pendingCheckpointIndexRef.current = null;
     checkpointJumpAttemptsRef.current = 0;
     olderCheckpointAnchorRef.current = undefined;
@@ -298,8 +278,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
       return <View style={styles.tool}><ToolCard call={item.tool} testID={`tool-card-${item.id}`} />{after}</View>;
     }
     if (item.role === 'collapse') {
-      const count = item.collapseCount || item.childTurns?.length || 0;
-      const label = `Worked${item.collapseElapsed ? ` for ${item.collapseElapsed}` : ''} · ${count} step${count !== 1 ? 's' : ''}${item.collapseTokens ? ` · ${item.collapseTokens}` : ''}`;
+      const label = activitySummary(item);
       return (
         <View style={styles.worked}>
           <Pressable onPress={() => setMessages(current => current.map(m => (m.id === item.id ? { ...m, collapseOpen: !m.collapseOpen } : m)))}
@@ -323,7 +302,6 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
     }
 
     const isUser = item.role === 'user';
-    const workedMs = workedById[item.id];
     return (
       <MessageHandoff phase={item.role === 'assistant' ? item.handoff : undefined}>
         <View style={[styles.msgRow, isUser ? styles.userRow : null]}>
@@ -337,7 +315,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
             {!isUser && receiptsById[item.id] ? <TurnReceiptRow receipt={receiptsById[item.id]} testID={`turn-receipt-${item.id}`} /> : null}
             {!isUser && item.text.length > 0 ? (
               <View style={styles.meta}>
-                {workedMs ? <Text variant="caption" tone="ink3" numeric>{formatWorked(workedMs)}</Text> : <View />}
+                <View />
                 <IconButton icon="copy" label="Copy message" onPress={() => { void Clipboard.setStringAsync(item.text); }} />
               </View>
             ) : null}
@@ -346,7 +324,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
         {after}
       </MessageHandoff>
     );
-  }, [activeSessionName, colors, onVisualizationInteractionChange, receiptsById, renderAssistantBody, resolvedAfter, setMessages, workedById]);
+  }, [activeSessionName, colors, onVisualizationInteractionChange, receiptsById, renderAssistantBody, resolvedAfter, setMessages]);
 
   const onScroll = useCallback((event: any) => {
     const native = event?.nativeEvent;
@@ -490,10 +468,20 @@ function MessageHandoff({ phase, children }: { phase?: ChatMessage['handoff']; c
   return <Animated.View style={{ opacity, transform: [{ translateY }] }}>{children}</Animated.View>;
 }
 
-function formatWorked(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  const minutes = Math.floor(seconds / 60);
-  return minutes > 0 ? `Worked for ${minutes}m ${seconds % 60}s` : `Worked for ${seconds}s`;
+// The activity row's overview: "Worked for 2m 4s · 14 steps · 38.2k tokens · $0.42".
+export function activitySummary(item: ChatMessage): string {
+  const children = item.childTurns || [];
+  let steps = children.filter(m => m.role === 'tool').length;
+  const stats = item.stats;
+  if (stats && Number.isFinite(Number(stats.tool_calls))) steps = Math.max(steps, Number(stats.tool_calls));
+  const parts = [`${steps} step${steps === 1 ? '' : 's'}`];
+  const time = stats ? formatSeconds(Number(stats.wall_seconds)) : '';
+  if (stats) {
+    const tokens = (Number(stats.input) || 0) + (Number(stats.output) || 0);
+    if (tokens) parts.push(`${formatTokenCount(tokens)} tokens`);
+    if (Number(stats.cost) > 0) parts.push(formatUsd(Number(stats.cost)));
+  }
+  return `${item.collapseLive ? 'Working' : 'Worked'}${time ? ` for ${time}` : ''} · ${parts.join(' · ')}`;
 }
 
 const styles = StyleSheet.create({

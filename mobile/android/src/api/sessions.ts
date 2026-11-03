@@ -138,10 +138,21 @@ export interface SessionListResponse {
   sessions: SessionSummary[];
 }
 
+/** One turn's footprint (server `turn_stats`), kept on the turn's user message. */
+export interface TurnStats {
+  input: number;
+  output: number;
+  cost: number;
+  api_seconds: number;
+  wall_seconds: number;
+  tool_calls: number;
+}
+
 export interface SessionHistoryTurn {
   index: number;
   role: string;
   parts: Array<Record<string, unknown>>;
+  stats?: TurnStats;
 }
 
 export interface SessionHistoryResponse {

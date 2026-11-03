@@ -42,7 +42,7 @@ beforeEach(() => {
   mockReceipts = [];
   mockMessages = [
     { id: 'u1', role: 'user', text: 'Fix the failing test' },
-    { id: 'c1', role: 'collapse', text: '', collapseCount: 3, collapseElapsed: '12s', collapseOpen: false, childTurns: [
+    { id: 'c1', role: 'collapse', text: '', collapseOpen: false, stats: { input: 30000, output: 2000, cost: 0.42, api_seconds: 9, wall_seconds: 12, tool_calls: 2 }, childTurns: [
       { id: 'a0', role: 'assistant', text: 'Looking at the tests first.' },
       tool('t1', 'read_file', { path: 'tests/test_a.py' }), tool('t2', 'bash', { command: 'pytest -q' }, 'failed', 'Error: 1 failed'),
     ] },
@@ -61,9 +61,9 @@ const renderChat = (props: Partial<React.ComponentProps<typeof ChatScreen>> = {}
 it('shows the conversation and folds a finished turn into Worked, with the web tool summary inside', () => {
   const ui = renderChat();
   expect(ui.getByText('Fix the failing test')).toBeTruthy();
-  expect(ui.getByText('Worked for 12s · 3 steps')).toBeTruthy();
+  expect(ui.getByText('Worked for 12s · 2 steps · 32.0k tokens · $0.420')).toBeTruthy();
   expect(ui.queryByText('Looking at the tests first.')).toBeNull();
-  fireEvent.press(ui.getByText('Worked for 12s · 3 steps'));
+  fireEvent.press(ui.getByText('Worked for 12s · 2 steps · 32.0k tokens · $0.420'));
   ui.rerender(<ThemeProvider statusBar={false}><ChatScreen mode={{ name: 'default', label: 'Default' }} onOpenModes={jest.fn()} onOpenSettings={jest.fn()} onOpenContext={jest.fn()} artifactsVisible /></ThemeProvider>);
   expect(ui.getByText('Looking at the tests first.')).toBeTruthy();
   expect(ui.getByText('Read 1 file · ran 1 command')).toBeTruthy();

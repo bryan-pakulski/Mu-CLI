@@ -8,6 +8,8 @@ const root = resolve(__dirname, '../../..');
 const script = name => readFileSync(resolve(root, 'mu/gui/static', name), 'utf8');
 const settle = window => new Promise(resolve => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
 const roles = turns => Array.from(turns, turn => turn.role);
+// The exchange's tool calls, thinking and interim answers live in its one activity row.
+const activityTrace = slot => slot.turns[1].childTurns.find(turn => turn.role === 'trace');
 const history = parts => parts.map(([role, ...parts], index) => ({ index, role, parts }));
 const text = value => ({ type: 'text', text: value });
 const thinking = value => ({ type: 'thinking', text: value });
@@ -55,9 +57,9 @@ test('reload groups provider thinking, calls, and results in chronological order
     const { chat, slot } = await harness(t);
     await chat.loadHistory('mailroom');
     assert(slot.historyHydrated);
-    assert.deepEqual(roles(slot.turns), ['user', 'trace']);
-    const trace = slot.turns[1];
-    assert.equal(trace.open, false);
+    assert.deepEqual(roles(slot.turns), ['user', 'collapse']);
+    assert.equal(slot.turns[1].open, false);
+    const trace = activityTrace(slot);
     assert.equal(trace.running, false);
     assert.deepEqual(Array.from(trace.events, event => event.kind), ['thinking', 'tool_call', 'tool_result', 'thinking', 'tool_call', 'tool_result']);
     assert.deepEqual(Array.from(trace.events, event => event.id), ['h-ev-1-0', 'h-ev-1-1', 'h-ev-2-0', 'h-ev-3-0', 'h-ev-3-1', 'h-ev-4-0']);
@@ -74,12 +76,13 @@ for (const busyBeforeHistory of [true, false]) {
         }
         await chat.loadHistory('mailroom');
         slot.busy = true;
-        const restored = slot.turns[1];
+        const restored = activityTrace(slot);
         chat._ensureBusyTrace(slot);
         chat._ensureBusyTrace(slot); // Repeated sessions snapshots are idempotent.
-        assert.deepEqual(roles(slot.turns), ['user', 'trace']);
+        assert.deepEqual(roles(slot.turns), ['user', 'collapse']);
+        assert.deepEqual(roles(slot.turns[1].childTurns), ['trace']);
         assert.equal(chat._activeTrace(slot), restored);
-        assert.equal(restored.open, false);
+        assert.equal(slot.turns[1].open, false);
         chat.addThinking('Check the tests.', 'mailroom');
         chat.addToolCall('run_tests', {}, 'mailroom');
         chat.addToolResult('run_tests', 'passed', 'mailroom');
@@ -96,16 +99,16 @@ for (const busyBeforeHistory of [true, false]) {
 test('a live event can resume the restored trace before the next busy snapshot', async t => {
     const { chat, slot } = await harness(t);
     await chat.loadHistory('mailroom');
-    const restored = slot.turns[1];
-    restored.open = true;
+    const restored = activityTrace(slot);
+    slot.turns[1].open = true;
     chat.addThinking('Continue inspecting.', 'mailroom');
     assert.equal(chat._activeTrace(slot), restored);
-    assert.equal(restored.open, true);
+    assert.equal(slot.turns[1].open, true);
     assert.equal(slot.turns.length, 2);
     assert.equal(restored.events.length, 7);
 });
 
-test('grouped history preserves message, visualization, and subagent boundaries', async t => {
+test('grouped history keeps each exchange as prompt, activity, outputs, then the final answer', async t => {
     const artifact = { kind: 'visualization', artifact_id: 'chart', title: 'Results' };
     const turns = history([
         ['user', text('First prompt')],
@@ -121,11 +124,15 @@ test('grouped history preserves message, visualization, and subagent boundaries'
     ]);
     const { chat, slot } = await harness(t, turns);
     await chat.loadHistory('mailroom');
+    assert.deepEqual(roles(slot.turns), ['user', 'collapse', 'visualization', 'subagent_panel', 'assistant', 'user', 'collapse']);
+    assert.equal(slot.turns[4].text, 'Final answer');
+    // Inside the row everything stays chronological, the interim answer included.
+    const activity = slot.turns[1].childTurns;
+    assert.deepEqual(roles(activity), ['trace', 'assistant', 'trace', 'trace', 'trace']);
+    assert.equal(activity[1].text, 'Progress update');
+    assert.equal(activity[3].events[0].text, 'After the chart');
+    assert.equal(activity[4].events[0].text, 'After the panel');
     const flattened = chat._flattenTimeline(slot.turns);
-    assert.deepEqual(roles(flattened), ['user', 'trace', 'assistant', 'trace', 'visualization', 'trace', 'subagent_panel', 'trace', 'assistant', 'user', 'trace']);
-    assert.equal(flattened[5].events[0].text, 'After the chart');
-    assert.equal(flattened[7].events[0].text, 'After the panel');
-    assert(slot.turns.some(turn => turn.role === 'assistant' && turn.text === 'Final answer'));
     slot.busy = true;
     chat._ensureBusyTrace(slot);
     assert.equal(flattened.filter(turn => turn.running).length, 1);
@@ -137,7 +144,7 @@ test('finishing and starting another prompt keeps each exchange separate', async
     await chat.loadHistory('mailroom');
     slot.busy = true;
     chat._ensureBusyTrace(slot);
-    const restored = slot.turns[1];
+    const restored = activityTrace(slot);
     chat.startAssistant('answer', 'mailroom');
     chat.appendDelta('answer', 'All done.', 'mailroom');
     chat.endAssistant('answer', 'mailroom');
@@ -164,4 +171,31 @@ test('enabling YOLO leaves human-only security approvals pending', async t => {
     ];
     window.Alpine.store('yolo')._autoApprovePending();
     assert.deepEqual(answered, ['ordinary']);
+});
+
+test('a live turn keeps its latest answer last and reports time, tokens and cost', async t => {
+    const { window, chat, slot } = await harness(t, []);
+    await chat.loadHistory('mailroom');
+    chat.addUser('Fix it', 'mailroom');
+    chat.addToolCall('read_file', { path: 'a.py' }, 'mailroom');
+    chat.startAssistant('a1', 'mailroom');
+    chat.appendDelta('a1', 'Found the bug.', 'mailroom');
+    chat.endAssistant('a1', 'mailroom');
+    chat.addToolCall('write_file', { path: 'a.py' }, 'mailroom');
+    chat.addToolResult('write_file', 'ok', 'mailroom');
+    // New tool activity joins the row; the last answer is still the last row.
+    assert.deepEqual(roles(slot.turns), ['user', 'collapse', 'assistant']);
+    chat.startAssistant('a2', 'mailroom');
+    chat.appendDelta('a2', 'Fixed and tested.', 'mailroom');
+    chat.endAssistant('a2', 'mailroom');
+    slot.busy = false;
+    chat.finishTurn('mailroom');
+    assert.deepEqual(roles(slot.turns), ['user', 'collapse', 'assistant']);
+    assert.equal(slot.turns[2].text, 'Fixed and tested.');
+    const activity = slot.turns[1];
+    assert.deepEqual(roles(activity.childTurns), ['trace', 'assistant', 'trace']);
+    assert.equal(activity.childTurns[1].text, 'Found the bug.');
+    slot.turns[0].stats = { input: 12000, output: 400, cost: 0.0312, wall_seconds: 75, api_seconds: 40, tool_calls: 2 };
+    chat._groupIntermediateTurns(slot);
+    assert.equal(window.summarizeCollapse(slot.turns[1]), 'Worked for 1m 15s · 2 steps · 12.4k tokens · $0.031');
 });

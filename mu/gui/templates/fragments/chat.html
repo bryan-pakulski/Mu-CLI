@@ -124,8 +124,7 @@
                          @keydown.enter.prevent="t.open = !t.open"
                          @keydown.space.prevent="t.open = !t.open">
                         <svg class="w-icon" data-size="sm" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-sparkles"></use></svg>
-                        <span class="collapse-summary w-worked__label" x-text="summarizeCollapse(t)"></span>
-                        <span class="w-worked__meta" x-show="t.tokens" x-text="t.tokens + ' tokens'"></span>
+                        <span class="collapse-summary w-worked__label" x-text="summarizeCollapse(t, $store.chat.clock)"></span>
                         <span class="caret w-worked__chevron" aria-hidden="true">›</span>
                     </div>
                     <div class="collapse-body w-worked__body"

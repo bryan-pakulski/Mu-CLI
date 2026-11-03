@@ -4,6 +4,7 @@ import {
   sessionsApi,
   type SessionHistoryResponse,
   type SessionHistoryTurn,
+  type TurnStats,
 } from '../api/sessions';
 import { subscribeToEvents, type SSESubscription } from '../api/sse';
 import { queueIfOffline, useConnectionStore } from '../store/connection';
@@ -39,13 +40,10 @@ export interface ChatMessage {
   subagentBatchId?: string;
   attachments?: AttachmentDescriptor[];
   childTurns?: ChatMessage[];
-  collapseCount?: number;
-  collapseElapsed?: string;
-  collapseTokens?: string;
   collapseOpen?: boolean;
-  collapseGroupKey?: string;
   collapseLive?: boolean;
-  collapseUserId?: string;
+  /** The turn's footprint: on its prompt, and on the activity row that summarises it. */
+  stats?: TurnStats;
   handoff?: 'entering' | 'leaving';
   /** Tool invocation shown as a Wash ToolCard (role 'tool'). */
   tool?: ToolCallView;
@@ -121,6 +119,7 @@ export function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
         streaming: false,
         origin: 'history',
         attachments: messageRole === 'user' ? [...pendingAttachments] : undefined,
+        stats: messageRole === 'user' ? turn.stats : undefined,
       });
     };
 
@@ -203,6 +202,7 @@ export function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
         streaming: false,
         origin: 'history',
         attachments: [...pendingAttachments],
+        stats: turn.stats,
       });
     }
     return messages;
@@ -376,21 +376,28 @@ function subagentFromEvent(
 // itself always remains top-level and in chronological order.
 /** Mark the oldest running live tool card done (or failed when blocked). */
 export function settleRunningTool(messages: ChatMessage[], result: string, failed: boolean): ChatMessage[] {
-  const index = messages.findIndex(message => message.role === 'tool' && message.tool?.status === 'running');
-  if (index < 0) return messages;
-  const message = messages[index];
-  const tool = message.tool!;
-  const updated = [...messages];
-  updated[index] = {
-    ...message,
-    tool: {
-      ...tool,
-      status: failed ? 'failed' : 'done',
-      result: result.length > 4000 ? `${result.slice(0, 4000)}…` : result,
-      durationMs: tool.startedAt ? Date.now() - tool.startedAt : undefined,
-    },
-  };
-  return updated;
+  let settled = false;
+  const visit = (items: ChatMessage[]): ChatMessage[] => items.map(message => {
+    if (settled) return message;
+    if (message.role === 'collapse' && message.childTurns) {
+      const childTurns = visit(message.childTurns);
+      return settled ? { ...message, childTurns, collapseLive: childTurns.some(m => m.tool?.status === 'running') } : message;
+    }
+    if (message.role !== 'tool' || message.tool?.status !== 'running') return message;
+    settled = true;
+    const tool = message.tool;
+    return {
+      ...message,
+      tool: {
+        ...tool,
+        status: failed ? 'failed' : 'done',
+        result: result.length > 4000 ? `${result.slice(0, 4000)}…` : result,
+        durationMs: tool.startedAt ? Date.now() - tool.startedAt : undefined,
+      },
+    };
+  });
+  const updated = visit(messages);
+  return settled ? updated : messages;
 }
 
 function flattenCollapsedMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -403,10 +410,6 @@ function flattenCollapsedMessages(messages: ChatMessage[]): ChatMessage[] {
     }
   }
   return flattened;
-}
-
-function collapseGroupKey(user: ChatMessage, finalResponse: ChatMessage): string {
-  return JSON.stringify([user.text, finalResponse.text]);
 }
 
 function isTimelineAnchor(message: ChatMessage): boolean {
@@ -454,165 +457,77 @@ function upsertSubagentPanelMessage(
   return updated;
 }
 
-function appendCollapsedSegments(
-  target: ChatMessage[],
-  segmentSource: ChatMessage[],
-  options: {
-    idPrefix: string;
-    groupKey: string;
-    userId: string;
-    live: boolean;
-    previousOpen: Map<string, boolean>;
-    defaultOpen: boolean;
-  },
-) {
-  let segment: ChatMessage[] = [];
-  let segmentIndex = 0;
-  const flush = () => {
-    if (segment.length === 0) return;
-    const childTurns = segment;
-    segment = [];
-    const key = `${options.groupKey}:${segmentIndex}`;
-    segmentIndex += 1;
-    target.push({
-      id: `${options.idPrefix}-${segmentIndex}`,
+// One exchange reads: the prompt, one activity row holding everything the agent
+// did (tool calls, interim answers) with its time/tokens/cost, the visualizations
+// and sub-agent panels it produced, then its latest answer. Flattening keeps
+// chronology: a retired answer lands after the older activity and before newer calls.
+function layoutExchange(user: ChatMessage, items: ChatMessage[], open: Map<string, boolean>): ChatMessage[] {
+  let final: ChatMessage | null = null;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (items[i].role === 'assistant' && items[i].text.trim()) { final = items[i]; break; }
+  }
+  const activity: ChatMessage[] = [];
+  const anchors: ChatMessage[] = [];
+  const tail: ChatMessage[] = [];
+  for (const message of items) {
+    if (message === final) continue;
+    if (message.role === 'assistant' && message.streaming && !message.text.trim()) tail.push(message);
+    else if (isTimelineAnchor(message)) anchors.push(message);
+    else activity.push(message);
+  }
+  const out: ChatMessage[] = [];
+  if (activity.length || user.stats) {
+    const id = `activity-${user.id}`;
+    out.push({
+      id,
       role: 'collapse',
       text: '',
-      childTurns,
-      collapseCount: childTurns.length,
-      collapseElapsed: '',
-      collapseTokens: '',
-      collapseOpen: options.previousOpen.get(key) ?? options.defaultOpen,
-      collapseGroupKey: key,
-      collapseLive: options.live,
-      collapseUserId: options.userId,
+      childTurns: activity,
+      stats: user.stats,
+      collapseOpen: open.get(id) ?? false,
+      collapseLive: activity.some(m => m.tool?.status === 'running'),
     });
-  };
-  for (const message of segmentSource) {
-    if (isTimelineAnchor(message)) {
-      flush();
-      target.push(message);
-    } else {
-      segment.push(message);
-    }
   }
-  flush();
+  out.push(...anchors);
+  if (final) out.push(final);
+  out.push(...tail);
+  return out;
 }
 
-function groupIntermediateTurns(
+function openStates(messages: ChatMessage[]): Map<string, boolean> {
+  return new Map(messages.filter(m => m.role === 'collapse').map(m => [m.id, Boolean(m.collapseOpen)]));
+}
+
+export function groupIntermediateTurns(
   messages: ChatMessage[],
   previous: ChatMessage[] = messages,
 ): ChatMessage[] {
+  const open = openStates([...previous, ...messages]);
   const source = flattenCollapsedMessages(messages);
-  if (source.length < 3) return source;
-
-  const previousOpen = new Map<string, boolean>();
-  const previousLiveOpen = new Map<string, boolean>();
-  for (const message of previous) {
-    if (message.role === 'collapse' && message.collapseGroupKey) {
-      previousOpen.set(message.collapseGroupKey, Boolean(message.collapseOpen));
-    }
-    if (message.role === 'collapse' && message.collapseLive && message.collapseUserId) {
-      previousLiveOpen.set(message.collapseUserId, Boolean(message.collapseOpen));
-    }
-  }
-
   const grouped: ChatMessage[] = [];
   let index = 0;
+  while (index < source.length && source[index].role !== 'user') grouped.push(source[index++]);
   while (index < source.length) {
-    const userMessage = source[index];
-    if (userMessage.role !== 'user') {
-      grouped.push(userMessage);
-      index += 1;
-      continue;
-    }
-
-    grouped.push(userMessage);
-    let nextUserIndex = index + 1;
-    while (nextUserIndex < source.length && source[nextUserIndex].role !== 'user') {
-      nextUserIndex += 1;
-    }
-
-    const exchange = source.slice(index + 1, nextUserIndex);
-    let finalOffset = -1;
-    for (let offset = exchange.length - 1; offset >= 0; offset -= 1) {
-      const candidate = exchange[offset];
-      if (candidate.role === 'assistant' && !candidate.streaming) {
-        finalOffset = offset;
-        break;
-      }
-    }
-
-    if (finalOffset > 0) {
-      const finalResponse = exchange[finalOffset];
-      const groupKey = collapseGroupKey(userMessage, finalResponse);
-      appendCollapsedSegments(grouped, exchange.slice(0, finalOffset), {
-        idPrefix: `collapse-${userMessage.id}-${finalResponse.id}`,
-        groupKey,
-        userId: userMessage.id,
-        live: false,
-        previousOpen,
-        defaultOpen:
-          previousOpen.get(groupKey)
-          ?? previousLiveOpen.get(userMessage.id)
-          ?? false,
-      });
-      grouped.push(finalResponse, ...exchange.slice(finalOffset + 1));
-    } else {
-      grouped.push(...exchange);
-    }
-
-    index = nextUserIndex;
+    const user = source[index];
+    let next = index + 1;
+    while (next < source.length && source[next].role !== 'user') next += 1;
+    grouped.push(user, ...layoutExchange(user, source.slice(index + 1, next), open));
+    index = next;
   }
   return grouped;
 }
 
-// A completed response stays readable until replacement text exists. Once the
-// successor arrives, fold only the content before it; visualization anchors
-// remain top-level and keep their exact chronological position.
-function foldLiveInterim(messages: ChatMessage[], currentTurnId: string): ChatMessage[] {
+// Live: re-lay the exchange in flight so new activity joins its row and the
+// latest answer stays last.
+function layoutLive(messages: ChatMessage[]): ChatMessage[] {
   let userIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].role === 'user') {
-      userIndex = index;
-      break;
-    }
+    if (messages[index].role === 'user') { userIndex = index; break; }
   }
   if (userIndex < 0) return messages;
-
-  const userMessage = messages[userIndex];
-  const originalTail = messages.slice(userIndex + 1);
-  const previousOpen = new Map<string, boolean>();
-  for (const message of originalTail) {
-    if (message.role === 'collapse' && message.collapseGroupKey) {
-      previousOpen.set(message.collapseGroupKey, Boolean(message.collapseOpen));
-    }
-  }
-  const tail = flattenCollapsedMessages(originalTail).map(message => ({
-    ...message,
-    handoff: undefined,
-  }));
-  let currentIndex = -1;
-  for (let index = tail.length - 1; index >= 0; index -= 1) {
-    const message = tail[index];
-    if (message.role === 'assistant' && message.turnId === currentTurnId) {
-      currentIndex = index;
-      break;
-    }
-  }
-  if (currentIndex < 0) return messages;
-
-  const regrouped: ChatMessage[] = [];
-  appendCollapsedSegments(regrouped, tail.slice(0, currentIndex), {
-    idPrefix: `live-collapse-${userMessage.id}`,
-    groupKey: `live:${userMessage.id}`,
-    userId: userMessage.id,
-    live: true,
-    previousOpen,
-    defaultOpen: false,
-  });
-  regrouped.push(...tail.slice(currentIndex));
-  return [...messages.slice(0, userIndex + 1), ...regrouped];
+  const tail = messages.slice(userIndex + 1);
+  const items = flattenCollapsedMessages(tail).map(message => ({ ...message, handoff: undefined }));
+  return [...messages.slice(0, userIndex + 1), ...layoutExchange(messages[userIndex], items, openStates(tail))];
 }
 
 // Pure whole-turn eviction helper retained for callers that need a bounded
@@ -799,7 +714,7 @@ export function useChatSession(activeSessionName: string | null) {
     if (handoffTimerRef.current) clearTimeout(handoffTimerRef.current);
     handoffTimerRef.current = setTimeout(() => {
       handoffTimerRef.current = null;
-      setMessages(current => foldLiveInterim(current, turnId));
+      setMessages(current => layoutLive(current));
     }, 260);
   }, []);
 
@@ -1192,7 +1107,7 @@ export function useChatSession(activeSessionName: string | null) {
       flushPendingDeltas();
       const startedAt = Date.now();
       const toolId = `live-tool-${startedAt}-${liveToolSeqRef.current++}`;
-      setMessages(current => [...current, {
+      setMessages(current => layoutLive([...current, {
         id: toolId,
         role: 'tool',
         text: '',
@@ -1200,7 +1115,7 @@ export function useChatSession(activeSessionName: string | null) {
         origin: 'stream',
         turnId: typeof event.turn_id === 'string' ? event.turn_id : undefined,
         tool: { id: toolId, name: toolName || 'tool', status: 'running', startedAt, live: true },
-      }]);
+      }]));
       return;
     }
 
@@ -1327,8 +1242,16 @@ export function useChatSession(activeSessionName: string | null) {
       if (result?.status === 'error' && result.error) {
         setError(String(result.error));
       }
+      const turnStats = result?.turn_stats && typeof result.turn_stats === 'object'
+        ? result.turn_stats as TurnStats
+        : undefined;
       setMessages(current => {
-        const retired = current.map(message =>
+        let lastUser = -1;
+        for (let i = current.length - 1; i >= 0; i -= 1) {
+          if (current[i].role === 'user') { lastUser = i; break; }
+        }
+        const retired = current.map((message, i) =>
+          i === lastUser && turnStats ? { ...message, stats: turnStats } :
           message.role === 'assistant' && message.streaming
             ? { ...message, streaming: false, handoff: undefined }
             : { ...message, handoff: undefined }

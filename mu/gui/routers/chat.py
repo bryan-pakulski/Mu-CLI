@@ -600,6 +600,7 @@ def _summarize_result(result: Any) -> Dict[str, Any]:
         "ok": result.get("ok", False),
         "status": result.get("status"),
         "tokens": result.get("session_totals") or result.get("tokens"),
+        "turn_stats": result.get("turn_stats"),
         "error": result.get("error"),
     }
 

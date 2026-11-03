@@ -1483,6 +1483,23 @@ class Session:
             except Exception:
                 logger.debug("durable memory capture failed", exc_info=True)
 
+        # One turn's footprint, shown on the turn's activity row and kept on its
+        # user message so reloaded history shows the same overview.
+        started_at = float(getattr(self, "_turn_started_at", 0.0) or 0.0)
+        wall_seconds = max(0.0, time.time() - started_at) if started_at else 0.0
+        counts = self.session_manager.token_counts
+        counts["wall_seconds"] = float(counts.get("wall_seconds", 0.0) or 0.0) + wall_seconds
+        turn_stats = {
+            "input": int(total_in or 0),
+            "output": int(total_out or 0),
+            "cost": float(total_cost or 0.0),
+            "api_seconds": round(float(getattr(self, "_turn_api_seconds", 0.0) or 0.0), 3),
+            "wall_seconds": round(wall_seconds, 3),
+            "tool_calls": len(tool_calls),
+        }
+        history = self.session_manager.history
+        if 0 <= start_index < len(history) and history[start_index].get("role") == "user":
+            history[start_index]["turn_stats"] = turn_stats
         response = {
             "ok": error is None and status not in {"error"},
             "status": status,
@@ -1502,6 +1519,7 @@ class Session:
                 "estimated_cost": total_cost,
             },
             "session_totals": dict(self.session_manager.token_counts),
+            "turn_stats": turn_stats,
             "memory": {
                 "recall_receipt_id": str(
                     getattr(

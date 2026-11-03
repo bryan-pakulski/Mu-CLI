@@ -244,6 +244,17 @@
                         title="Refresh context history" aria-label="Refresh context history"><svg class="w-icon" aria-hidden="true" focusable="false"><use href="/static/icons/wash.svg#i-refresh-cw"></use></svg></button>
             </header>
 
+            <dl class="w-stats context-session-totals" aria-label="Session totals">
+                <div class="w-stat"><dt class="w-stat__label">Tokens</dt>
+                    <dd class="w-stat__value" x-text="formatTokenCount($store.tokens.total || 0)"></dd></div>
+                <div class="w-stat"><dt class="w-stat__label">API time</dt>
+                    <dd class="w-stat__value" x-text="formatSeconds($store.tokens.api_seconds) || '0s'"></dd></div>
+                <div class="w-stat"><dt class="w-stat__label">Wall time</dt>
+                    <dd class="w-stat__value" x-text="formatSeconds($store.tokens.wall_seconds) || '0s'"></dd></div>
+                <div class="w-stat"><dt class="w-stat__label">Cost</dt>
+                    <dd class="w-stat__value" x-text="formatUsd($store.tokens.total_cost || 0)"></dd></div>
+            </dl>
+
             <section class="context-meter-card" aria-label="Context fill and layers">
                 <div class="context-meter-row">
                     <span class="w-ring" data-size="lg"

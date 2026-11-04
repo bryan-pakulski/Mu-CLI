@@ -10,7 +10,7 @@
 // Fleet-chat and job sessions never appear (the server filters them).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, PanResponder, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { describeSessionLoadError, formatSessionLoadProblem, sessionsApi, type SessionSummary } from '../../api/sessions';
 import { threadsApi, type ThreadStatus, type ThreadSummary } from '../../api/threads';
 import { useConnectionStore } from '../../store/connection';
@@ -19,10 +19,8 @@ import { useTheme } from '../../theme/ThemeContext';
 import { spacing } from '../../theme/tokens';
 import { IconButton } from '../../ui/Button';
 import { Chip } from '../../ui/Chip';
-import { GlassBackdrop } from '../../ui/Glass';
 import { ActionSheet, BoardSection, Row, type MenuItem } from '../../ui/Mu';
-import { Pressable } from '../../ui/Pressable';
-import { ModalFrame } from '../../ui/Sheet';
+import { SlidePanel, type SlidePanelHandle } from '../SlidePanel';
 import { Button } from '../../ui/Button';
 import { Text } from '../../ui/Text';
 import { NewSessionSheet } from '../NewSessionSheet';
@@ -68,7 +66,15 @@ export function nestSessions(sessions: readonly SessionSummary[], activeName?: s
   }));
 }
 
-export function SessionsDrawer({ visible, onClose, createRequestToken = 0 }: { visible: boolean; onClose: () => void; createRequestToken?: number }) {
+export function SessionsDrawer({ visible, onClose, onOpen, panelRef, createRequestToken = 0 }: {
+  visible: boolean;
+  onClose: () => void;
+  /** An edge swipe left the drawer open. */
+  onOpen?: () => void;
+  /** Lets the screen's edge swipe drive the drawer while the finger moves. */
+  panelRef?: React.Ref<SlidePanelHandle>;
+  createRequestToken?: number;
+}) {
   const { colors } = useTheme();
   const { activeSessionName, setActiveSession, setActiveProviderModel } = useConnectionStore();
   const needsYou = usePromptStore(s => s.queue.length > 0);
@@ -81,11 +87,6 @@ export function SessionsDrawer({ visible, onClose, createRequestToken = 0 }: { v
   const [createSession, setCreateSession] = useState(false);
   const [createThread, setCreateThread] = useState(false);
   const [menu, setMenu] = useState<{ title: string; items: MenuItem[] } | null>(null);
-
-  const swipe = React.useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_e, g) => g.dx < -10 && Math.abs(g.dx) > Math.abs(g.dy) * 1.2,
-    onPanResponderRelease: (_e, g) => { if (g.dx < -64) onClose(); },
-  }), [onClose]);
 
   const load = useCallback(async (spinner = true) => {
     try {
@@ -191,14 +192,10 @@ export function SessionsDrawer({ visible, onClose, createRequestToken = 0 }: { v
 
   const families = nestSessions(sessions, activeSessionName);
 
-  const drawerVisible = visible && !createSession && !createThread && !menu;
-
   return (
     <>
-      <ModalFrame statusBarTranslucent={false} visible={drawerVisible} transparent animationType="fade" onRequestClose={onClose} testID="sessions-drawer">
-        <View style={styles.overlay}>
-          <View {...swipe.panHandlers} style={[styles.drawer, { borderRightColor: colors.hairline }]}>
-            <GlassBackdrop level={1} testID="sessions-drawer-glass" />
+      <SlidePanel ref={panelRef} side="left" visible={visible} onClose={onClose} onOpen={onOpen} label="Conversations" testID="sessions-drawer">
+          <View style={styles.drawer}>
             <View style={[styles.head, { borderBottomColor: colors.hairline }]}>
               <Text variant="title3" accessibilityRole="header" style={{ flex: 1 }}>Conversations</Text>
               <IconButton icon="plus" label={activeSessionName ? 'New thread' : 'New session'} onPress={() => (activeSessionName ? setCreateThread(true) : setCreateSession(true))} testID="drawer-new" />
@@ -244,9 +241,7 @@ export function SessionsDrawer({ visible, onClose, createRequestToken = 0 }: { v
               {error ? <Button variant="ghost" label="Retry" onPress={() => void load()} /> : null}
             </ScrollView>
           </View>
-          <Pressable accessibilityLabel="Close conversations" style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={onClose} scale={false} />
-        </View>
-      </ModalFrame>
+      </SlidePanel>
       <ActionSheet visible={!!menu} onClose={() => setMenu(null)} title={menu?.title} items={menu?.items || []} />
       <NewSessionSheet visible={createSession} onClose={() => setCreateSession(false)}
         onCreated={session => { setActiveSession(session.name); setActiveProviderModel(session.provider, session.model); setCreateSession(false); onClose(); }} />
@@ -257,9 +252,7 @@ export function SessionsDrawer({ visible, onClose, createRequestToken = 0 }: { v
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, flexDirection: 'row' },
-  backdrop: { flex: 1 },
-  drawer: { width: '88%', maxWidth: 380, borderRightWidth: 1, overflow: 'hidden', paddingTop: spacing.base },
+  drawer: { flex: 1, paddingTop: spacing.sm },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.base, paddingBottom: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   list: { padding: spacing.base, paddingBottom: spacing['2xl'] },
   thread: { marginLeft: spacing.lg },

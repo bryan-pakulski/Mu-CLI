@@ -552,7 +552,8 @@ export const jobsApi = {
   history: (q: JobHistoryQuery = {}) => api.get<JobHistoryResponse>('/api/jobs/history', { query: jobHistoryQuery(q) }),
   /** Aggregate report for the same filters as history. */
   report: (q: Omit<JobHistoryQuery, 'sort' | 'order' | 'limit' | 'offset'> = {}) => api.get<{ report: JobReport }>('/api/jobs/report', { query: jobHistoryQuery(q) }),
-  archive: (jobId: string, reason = '') => api.post<JobManagementState>(`/api/jobs/${encodeURIComponent(jobId)}/archive`, { reason }),
+  /** `stop` first stops a job that is still live (e.g. waiting on you at review), then archives it. */
+  archive: (jobId: string, reason = '', stop = false) => api.post<JobManagementState>(`/api/jobs/${encodeURIComponent(jobId)}/archive`, { reason, stop }),
   restore: (jobId: string) => api.post<JobManagementState>(`/api/jobs/${encodeURIComponent(jobId)}/restore`, {}),
   bulk: (action: 'archive' | 'restore' | 'delete', jobIds: string[], opts: { reason?: string; force?: boolean } = {}) =>
     api.post<{ action: string; requested: number; succeeded: number; failed: number; results: Array<{ job_id: string; ok: boolean; error?: string }> }>(

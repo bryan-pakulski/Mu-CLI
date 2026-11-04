@@ -41,7 +41,7 @@ COMMANDS: Sequence[tuple[str, str]] = (
     ("keepEnvironments", "Keep environments"),
     ("addRepairToTemplate", "Add to template setup"),
     ("saveRepairedTemplate", "Save repaired image as template"),
-    ("discard", "Discard"),
+    ("discard", "Stop job"),
     ("delete", "Delete"),
 )
 COMMAND_IDS = tuple(c[0] for c in COMMANDS)
@@ -128,7 +128,7 @@ TONES = {
 }
 CONFIRMS = {
     "repush": "Push the branch again and open a new PR? The closed PR is left as it is.",
-    "discard": "Discard this job? Running work is cancelled and the job cannot be resumed.",
+    "discard": "Stop this job? Running work is cancelled and it cannot be resumed; you can then archive it.",
     "delete": "Delete this job and its artifacts? This cannot be undone.",
     "restartStage": "Restart the current stage? Its in-progress work is discarded.",
     "refreshEnvironments": "Re-snapshot the build environments for this job? Stages started after this use the new images.",

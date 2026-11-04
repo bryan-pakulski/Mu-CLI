@@ -50,6 +50,7 @@ import { StatusSheen } from '../ui/StatusSheen';
 import { Pressable } from '../ui/Pressable';
 import { Text } from '../ui/Text';
 import { ToolCard } from '../ui/ToolCard';
+import { Pre } from '../ui/Card';
 import { useGlass } from '../ui/Glass';
 import { formatSeconds, formatTokenCount, formatUsd } from '../ui/turnStats';
 
@@ -335,6 +336,21 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
     if (item.role === 'subagent_panel' && item.subagents?.length) {
       return <View style={styles.block}><SubagentActivityPanel agents={item.subagents} />{after}</View>;
     }
+    if (item.role === 'command' && item.command) {
+      const run = item.command;
+      const tone = run.running ? colors.ink3 : run.ok ? colors.ok.ink : colors.danger.ink;
+      return (
+        <View style={[styles.command, { backgroundColor: colors.sunken, borderColor: colors.hairline }]} testID={`command-${item.id}`} accessibilityLabel={`Command ${run.input}`}>
+          <View style={styles.commandHead}>
+            <Text variant="monoSm" style={{ flex: 1, color: colors.ink }} numberOfLines={2} selectable>{run.input}</Text>
+            <Text variant="caption" style={{ color: tone }}>{run.running ? '● running' : run.ok ? '✓ ok' : '✗ error'}</Text>
+          </View>
+          {run.message && !(run.output && run.message === run.output) ? <Text variant="body" tone="ink2" selectable>{run.message}</Text> : null}
+          {run.output ? <Pre>{run.output}</Pre> : null}
+          {after}
+        </View>
+      );
+    }
     if (item.role === 'tool' && item.tool) {
       return <View style={styles.tool}><ToolCard call={item.tool} testID={`tool-card-${item.id}`} />{after}</View>;
     }
@@ -558,6 +574,8 @@ const styles = StyleSheet.create({
   attachments: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm },
   block: { marginBottom: spacing.base },
   tool: { marginBottom: spacing.sm },
+  command: { marginBottom: spacing.base, padding: spacing.md, borderRadius: radii.md, borderWidth: StyleSheet.hairlineWidth, gap: spacing.xs },
+  commandHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   worked: { marginBottom: spacing.md },
   workedHead: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radii.md, alignSelf: 'flex-start', maxWidth: '100%' },
   workedBody: { marginLeft: spacing.xs, marginTop: spacing.sm, paddingLeft: spacing.md, borderLeftWidth: 1, gap: spacing.xs },

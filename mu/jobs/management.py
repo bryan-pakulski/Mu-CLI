@@ -413,8 +413,18 @@ class JobManagementService:
             ],
         }
 
-    def archive(self, job_id: str, *, reason: str = "") -> Dict[str, Any]:
+    def archive(self, job_id: str, *, reason: str = "", stop: bool = False,
+                lease_wait_seconds: float = 5.0) -> Dict[str, Any]:
+        """Hide a historic job from the board. ``stop=True`` first stops a job that is still
+        live (e.g. waiting on a human at review), then archives it."""
         job = self.service.get(job_id)
+        if stop and job.status not in HISTORIC_STATUSES:
+            self.service.cancel(job.id, reason=str(reason or "stopped and archived by user"))
+            if not self._wait_for_lease_release(job.id, lease_wait_seconds):
+                raise JobManagementError(
+                    f"Job {job.id} is still stopping; its worker lease has not been released yet. Retry shortly."
+                )
+            job = self.service.get(job.id)
         if job.status not in HISTORIC_STATUSES:
             raise JobManagementError(
                 f"Job {job.id} cannot be archived while it is {job.status.value}. Stop or finish it first."

@@ -58,7 +58,7 @@
     const TONE = {approvePlan:'ok', rejectPlan:'danger', approveTool:'warn', denyTool:'danger', retry:'warn', restartStage:'warn', resume:'warn', push:'ok', discard:'danger', delete:'danger'};
     const LABEL = {savePlanDraft:'Edit plan', reprompt:'Fix selected findings', message:'Message agent'};
     const FALLBACK_CONFIRM = {
-        discard: 'Discard this job? Running jobs are cancelled first and their worktree is removed. Git branch is preserved.',
+        discard: 'Stop this job? Running work is cancelled and it cannot be resumed; you can then archive it.',
         delete: 'Delete this job? Running jobs are cancelled first and their worktree is removed. Git branch is preserved.',
         restartStage: 'Restart the current stage? Its in-flight work is discarded.',
     };
@@ -603,8 +603,13 @@
             jobsEl.querySelector('#work-jobs-session').onchange = e => { jobsSession = e.target.value; renderJobsPage(); };
             jobsEl.querySelectorAll('[data-row-archive]').forEach(b => { b.onclick = async () => {
                 const row = home.jobs.find(j => j.id === b.dataset.rowArchive);
-                if (!await ui.confirm(`Archive ${jobKey(row)}? It leaves the board; History keeps its record and evidence.`, {title:`Archive ${jobKey(row)}`, okLabel:'Archive'})) return;
-                try { await api(`/api/jobs/${encodeURIComponent(row.id)}/archive`, {method:'POST', body:{}}); notify(`Archived ${jobKey(row)}`, 'ok'); await refreshHome(); } catch (e) { notify(e.message, 'danger'); }
+                // A job still waiting on you (review, input) is stopped first, then archived.
+                const live = !['done', 'cancelled'].includes(row.state);
+                const text = live
+                    ? `Stop and archive ${jobKey(row)}? Its work is cancelled and it cannot be resumed; History keeps its record and evidence.`
+                    : `Archive ${jobKey(row)}? It leaves the board; History keeps its record and evidence.`;
+                if (!await ui.confirm(text, {title:`Archive ${jobKey(row)}`, okLabel: live ? 'Stop and archive' : 'Archive', tone: live ? 'danger' : undefined})) return;
+                try { await api(`/api/jobs/${encodeURIComponent(row.id)}/archive`, {method:'POST', body:{stop: live}}); notify(`Archived ${jobKey(row)}`, 'ok'); await refreshHome(); } catch (e) { notify(e.message, 'danger'); }
             }; });
             jobsEl.querySelectorAll('[data-row-delete]').forEach(b => { b.onclick = () => runById(b.dataset.rowDelete, 'delete'); });
         }

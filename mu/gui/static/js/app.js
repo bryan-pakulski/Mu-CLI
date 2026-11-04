@@ -460,7 +460,8 @@ document.addEventListener("alpine:init", () => {
             const activity = [], anchors = [], tail = [];
             for (const turn of items) {
                 if (turn === final) continue;
-                if (turn.role === "error" || (turn.role === "assistant" && turn.streaming && !turn.text)) tail.push(turn);
+                // A command the user ran is not the agent's work: it stays visible after the exchange.
+                if (turn.role === "error" || turn.role === "command" || (turn.role === "assistant" && turn.streaming && !turn.text)) tail.push(turn);
                 else if (this._isTimelineAnchor(turn)) anchors.push(turn);
                 else activity.push(turn);
             }
@@ -900,11 +901,30 @@ document.addEventListener("alpine:init", () => {
             if (!name || name === this.currentName) this.scroll(shouldFollow);
         },
 
-        addCommandResult(result, name) {
+        // A command the user ran (`/status`, `/mode plan`...): one row showing what was
+        // run and what it returned. It never starts a model turn, so no thinking or
+        // working state; it is not part of any exchange's activity.
+        _pendingCommand(slot, text) {
+            const turns = this._flattenTimeline(slot.turns);
+            for (let i = turns.length - 1; i >= 0; i--) {
+                if (turns[i].role === "command" && turns[i].running && turns[i].input === text) return turns[i];
+            }
+            return null;
+        },
+        addCommandStarted(text, name) {
             const slot = this._slot(name);
-            this._closeTrace(slot);
-            const ok = result && result.ok;
-            const cmd = (result && result.command) || "/command";
+            if (this._pendingCommand(slot, text)) return;
+            slot.turns.push({
+                id: this._id("cmd"), role: "command", running: true, ok: true,
+                input: text, command: text.split(/\s+/)[0], message: "", data: {},
+                body: "", html: "", isPreformatted: false,
+            });
+            if (!name || name === this.currentName) this.scroll(true);
+        },
+        addCommandResult(result, name, text = "") {
+            const slot = this._slot(name);
+            const ok = !!(result && result.ok);
+            const cmd = (result && result.command) || (text ? text.split(/\s+/)[0] : "/command");
             const msg = (result && result.message) || "";
             const data = (result && result.data) || {};
 
@@ -941,17 +961,14 @@ document.addEventListener("alpine:init", () => {
                 body = msg;
             }
 
-            slot.turns.push({
-                id: this._id("cmd"),
-                role: "command",
-                ok,
-                command: cmd,
-                message: msg,
-                data,
-                body,
-                html: body ? renderMarkdown(body) : "",
-                isPreformatted: preformatted,
-            });
+            const row = {
+                role: "command", running: false, ok,
+                input: text || cmd, command: cmd, message: msg, data,
+                body, html: body ? renderMarkdown(body) : "", isPreformatted: preformatted,
+            };
+            const pending = text ? this._pendingCommand(slot, text) : null;
+            if (pending) Object.assign(pending, row);
+            else slot.turns.push({ id: this._id("cmd"), ...row });
             if (!name || name === this.currentName) this.scroll(true);
         },
 
@@ -1760,7 +1777,8 @@ document.addEventListener("alpine:init", () => {
             }
             if (slot.busy && !isCommand) return false;
             this.followOutput = true;   // user sent → re-engage scroll-lock
-            this.addUser(text, name, selected);
+            if (isCommand) this.addCommandStarted(text, name);
+            else this.addUser(text, name, selected);
             // A command can be submitted alongside an active turn. Do not
             // toggle the slot's existing busy state; the server handles the
             // command path independently of normal turn submission.
@@ -1785,12 +1803,13 @@ document.addEventListener("alpine:init", () => {
                     if (!isCommand) attachmentStore.clearSelected(name);
                 } else if (!resp.ok) {
                     const data = await resp.json().catch(() => ({}));
-                    this.addError(data.detail || `send failed (${resp.status})`, name);
-                    if (!isCommand) slot.busy = false;
+                    const detail = data.detail || `send failed (${resp.status})`;
+                    if (isCommand) this.addCommandResult({ ok: false, message: detail }, name, text);
+                    else { this.addError(detail, name); slot.busy = false; }
                 }
             } catch (err) {
-                this.addError(`Network error: ${err}`, name);
-                if (!isCommand) slot.busy = false;
+                if (isCommand) this.addCommandResult({ ok: false, message: `Network error: ${err}` }, name, text);
+                else { this.addError(`Network error: ${err}`, name); slot.busy = false; }
             }
             return true;
         },
@@ -6590,10 +6609,13 @@ function routeEvent(ev) {
                 refreshActivePanel();
             }
             break;
+        case "command_started":
+            chat.addCommandStarted(String(ev.text || ""), name);
+            break;
         case "command_result":
-            chat.addCommandResult(ev.result, name);
-            slot.busy = false;
-            chat.finishTurn(name);
+            // A command never touches the turn state: an agent turn running
+            // alongside it keeps going.
+            chat.addCommandResult(ev.result, name, String(ev.text || ""));
             Alpine.store("cmdComplete").invalidateCache();
             // Slash commands like /feature new mutate the session's
             // panel state without triggering a model turn, so the

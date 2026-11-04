@@ -14,9 +14,10 @@
 //
 // Screens compose these; they never hand-build headers, rows or action menus.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeContext';
 import { radii, spacing, toneInk, touchTarget, type Tone } from '../theme/tokens';
 import { STATUS, asStatus } from '../theme/status';
@@ -127,16 +128,57 @@ export type PageHeaderProps = {
   testID?: string;
 };
 
+/** What a tab's page hands the top bar: its title, its ⋯ options and an optional accessory. */
+export type BarPage = { title: string; items: MenuItem[]; right?: React.ReactNode };
+
+/**
+ * Set by the tab shell. Its fixed top bar clears the status bar and shows the focused page's
+ * title, accessory and options, so a tab's PageHeader draws only what is left (its text tabs and
+ * state sentence) and nothing at all when there is nothing left.
+ */
+export const TopBarContext = createContext<{ registerPage: (owner: string, page: BarPage | null) => void } | null>(null);
+
+/** Hands a focused tab's title and options to the top bar while the tab is on show. */
+function RegisterPage({ title, items, right }: BarPage) {
+  const bar = useContext(TopBarContext);
+  const owner = useId();
+  // Only rendered inside the tab shell, so a navigator is always above it.
+  const focused = useIsFocused();
+  useEffect(() => { bar?.registerPage(owner, focused ? { title, items, right } : null); });
+  useEffect(() => () => bar?.registerPage(owner, null), [bar, owner]);
+  return null;
+}
+
 /**
  * The page header (§4): title, the state sentence under it, then text tabs. No chips. A stack
- * screen that renders it sets `headerShown: false` on its route and passes `back`.
+ * screen that renders it sets `headerShown: false` on its route and passes `back`. Inside the
+ * tab shell the title, accessory and ⋯ move into the top bar.
  */
 export function PageHeader({ title, state, tabs, tab, onTab, menu, right, back, testID }: PageHeaderProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const bar = useContext(TopBarContext);
   const [menuOpen, setMenuOpen] = useState(false);
-  // The page header is the screen's only header (its route hides the navigator's), so it clears
-  // the status bar itself.
+  const tabRow = tabs?.length && onTab
+    ? <HeaderTabs tabs={tabs} value={tab ?? tabs[0].key} onChange={onTab} testID={testID ? `${testID}-tabs` : undefined} />
+    : null;
+  const sentence = state ? <StateSentence parts={state} testID={testID ? `${testID}-state` : undefined} /> : null;
+  if (bar) {
+    return (
+      <>
+        <RegisterPage title={title} items={menu || []} right={right} />
+        {tabRow || sentence ? (
+          <View testID={testID} style={[styles.subheader, { borderBottomColor: colors.hairline }]}>
+            {tabRow}
+            {sentence}
+          </View>
+        ) : null}
+      </>
+    );
+  }
+  const ownMenu = !!menu?.length;
+  // Outside the tab shell the page header is the screen's only header (its route hides the
+  // navigator's), so it clears the status bar itself.
   return (
     <View testID={testID} style={[styles.header, { borderBottomColor: colors.hairline, paddingTop: insets.top + spacing.md }]}>
       {back ? (
@@ -148,11 +190,11 @@ export function PageHeader({ title, state, tabs, tab, onTab, menu, right, back, 
       <View style={styles.titleRow}>
         <Text variant="title2" accessibilityRole="header" numberOfLines={2} style={{ flex: 1, color: colors.plum }}>{title}</Text>
         {right}
-        {menu?.length ? <IconButton icon="more-horizontal" label="More actions" onPress={() => setMenuOpen(true)} testID={testID ? `${testID}-menu` : undefined} /> : null}
+        {ownMenu ? <IconButton icon="more-horizontal" label="More actions" onPress={() => setMenuOpen(true)} testID={testID ? `${testID}-menu` : undefined} /> : null}
       </View>
-      {state ? <StateSentence parts={state} testID={testID ? `${testID}-state` : undefined} /> : null}
-      {tabs?.length && onTab ? <View style={{ marginTop: spacing.xs }}><HeaderTabs tabs={tabs} value={tab ?? tabs[0].key} onChange={onTab} testID={testID ? `${testID}-tabs` : undefined} /></View> : null}
-      {menu?.length ? <ActionSheet visible={menuOpen} onClose={() => setMenuOpen(false)} items={menu} /> : null}
+      {sentence}
+      {tabRow ? <View style={{ marginTop: spacing.xs }}>{tabRow}</View> : null}
+      {ownMenu ? <ActionSheet visible={menuOpen} onClose={() => setMenuOpen(false)} items={menu!} /> : null}
     </View>
   );
 }
@@ -373,6 +415,7 @@ export function ActionSheet({ visible, onClose, title, items }: { visible: boole
 
 const styles = StyleSheet.create({
   header: { paddingHorizontal: spacing.base, paddingTop: spacing.md, paddingBottom: spacing.sm, gap: 2, borderBottomWidth: StyleSheet.hairlineWidth },
+  subheader: { paddingHorizontal: spacing.base, paddingTop: spacing.xs, paddingBottom: spacing.xs, gap: 2, borderBottomWidth: StyleSheet.hairlineWidth },
   back: { flexDirection: 'row', alignItems: 'center', gap: 2, alignSelf: 'flex-start', minHeight: 28 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: touchTarget },
   row: { paddingVertical: spacing.sm, paddingHorizontal: spacing.sm, borderRadius: radii.md },

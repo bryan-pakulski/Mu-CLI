@@ -1,14 +1,12 @@
-// More (documentation/plans/mobile_parity.md §3): Settings (Appearance, Areas, Devices),
-// Connection and Providers, and pairing.
+// App screens reached from the top bar's Options menu (TopBar appOptions): Settings (Appearance,
+// Areas, Devices), Connection, Provider and model, and pairing.
 
 import React from 'react';
-import { MoreScreen } from '../../screens/MoreScreen';
 import { SettingsScreen } from '../../screens/SettingsScreen';
 import { ConnectionScreen } from '../../screens/ConnectionScreen';
 import { ProvidersScreen } from '../../screens/ProvidersScreen';
 import { PairScreen } from '../../screens/PairScreen';
-import { Stage } from '../../ui/Glass';
-import type { ScreenSpec, TabSpec } from '../types';
+import type { ScreenSpec } from '../types';
 
 export type MoreParams = {
   Settings: undefined;
@@ -17,9 +15,6 @@ export type MoreParams = {
   Pair: { url?: string; code?: string } | undefined;
 };
 
-const MoreTab = (props: any) => <Stage><MoreScreen {...props} /></Stage>;
-
-export const moreTab: TabSpec = { name: 'More', component: MoreTab, label: 'More', icon: 'more-horizontal', destination: 'settings', headerShown: false };
 
 export const moreScreens: ScreenSpec[] = [
   // Each draws its own PageHeader (with the back link), so the navigator header stays hidden.

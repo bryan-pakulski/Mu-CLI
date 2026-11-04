@@ -21,7 +21,6 @@ export type TabParamList = {
   Orchestration: { tab?: string } | undefined;
   Environments: undefined;
   Insights: { tab?: 'runs' | 'jobs' | 'costs' } | undefined;
-  More: undefined;
 };
 
 export type TabName = keyof TabParamList;

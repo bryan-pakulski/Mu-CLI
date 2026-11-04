@@ -44,7 +44,7 @@ export function SettingsScreen() {
 
   return (
     <View style={{ flex: 1 }} testID="settings-screen">
-      <PageHeader title="Settings" back={navigation.canGoBack?.() ? { label: 'More', onPress: () => navigation.goBack() } : undefined} state={[{ text: `${paletteLabel(palette)} theme`, tone: '' }, { text: isConnected ? `connected to ${server}` : 'not connected', tone: isConnected ? 'quiet' : 'attention' }]} />
+      <PageHeader title="Settings" back={navigation.canGoBack?.() ? { label: 'Back', onPress: () => navigation.goBack() } : undefined} state={[{ text: `${paletteLabel(palette)} theme`, tone: '' }, { text: isConnected ? `connected to ${server}` : 'not connected', tone: isConnected ? 'quiet' : 'attention' }]} />
       <ScrollView contentContainerStyle={styles.content}>
         <Section title="Appearance" lede="How μcli looks on this phone.">
           <View style={styles.themes} accessibilityRole="radiogroup" accessibilityLabel="Theme">

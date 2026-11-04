@@ -28,7 +28,7 @@ const MAX_TURN_RECEIPTS = 60;
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'visualization' | 'subagent_panel' | 'collapse' | 'tool';
+  role: 'user' | 'assistant' | 'visualization' | 'subagent_panel' | 'collapse' | 'tool' | 'command';
   text: string;
   turnId?: string;
   /** Durable server turn index; user messages sharing it are one checkpoint. */
@@ -47,6 +47,29 @@ export interface ChatMessage {
   handoff?: 'entering' | 'leaving';
   /** Tool invocation shown as a Wash ToolCard (role 'tool'). */
   tool?: ToolCallView;
+  /** A command the user ran (role 'command'): what was run and what it returned. */
+  command?: CommandRun;
+}
+
+export interface CommandRun {
+  input: string;
+  running: boolean;
+  ok: boolean;
+  message: string;
+  /** Output shown monospaced (stdout/stderr or a list). */
+  output: string;
+}
+
+/** The row for a command's result: the server's message, or its stdout/stderr/list as output. */
+export function commandRun(input: string, result: unknown): CommandRun {
+  const r = (result && typeof result === 'object' ? result : {}) as { ok?: unknown; message?: unknown; data?: Record<string, unknown> };
+  const data = (r.data && typeof r.data === 'object' ? r.data : {}) as Record<string, unknown>;
+  const lines = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+  let output = '';
+  if (data.stdout || data.stderr) output = [data.stdout, data.stderr].filter(Boolean).map(v => String(v).replace(/\n+$/, '')).join('\n');
+  else if (Array.isArray(data.sessions)) output = lines(data.sessions).map(n => `${n === data.active ? '▸' : ' '} ${n}`).join('\n');
+  else if (Array.isArray(data.folders) || Array.isArray(data.staged_files)) output = [...lines(data.folders), ...lines(data.staged_files)].join('\n');
+  return { input, running: false, ok: !!r.ok, message: typeof r.message === 'string' ? r.message : '', output };
 }
 
 export interface LiveSubagentAction {
@@ -473,7 +496,8 @@ function layoutExchange(user: ChatMessage, items: ChatMessage[], open: Map<strin
   const tail: ChatMessage[] = [];
   for (const message of items) {
     if (message === final) continue;
-    if (message.role === 'assistant' && message.streaming && !message.text.trim()) tail.push(message);
+    // A command the user ran is not the agent's work: it stays visible after the exchange.
+    if (message.role === 'command' || (message.role === 'assistant' && message.streaming && !message.text.trim())) tail.push(message);
     else if (isTimelineAnchor(message)) anchors.push(message);
     else activity.push(message);
   }
@@ -711,6 +735,22 @@ export function useChatSession(activeSessionName: string | null) {
         origin,
         attachments,
       }];
+    });
+  }, [nextId]);
+
+  // Commands never start a model turn: one row, running until its result arrives.
+  const startCommand = useCallback((input: string) => {
+    setMessages(current => (current.some(m => m.role === 'command' && m.command?.running && m.command.input === input)
+      ? current
+      : [...current, { id: nextId('cmd'), role: 'command', text: input, command: { input, running: true, ok: true, message: '', output: '' } }]));
+  }, [nextId]);
+
+  const finishCommand = useCallback((input: string, run: CommandRun) => {
+    setMessages(current => {
+      const flat = flattenCollapsedMessages(current);
+      const pending = [...flat].reverse().find(m => m.role === 'command' && m.command?.running && m.command.input === input);
+      if (!pending) return [...current, { id: nextId('cmd'), role: 'command', text: input, command: run }];
+      return current.map(m => (m.id === pending.id ? { ...m, command: run } : m));
     });
   }, [nextId]);
 
@@ -1166,7 +1206,15 @@ export function useChatSession(activeSessionName: string | null) {
       return;
     }
 
+    if (kind === 'command_started') {
+      startCommand(String(event.text || ''));
+      return;
+    }
+
     if (kind === 'command_result') {
+      const input = String(event.text || '');
+      const run = commandRun(input, event.result);
+      finishCommand(input || String((event.result as { command?: unknown } | undefined)?.command || '/command'), run);
       const data = (event.result && typeof event.result === 'object')
         ? (event.result as { data?: { plan_mode?: unknown } }).data
         : undefined;
@@ -1498,7 +1546,21 @@ export function useChatSession(activeSessionName: string | null) {
   const sendMessage = useCallback(async (text: string, attachments: AttachmentDescriptor[] = []) => {
     let trimmed = text.trim();
     if (!trimmed && attachments.length > 0) trimmed = 'Please review the attached document(s).';
-    if (!trimmed || !activeSessionName || busyRef.current) return false;
+    if (!trimmed || !activeSessionName) return false;
+    if (trimmed.startsWith('/') && attachments.length === 0) {
+      // A command: shown as a command row, never as a chat turn — no thinking or
+      // working state, and it may run alongside an agent turn.
+      setError(null);
+      startCommand(trimmed);
+      try {
+        await chatApi.send(trimmed, activeSessionName);
+        void refreshPlanMode(activeSessionName);
+      } catch (commandError) {
+        finishCommand(trimmed, { input: trimmed, running: false, ok: false, message: String(commandError), output: '' });
+      }
+      return true;
+    }
+    if (busyRef.current) return false;
 
     setError(null);
     busyRef.current = true;
@@ -1536,9 +1598,6 @@ export function useChatSession(activeSessionName: string | null) {
       if (sendRevision !== null) {
         useConnectionStore.getState().setSessionRevision(sendRevision);
       }
-      // `/plan` (and anything else that flips plan mode) — re-read it in case
-      // the plan_mode_changed event raced the stream.
-      if (trimmed.startsWith('/')) void refreshPlanMode(activeSessionName);
       return true;
     } catch (sendError) {
       setError(String(sendError));
@@ -1559,7 +1618,7 @@ export function useChatSession(activeSessionName: string | null) {
       }
       return false;
     }
-  }, [activeSessionName, appendUserMessage, syncSessionState]);
+  }, [activeSessionName, appendUserMessage, finishCommand, startCommand, syncSessionState]);
 
   const stop = useCallback(async () => {
     if (!activeSessionName) return;

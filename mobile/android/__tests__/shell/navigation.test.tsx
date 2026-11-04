@@ -6,10 +6,10 @@ import { SCREENS, TABS, TAB_DESTINATION, linking } from '../../src/navigation/Ap
 import { TAB_ROUTES } from '../../src/navigation/nav';
 import { destinationArt } from '../../src/ui/Glass';
 
-it('has the six destinations in the web rail order', () => {
-  expect(TABS.map(t => t.name)).toEqual(['Chat', 'Work', 'Orchestration', 'Environments', 'Insights', 'More']);
+it('has the five destinations in the web rail order', () => {
+  expect(TABS.map(t => t.name)).toEqual(['Chat', 'Work', 'Orchestration', 'Environments', 'Insights']);
   expect(TAB_DESTINATION).toEqual({
-    Chat: 'chat', Work: 'work', Orchestration: 'orchestration', Environments: 'environments', Insights: 'insights', More: 'settings',
+    Chat: 'chat', Work: 'work', Orchestration: 'orchestration', Environments: 'environments', Insights: 'insights',
   });
   expect([...TAB_ROUTES].sort()).toEqual(TABS.map(t => t.name).sort());
   expect(destinationArt(TAB_DESTINATION.Environments)).toBe('meadow');

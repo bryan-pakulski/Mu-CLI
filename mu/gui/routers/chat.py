@@ -337,14 +337,14 @@ async def send_message(request: Request, payload: Dict[str, Any]):
         )
 
     bus = request.app.state.bus
-    # Echo the user's message to the per-session stream so the browser
-    # can render it immediately without waiting for the agent loop.
-    await bus.publish(
-        {"kind": "user_message", "text": text, "attachments": attachments, "session_name": name}
-    )
 
     if text.startswith("/"):
+        # A command the user ran, not a chat turn: no user message and no model
+        # call. Clients render it as a command row (``command_started`` while it
+        # runs, then ``command_result`` with the same text).
         from mucli import handle_command
+
+        await bus.publish({"kind": "command_started", "text": text, "session_name": name})
 
         lock = request.app.state.session_lock_for(name)
 
@@ -354,10 +354,15 @@ async def send_message(request: Request, payload: Dict[str, Any]):
 
         result = await asyncio.to_thread(_run_cmd)
         await bus.publish(
-            {"kind": "command_result", "result": result, "session_name": name}
+            {"kind": "command_result", "text": text, "result": result, "session_name": name}
         )
         return {"accepted": True, "kind": "command", "session_name": name}
 
+    # Echo the user's message to the per-session stream so the browser
+    # can render it immediately without waiting for the agent loop.
+    await bus.publish(
+        {"kind": "user_message", "text": text, "attachments": attachments, "session_name": name}
+    )
     return await launch_turn(request.app, session, text, attachments=attachments)
 
 

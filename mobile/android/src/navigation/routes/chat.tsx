@@ -1,12 +1,13 @@
 // Chat (documentation/plans/mobile_parity.md §3, §6 Chat): the conversation, the sessions and
-// threads drawer (menu button or the left edge), the workspace panel (⋯ or the right edge), and the
-// session settings (⋯, the composer's model label, or Settings → Areas → Chat and workspace).
-// The header carries the title only.
+// threads drawer (a swipe in from the left edge), the workspace panel (a swipe in from the right
+// edge), and the session settings (top bar Options, the
+// composer's model label, or Settings → Areas → Chat and workspace). The header carries the title only.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { ConnectionPrompt } from '../../components/ConnectionPrompt';
-import { EdgeSwipeView } from '../../components/EdgeSwipeView';
+import { EdgeSwipeView, type EdgeSide } from '../../components/EdgeSwipeView';
+import type { SlidePanelHandle } from '../../components/SlidePanel';
 import { SessionStartPrompt } from '../../components/SessionStartPrompt';
 import { SessionsDrawer } from '../../components/chat/SessionsDrawer';
 import { SessionSettingsSheet } from '../../components/chat/SessionSettingsSheet';
@@ -29,7 +30,6 @@ import { LoopScreen } from '../../screens/LoopScreen';
 import { DebugScreen } from '../../screens/DebugScreen';
 import { ThreadsScreen } from '../../screens/ThreadsScreen';
 import { ArtifactsScreen } from '../../screens/ArtifactsScreen';
-import { IconButton } from '../../ui/Button';
 import { ChoiceRow } from '../../ui/Form';
 import { Stage } from '../../ui/Glass';
 import { PageHeader } from '../../ui/Mu';
@@ -92,20 +92,24 @@ function ChatTab({ route }: { route?: { params?: ChatTabParams } }) {
   }, [baseUrl, isConnected, setActiveSession]);
 
   const menu = [
-    { key: 'conversations', label: 'Conversations', icon: 'menu' as const, onPress: () => setDrawerOpen(true) },
     ...(activeSessionName ? [
-      { key: 'workspace', label: 'Workspace', icon: 'panel-right' as const, onPress: () => setWorkspaceOpen(true) },
       { key: 'settings', label: 'Session settings', icon: 'sliders-horizontal' as const, onPress: openSettings },
       { key: 'artifacts', label: artifactsVisible ? 'Hide session files strip' : 'Show session files strip', icon: (artifactsVisible ? 'eye-off' : 'eye') as 'eye', onPress: () => setArtifactsVisible(v => !v) },
     ] : []),
     { key: 'runs', label: 'Runs and traces', icon: 'activity' as const, onPress: () => navigateTo('Insights') },
   ];
 
+  // An edge swipe drives the matching side panel while the finger moves.
+  const drawerRef = useRef<SlidePanelHandle>(null);
+  const workspaceRef = useRef<SlidePanelHandle>(null);
+  const panelFor = useCallback((side: EdgeSide) => (side === 'left' ? drawerRef.current : activeSessionName ? workspaceRef.current : null), [activeSessionName]);
+  const onEdgeDrag = useCallback((side: EdgeSide, distance: number) => panelFor(side)?.drag(distance), [panelFor]);
+  const onEdgeRelease = useCallback((side: EdgeSide, distance: number, velocity: number) => panelFor(side)?.release(distance, velocity), [panelFor]);
+
   return (
-    <EdgeSwipeView onSwipeFromLeft={() => setDrawerOpen(true)} onSwipeFromRight={() => { if (activeSessionName) setWorkspaceOpen(true); }}>
+    <EdgeSwipeView onDrag={onEdgeDrag} onRelease={onEdgeRelease}>
       <View style={{ flex: 1, backgroundColor: 'transparent' }}>
-        <PageHeader testID="chat-header" title={activeSessionName || 'Chat'} menu={menu}
-          right={<IconButton icon="menu" label="Conversations" onPress={() => setDrawerOpen(true)} testID="chat-open-drawer" />} />
+        <PageHeader testID="chat-header" title={activeSessionName || 'Chat'} menu={menu} />
         <Stage>
           {!isConnected ? (
             <ConnectionPrompt onConnect={() => navigateTo('Connection')} />
@@ -116,8 +120,8 @@ function ChatTab({ route }: { route?: { params?: ChatTabParams } }) {
             <SessionStartPrompt onLoadSession={() => setDrawerOpen(true)} onCreateSession={() => setCreateRequestToken(v => v + 1)} onManageContainers={() => navigateTo('Environments')} />
           )}
         </Stage>
-        <SessionsDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} createRequestToken={createRequestToken} />
-        <WorkspacePanelSheet visible={workspaceOpen && !!activeSessionName} onClose={() => setWorkspaceOpen(false)} activeMode={modes.current}
+        <SessionsDrawer panelRef={drawerRef} visible={drawerOpen} onClose={() => setDrawerOpen(false)} onOpen={() => setDrawerOpen(true)} createRequestToken={createRequestToken} />
+        <WorkspacePanelSheet panelRef={workspaceRef} visible={workspaceOpen && !!activeSessionName} onClose={() => setWorkspaceOpen(false)} onShow={() => setWorkspaceOpen(true)} activeMode={modes.current}
           onOpen={panel => navigateTo(panel)} />
         <SessionSettingsSheet visible={settingsOpen && !!activeSessionName} onClose={() => setSettingsOpen(false)} modes={modes.modes} activeMode={modes.current}
           onSelectMode={name => { void modes.select(name); }} onOpenProviders={() => { setSettingsOpen(false); navigateTo('Providers'); }} />

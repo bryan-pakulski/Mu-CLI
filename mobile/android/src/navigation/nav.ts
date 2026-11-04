@@ -6,7 +6,7 @@ import type { RootStackParamList, TabName } from './types';
 
 export const navRef = React.createRef<NavigationContainerRef<RootStackParamList>>();
 
-export const TAB_ROUTES = new Set<string>(['Chat', 'Work', 'Orchestration', 'Environments', 'Insights', 'More']);
+export const TAB_ROUTES = new Set<string>(['Chat', 'Work', 'Orchestration', 'Environments', 'Insights']);
 
 /** Navigate from anywhere: tab routes go through the tab shell. */
 export function navigateTo(name: string, params?: object) {

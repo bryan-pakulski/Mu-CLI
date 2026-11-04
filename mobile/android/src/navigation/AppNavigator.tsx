@@ -1,23 +1,25 @@
-// The app shell (documentation/plans/mobile_parity.md §3): six tabs — the web rail's destinations —
-// over a root stack. Each destination owns a route module (routes/<destination>.tsx); this file
+// The app shell (documentation/plans/mobile_parity.md §3): five destinations — the web rail's — in a
+// top bar (TopBar: icons plus one Options menu) over a root stack. Each destination owns a route module (routes/<destination>.tsx); this file
 // only assembles them. Switching tab sets the destination, whose accent marks the tab and whose
 // watercolour cross-fades behind the app (ThemeContext / ui/Glass).
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { DarkTheme, DefaultTheme, NavigationContainer, type LinkingOptions } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createBottomTabNavigator, type BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
-import { fontSizes, fontWeights, radii, type DestinationName } from '../theme/tokens';
+import { fontSizes, fontWeights, type DestinationName } from '../theme/tokens';
 import { useConnectionStore } from '../store/connection';
-import { badgeText, useOrchBadge } from '../store/orchBadge';
+import { useOrchBadge } from '../store/orchBadge';
 import { useWorkBadge } from '../store/workBadge';
 import { NeedsYouNotifier } from '../components/NeedsYouNotifier';
 import { OrchestrationNotifier } from '../components/OrchestrationNotifier';
-import { Banner, Icon, ToastHost, textStyle } from '../ui';
-import { scaleText } from '../ui/Text';
+import { Banner, ToastHost, textStyle } from '../ui';
 import { GlassChrome, glassStyle } from '../ui/Glass';
+import { TopBarContext } from '../ui/Mu';
+import { TopBar, type TabBadges } from './TopBar';
+import { useBarPage } from '../store/barPage';
 import { navRef, navigateTo } from './nav';
 import { useNotificationTaps } from './notifications';
 import type { RootStackParamList, ScreenSpec, TabParamList, TabSpec } from './types';
@@ -26,12 +28,12 @@ import { workScreens, workTab } from './routes/work';
 import { orchestrationScreens, orchestrationTab } from './routes/orchestration';
 import { environmentsScreens, environmentsTab } from './routes/environments';
 import { insightsScreens, insightsTab } from './routes/insights';
-import { moreScreens, moreTab } from './routes/more';
+import { moreScreens } from './routes/more';
 
 export type { RootStackParamList, TabParamList } from './types';
 export { navigateTo, TAB_ROUTES } from './nav';
 
-export const TABS: TabSpec[] = [chatTab, workTab, orchestrationTab, environmentsTab, insightsTab, moreTab];
+export const TABS: TabSpec[] = [chatTab, workTab, orchestrationTab, environmentsTab, insightsTab];
 export const SCREENS: ScreenSpec[] = [...chatScreens, ...workScreens, ...orchestrationScreens, ...environmentsScreens, ...insightsScreens, ...moreScreens];
 export const TAB_DESTINATION: Record<string, DestinationName> = Object.fromEntries(TABS.map(t => [t.name, t.destination]));
 
@@ -51,24 +53,12 @@ export const linking: LinkingOptions<RootStackParamList> = {
       EnvironmentDetail: 'environments/env/:name',
       TemplateDetail: 'environments/template/:name',
       Shell: 'environments/terminal/:container',
-      Tabs: { screens: { Chat: 'chat', Work: 'work/:tab?', Orchestration: 'orchestration/:tab?', Environments: 'environments', Insights: 'insights/:tab?', More: 'more' } },
+      Tabs: { screens: { Chat: 'chat', Work: 'work/:tab?', Orchestration: 'orchestration/:tab?', Environments: 'environments', Insights: 'insights/:tab?' } },
     },
   },
 };
 
-const TabBarGlass = () => <GlassChrome level={1} edges={false} style={{ flex: 1 }} testID="tab-bar-glass" />;
 const HeaderGlass = () => <GlassChrome level={1} edges={false} style={{ flex: 1 }} />;
-
-/** Tab icon: the tab's own destination accent marks it when active (a wash pill behind the icon). */
-function TabIcon({ spec, focused }: { spec: TabSpec; focused: boolean }) {
-  const { colors } = useTheme();
-  const accent = colors.destination[spec.destination];
-  return (
-    <View style={{ width: 40, height: 24, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: focused ? accent.wash : 'transparent' }}>
-      <Icon name={spec.icon} size="md" color={focused ? accent.ink : colors.ink3} />
-    </View>
-  );
-}
 
 /** Shown over every tab while the server answers but this phone isn't paired (§7a). */
 function PairingBanner() {
@@ -83,56 +73,52 @@ function PairingBanner() {
   );
 }
 
+/** Hands the tab navigator's state to the top bar (drawn above the tabs, not below them). */
+function TabStateBridge({ onState, ...props }: BottomTabBarProps & { onState: (p: BottomTabBarProps) => void }) {
+  useEffect(() => { onState(props as BottomTabBarProps); }, [props.state]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
+/** Tab pages hand their title and options to the top bar through this (PageHeader). */
+const TOP_BAR = { registerPage: useBarPage.getState().register };
+
 function MainTabs() {
-  const { colors, setDestination, textScale } = useTheme();
+  const { colors, setDestination } = useTheme();
   const orchCount = useOrchBadge(state => state.count);
   const orchSummary = useOrchBadge(state => state.summary);
   const workCount = useWorkBadge(state => state.count);
   const workSummary = useWorkBadge(state => state.summary);
-  const badgeStyle = { backgroundColor: colors.attention.wash, color: colors.attention.ink, fontWeight: fontWeights.semibold };
-  const badges: Partial<Record<string, { count: number; summary: string }>> = {
+  const badges: TabBadges = {
     Work: { count: workCount, summary: workSummary },
     Orchestration: { count: orchCount, summary: orchSummary },
   };
+  const [bar, setBar] = useState<BottomTabBarProps | null>(null);
   return (
-    <View style={{ flex: 1 }}>
-      <PairingBanner />
-      <Tab.Navigator
-        sceneContainerStyle={{ backgroundColor: 'transparent' }}
-        screenListeners={({ route }) => ({ focus: () => setDestination(TAB_DESTINATION[route.name] || 'chat') })}
-        screenOptions={({ route }) => {
-          const spec = TABS.find(t => t.name === route.name) as TabSpec;
-          const badge = badges[route.name];
-          return {
-            tabBarIcon: ({ focused }) => <TabIcon spec={spec} focused={focused} />,
-            tabBarLabel: spec.label,
-            tabBarActiveTintColor: colors.ink,
-            tabBarInactiveTintColor: colors.ink3,
-            // Compact bar: 20pt icons, 11pt labels, 52pt tall (plus the system inset); every
-            // item still clears the 44pt touch target.
-            tabBarLabelStyle: { ...scaleText({ ...textStyle('caption'), fontSize: 11, lineHeight: 13 }, Math.min(textScale, 110)), marginTop: 1, marginBottom: 0 },
-            tabBarIconStyle: { marginTop: 0 },
-            tabBarStyle: { backgroundColor: 'transparent', borderTopColor: colors.hairline, minHeight: 52, paddingTop: 4, elevation: 0 },
-            tabBarBackground: TabBarGlass,
-            tabBarItemStyle: { minHeight: 44 },
-            tabBarHideOnKeyboard: true,
-            tabBarTestID: `tab-${spec.name.toLowerCase()}`,
-            tabBarBadge: badge ? badgeText(badge.count) : undefined,
-            tabBarBadgeStyle: badgeStyle,
-            tabBarAccessibilityLabel: badge?.count ? `${spec.label}, ${badge.summary || `${badge.count} need you`}` : spec.label,
-            headerShown: spec.headerShown !== false,
-            title: spec.label,
-            headerStyle: { backgroundColor: 'transparent' },
-            headerBackground: HeaderGlass,
-            headerTintColor: colors.ink,
-            headerShadowVisible: false,
-            headerTitleStyle: { ...textStyle('title3'), color: colors.plum },
-          };
-        }}
-      >
-        {TABS.map(spec => <Tab.Screen key={spec.name} name={spec.name} component={spec.component} />)}
-      </Tab.Navigator>
-    </View>
+    <TopBarContext.Provider value={TOP_BAR}>
+      <View style={{ flex: 1 }}>
+        {bar ? <TopBar state={bar.state} navigation={bar.navigation} tabs={TABS} badges={badges} /> : null}
+        <PairingBanner />
+        <Tab.Navigator
+          sceneContainerStyle={{ backgroundColor: 'transparent' }}
+          tabBar={props => <TabStateBridge {...props} onState={setBar} />}
+          screenListeners={({ route }) => ({ focus: () => { setDestination(TAB_DESTINATION[route.name] || 'chat'); } })}
+          screenOptions={({ route }) => {
+            const spec = TABS.find(t => t.name === route.name) as TabSpec;
+            return {
+              headerShown: spec.headerShown !== false,
+              title: spec.label,
+              headerStyle: { backgroundColor: 'transparent' },
+              headerBackground: HeaderGlass,
+              headerTintColor: colors.ink,
+              headerShadowVisible: false,
+              headerTitleStyle: { ...textStyle('title3'), color: colors.plum },
+            };
+          }}
+        >
+          {TABS.map(spec => <Tab.Screen key={spec.name} name={spec.name} component={spec.component} />)}
+        </Tab.Navigator>
+      </View>
+    </TopBarContext.Provider>
   );
 }
 

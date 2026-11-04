@@ -269,3 +269,19 @@ def test_historic_job_requires_archive_before_delete_and_cascades_events(tmp_pat
         assert conn.execute("SELECT COUNT(*) FROM job_management WHERE job_id = ?", (job.id,)).fetchone()[0] == 0
     finally:
         conn.close()
+
+
+def test_a_job_waiting_on_a_human_can_be_stopped_and_archived(tmp_path):
+    service = make_service(tmp_path)
+    job = service.create(JobSpec(title="Abandon me", description="d", repository="/repo"))
+    service.transition(job.id, JobStatus.PREPARING)
+    service.transition(job.id, JobStatus.RUNNING)
+    service.require_human(job.id, AttentionReason.REVIEW_DONE, "review is ready")
+    management = JobManagementService(service)
+
+    with pytest.raises(JobManagementError, match="Stop or finish it first"):
+        management.archive(job.id)
+    state = management.archive(job.id, stop=True, lease_wait_seconds=0)
+
+    assert state["archived"] is True
+    assert service.get(job.id).status == JobStatus.CANCELLED

@@ -3,10 +3,11 @@
 // agent conversations, then every mode panel. Each opens as a pushed screen.
 
 import React from 'react';
-import { View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { spacing } from '../../theme/tokens';
 import { BoardSection, Row } from '../../ui/Mu';
-import { Sheet } from '../../ui/Sheet';
+import { Text } from '../../ui/Text';
+import { SlidePanel, type SlidePanelHandle } from '../SlidePanel';
 
 export type PanelRoute = 'Teacher' | 'Feature' | 'Research' | 'Security' | 'Loop' | 'Debug' | 'Memory' | 'Files' | 'Artifacts' | 'Skills' | 'SystemPrompts' | 'Threads' | 'Modes';
 
@@ -28,17 +29,22 @@ export const WORKSPACE_PANELS: Array<{ route: PanelRoute; title: string; sub: st
   { route: 'Threads', title: 'Agent conversations', sub: 'Threads and their coordination activity' },
 ];
 
-export function WorkspacePanelSheet({ visible, onClose, activeMode, onOpen }: {
+export function WorkspacePanelSheet({ visible, onClose, onShow, panelRef, activeMode, onOpen }: {
   visible: boolean;
   onClose: () => void;
+  /** An edge swipe left the panel open. */
+  onShow?: () => void;
+  /** Lets the screen's edge swipe drive the panel while the finger moves. */
+  panelRef?: React.Ref<SlidePanelHandle>;
   activeMode: string | null;
   onOpen: (route: PanelRoute) => void;
 }) {
   const current = MODE_PANELS.find(p => p.mode === activeMode);
   const go = (route: PanelRoute) => () => { onClose(); onOpen(route); };
   return (
-    <Sheet visible={visible} onClose={onClose} title="Workspace" testID="workspace-panel">
-      <View style={{ gap: spacing.sm }}>
+    <SlidePanel ref={panelRef} side="right" visible={visible} onClose={onClose} onOpen={onShow} label="Workspace" testID="workspace-panel">
+      <Text variant="title3" accessibilityRole="header" style={styles.head}>Workspace</Text>
+      <ScrollView contentContainerStyle={styles.list}>
         {current ? (
           <BoardSection title="This mode">
             <Row testID={`panel-${current.route}`} status="active" title={current.title} sub={current.sub} onPress={go(current.route)} />
@@ -51,7 +57,12 @@ export function WorkspacePanelSheet({ visible, onClose, activeMode, onOpen }: {
           {MODE_PANELS.filter(p => p !== current).map(p => <Row key={p.route} testID={`panel-${p.route}`} title={p.title} sub={p.sub} onPress={go(p.route)} />)}
           <Row testID="panel-Modes" title="All modes" sub="What each mode does, and switch" onPress={go('Modes')} />
         </BoardSection>
-      </View>
-    </Sheet>
+      </ScrollView>
+    </SlidePanel>
   );
 }
+
+const styles = StyleSheet.create({
+  head: { paddingHorizontal: spacing.base, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  list: { gap: spacing.sm, paddingHorizontal: spacing.base, paddingBottom: spacing['2xl'] },
+});

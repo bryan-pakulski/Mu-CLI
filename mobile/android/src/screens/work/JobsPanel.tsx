@@ -54,11 +54,14 @@ export function JobsPanel({ onOpenJob }: { onOpenJob: (jobId: string) => void })
     onError: () => setDeleteRow(null),
   });
 
+  // A job still waiting on you (review, input) is stopped first, then archived.
+  const isLive = (row: JobSummary) => !['done', 'cancelled'].includes(row.state);
+  const archiveLive = !!archiveRow && isLive(archiveRow);
   const archive = async () => {
     const row = archiveRow;
     if (!row) return;
     try {
-      await jobsApi.archive(row.id);
+      await jobsApi.archive(row.id, '', isLive(row));
       toast(`Archived ${jobKey(row)}`, 'ok');
       setArchiveRow(null);
       await reload(true);
@@ -99,8 +102,10 @@ export function JobsPanel({ onOpenJob }: { onOpenJob: (jobId: string) => void })
         </Rows>
       )}
       <Dialog visible={!!archiveRow} onClose={() => setArchiveRow(null)} title={archiveRow ? `Archive ${jobKey(archiveRow)}` : 'Archive'}
-        footer={<><Button variant="secondary" label="Cancel" onPress={() => setArchiveRow(null)} /><Button variant="primary" label="Archive" onPress={() => void archive()} testID="archive-confirm" /></>}>
-        <Text variant="body">It leaves the board; History keeps its record and evidence.</Text>
+        footer={<><Button variant="secondary" label="Cancel" onPress={() => setArchiveRow(null)} /><Button variant={archiveLive ? 'danger' : 'primary'} label={archiveLive ? 'Stop and archive' : 'Archive'} onPress={() => void archive()} testID="archive-confirm" /></>}>
+        <Text variant="body">{archiveLive
+          ? 'Its work is cancelled and it cannot be resumed. It leaves the board; History keeps its record and evidence.'
+          : 'It leaves the board; History keeps its record and evidence.'}</Text>
       </Dialog>
       {del.sheets}
     </ScrollView>

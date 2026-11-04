@@ -826,6 +826,7 @@ async def archive_job(job_id: str, request: Request, payload: Dict[str, Any] | N
         state = JobManagementService(_service(request)).archive(
             job_id,
             reason=str((payload or {}).get("reason") or ""),
+            stop=bool((payload or {}).get("stop")),
         )
     except (KeyError, ValueError, JobManagementError) as exc:
         if isinstance(exc, KeyError):

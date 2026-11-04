@@ -161,20 +161,6 @@
                                         <div class="body w-msg__body" x-html="ct.html"></div>
                                     </div>
                                 </template>
-                                <template x-if="ct.role === 'command'">
-                                    <div class="msg w-msg command collapsed-child" data-role="command" :class="{ 'cmd-err': !ct.ok }">
-                                        <div class="cmd-head">
-                                            <span class="cmd-name mono" x-text="ct.command"></span>
-                                            <span class="cmd-status w-status" :data-tone="ct.ok ? 'ok' : 'danger'"><span class="w-status__glyph" aria-hidden="true" x-text="ct.ok ? '✓' : '✗'"></span><span x-text="ct.ok ? 'ok' : 'error'"></span></span>
-                                        </div>
-                                        <template x-if="ct.isPreformatted && ct.body">
-                                            <pre class="cmd-pre" x-text="ct.body"></pre>
-                                        </template>
-                                        <template x-if="!ct.isPreformatted && ct.body">
-                                            <div class="cmd-body w-markdown" x-html="ct.html"></div>
-                                        </template>
-                                    </div>
-                                </template>
                                 <template x-if="ct.role === 'prompt_resolved'">
                                     <div class="msg prompt-resolved w-resolved collapsed-child" :class="{ cancelled: ct.cancelled }"
                                          :data-outcome="ct.cancelled ? 'denied' : (ct.auto ? 'auto' : 'approved')">
@@ -329,12 +315,15 @@
                 </div>
             </template>
 
-            <!-- command result -->
+            <!-- a command the user ran: what was typed, then what it returned. Never a
+                 chat turn, so no thinking, no activity row, no model answer. -->
             <template x-if="t.role === 'command'">
-                <div class="msg w-msg command" data-role="command" :class="{ 'cmd-err': !t.ok }">
+                <div class="msg w-msg command" data-role="command" :class="{ 'cmd-err': !t.running && !t.ok }" :aria-busy="t.running ? 'true' : 'false'">
                     <div class="cmd-head">
-                        <span class="cmd-name mono" x-text="t.command"></span>
-                        <span class="cmd-status w-status" :data-tone="t.ok ? 'ok' : 'danger'"><span class="w-status__glyph" aria-hidden="true" x-text="t.ok ? '✓' : '✗'"></span><span x-text="t.ok ? 'ok' : 'error'"></span></span>
+                        <span class="cmd-who">You ran</span>
+                        <code class="cmd-name" x-text="t.input || t.command"></code>
+                        <span class="cmd-status w-status" x-show="t.running" data-tone="neutral"><span class="w-status__glyph" aria-hidden="true">●</span><span>running</span></span>
+                        <span class="cmd-status w-status" x-show="!t.running" :data-tone="t.ok ? 'ok' : 'danger'"><span class="w-status__glyph" aria-hidden="true" x-text="t.ok ? '✓' : '✗'"></span><span x-text="t.ok ? 'ok' : 'error'"></span></span>
                         <span class="cmd-message muted" x-show="t.isPreformatted && t.message" x-text="t.message"></span>
                     </div>
                     <template x-if="t.isPreformatted && t.body">

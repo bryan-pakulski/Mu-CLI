@@ -257,3 +257,30 @@ test('live text shows `inline code` as a code chip, escaped', async t => {
     assert.equal(host.textContent.includes('`'), false);
     assert.equal(host.querySelector('b'), null, 'markup in the text stays text');
 });
+
+test('a command the user runs is one command row, never a chat turn', async t => {
+    const { chat, slot } = await harness(t, []);
+    chat.addCommandStarted('/status', 'mailroom');
+    assert.equal(slot.busy, false, 'a command never starts a working state');
+    chat.addCommandResult({ ok: true, command: '/status', message: 'idle', data: {} }, 'mailroom', '/status');
+    const rows = chat._flattenTimeline(slot.turns);
+    assert.equal(rows.map(r => r.role).join(','), 'command');
+    assert.equal(rows[0].running, false);
+    assert.equal(rows[0].input, '/status');
+    assert.equal(rows[0].body, 'idle');
+    assert.equal(rows.some(r => r.role === 'user' || r.role === 'assistant'), false);
+});
+
+test('a command run during a turn stays out of the activity row', async t => {
+    const { chat, slot } = await harness(t, []);
+    chat.addUser('Go', 'mailroom');
+    chat.startAssistant('a1', 'mailroom');
+    chat.appendDelta('a1', 'Working on it.', 'mailroom');
+    chat.endAssistant('a1', 'mailroom');
+    chat.addCommandResult({ ok: false, command: '/mode', message: 'unknown mode' }, 'mailroom', '/mode nope');
+    chat._groupIntermediateTurns(slot);
+    const top = slot.turns.map(r => r.role);
+    assert.ok(top.includes('command'), 'the command row is a top-level row');
+    const collapse = slot.turns.find(r => r.role === 'collapse');
+    assert.equal((collapse?.childTurns || []).some(r => r.role === 'command'), false);
+});

@@ -32,6 +32,7 @@
                     + (t.leaving ? ' interim-leaving' : '')"
                      :data-role="t.role"
                      :data-streaming="t.streaming ? '' : null"
+                     :data-status="$store.chat.isLiveStatus(t) ? '' : null"
                      x-show="t.role === 'user' || !!t.text">
                     <div class="role w-sr-only" x-text="t.role"></div>
                     <div class="w-msg__head" x-show="t.role === 'assistant'" aria-hidden="true">
@@ -41,7 +42,7 @@
                     <!-- Round-47 F13: streaming turns render the plain-text
                          mirror (x-text, no markdown parse); the full
                          markdown render happens once at assistant_end. -->
-                    <div class="body w-msg__body" x-show="t.streaming && t.rawText" x-text="t.rawText"></div>
+                    <div class="body w-msg__body w-markdown" x-show="t.streaming && t.rawText" x-html="renderLiveText(t.rawText)"></div>
                     <div class="body w-msg__body w-markdown" x-show="!(t.streaming && t.rawText)" x-html="t.html"></div>
                     <div class="message-attachments w-msg__attachments" x-show="t.attachments && t.attachments.length">
                         <template x-for="item in (t.attachments || [])" :key="item.attachment_id">
@@ -140,9 +141,10 @@
                                         <div class="body w-msg__body w-markdown" x-html="ct.html"></div>
                                     </div>
                                 </template>
-                                <!-- MUCLI_SINGLE_TRACE_LIVE_INTERIM_V1: historical/interim traces never animate. -->
+                                <!-- Inside the activity row every step is listed; only the live trace animates. -->
                                 <template x-if="ct.role === 'trace'">
-                                    <div class="trace w-trace" x-html="renderToolCards(ct.events, { running: false })"></div>
+                                    <div class="trace w-trace" :class="{ running: $store.chat.isActiveTrace(ct) }"
+                                         x-html="renderToolCards(ct.events, { running: $store.chat.isActiveTrace(ct), now: $store.chat.clock, expanded: true })"></div>
                                 </template>
                                 <template x-if="ct.role === 'diff'">
                                     <div class="w-msg w-msg--diff" data-role="diff" x-html="WashDiff.renderDiffHTML(ct.unified, { maxLines: 60, collapsed: true })"></div>
@@ -309,7 +311,7 @@
                     <!-- Round-47 F13: streaming turns render the plain-text
                          mirror (x-text, no markdown parse); the full
                          markdown render happens once at assistant_end. -->
-                    <div class="body w-msg__body" x-show="t.streaming && t.rawText" x-text="t.rawText"></div>
+                    <div class="body w-msg__body w-markdown" x-show="t.streaming && t.rawText" x-html="renderLiveText(t.rawText)"></div>
                     <div class="body w-msg__body" x-show="!(t.streaming && t.rawText)" x-html="t.html"></div>
                 </div>
             </template>
@@ -322,7 +324,7 @@
                     <!-- Round-47 F13: streaming turns render the plain-text
                          mirror (x-text, no markdown parse); the full
                          markdown render happens once at assistant_end. -->
-                    <div class="body w-msg__body" x-show="t.streaming && t.rawText" x-text="t.rawText"></div>
+                    <div class="body w-msg__body w-markdown" x-show="t.streaming && t.rawText" x-html="renderLiveText(t.rawText)"></div>
                     <div class="body w-msg__body" x-show="!(t.streaming && t.rawText)" x-html="t.html"></div>
                 </div>
             </template>

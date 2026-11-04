@@ -45,7 +45,8 @@ import { Chip } from '../ui/Chip';
 import { EmptyState, ErrorState } from '../ui/Feedback';
 import { Icon } from '../ui/Icon';
 import { Markdown } from '../ui/Markdown';
-import { Skeleton } from '../ui/Progress';
+import { LoadingRing } from '../ui/LoadingRing';
+import { StatusSheen } from '../ui/StatusSheen';
 import { Pressable } from '../ui/Pressable';
 import { Text } from '../ui/Text';
 import { ToolCard } from '../ui/ToolCard';
@@ -86,7 +87,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
   const activeModel = useConnectionStore(s => s.activeModel);
   const isConnected = useConnectionStore(s => s.isConnected);
   const {
-    messages, setMessages, receipts, streaming, waitingForFirstToken, historyLoading, activityLabel, sseConnected, error,
+    messages, setMessages, receipts, streaming, waitingForFirstToken, historyLoading, historyProgress, activityLabel, sseConnected, error,
     artifactRevision, hasMore, loadingOlder, sendMessage, stop, retry, loadOlderHistory,
   } = useChatSession(activeSessionName);
   // Default-mode turn receipts, each under the last assistant message of its turn.
@@ -111,6 +112,20 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
   const [atEnd, setAtEnd] = useState(true);
 
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
+  // Entering a session: the transcript stays hidden behind a loading ring until history is in
+  // and the list has stopped growing, then appears once, already at its last message.
+  const [settled, setSettled] = useState(false);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settledRef = useRef(false);
+  settledRef.current = settled;
+  const settleSoon = useCallback((delay: number) => {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => {
+      settleTimerRef.current = null;
+      flatListRef.current?.scrollToEnd({ animated: false });
+      requestAnimationFrame(() => setSettled(true));
+    }, delay);
+  }, []);
   const loadingOlderRef = useRef(false);
   const checkpointRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingCheckpointIndexRef = useRef<number | null>(null);
@@ -128,13 +143,30 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
   }, [focused, setChatVisible]);
   useEffect(() => { setLastMessageId(messages.length ? messages[messages.length - 1].id : null); }, [messages, setLastMessageId]);
 
-  // Breadcrumbs follow the message that was last when they were answered; unknown anchors trail.
+  // Resolved prompts (approvals, answers) are part of the work: each joins the activity row of
+  // the exchange it was answered in, so they never pile up under the latest answer.
   const { resolvedAfter, resolvedTrailing } = useMemo(() => {
-    const ids = new Set(messages.map(m => m.id));
+    const rowOf = new Map<string, string>();
+    let exchange: string[] = [];
+    let row: string | null = null;
+    let lastRow: string | null = null;
+    const close = () => { if (row) for (const id of exchange) rowOf.set(id, row); exchange = []; row = null; };
+    for (const m of messages) {
+      if (m.role === 'user') close();
+      exchange.push(m.id);
+      if (m.role === 'collapse') {
+        row = lastRow = m.id;
+        for (const child of m.childTurns || []) exchange.push(child.id);
+      }
+    }
+    close();
+    const known = new Set(messages.flatMap(m => [m.id, ...(m.childTurns || []).map(c => c.id)]));
     const after: Record<string, ResolvedEntry[]> = {};
     const trailing: ResolvedEntry[] = [];
     for (const entry of resolvedAll || []) {
-      if (entry.after && ids.has(entry.after)) (after[entry.after] ||= []).push(entry);
+      // An anchor that no longer exists (ids replaced by a history reload) joins the newest row.
+      const target = entry.after && known.has(entry.after) ? rowOf.get(entry.after) : lastRow;
+      if (target) (after[target] ||= []).push(entry);
       else trailing.push(entry);
     }
     return { resolvedAfter: after, resolvedTrailing: trailing };
@@ -203,13 +235,18 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
   streamingRef.current = streaming;
   // Streaming grows the list many times per second: follow it, throttled.
   const scrollToBottom = useCallback(() => {
+    if (!settledRef.current) {
+      flatListRef.current?.scrollToEnd({ animated: false });
+      if (settleTimerRef.current) settleSoon(250);
+      return;
+    }
     if (!streamingRef.current || !followOutputRef.current || visualizationActiveRef.current) return;
     if (scrollThrottleRef.current) return;
     scrollThrottleRef.current = setTimeout(() => {
       scrollThrottleRef.current = null;
       if (streamingRef.current && followOutputRef.current && !visualizationActiveRef.current) flatListRef.current?.scrollToEnd({ animated: false });
     }, 48);
-  }, []);
+  }, [settleSoon]);
 
   const goToEnd = useCallback(() => {
     followOutputRef.current = true;
@@ -223,7 +260,20 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
     olderCheckpointAnchorRef.current = undefined;
     if (checkpointRetryTimerRef.current) clearTimeout(checkpointRetryTimerRef.current);
     checkpointRetryTimerRef.current = null;
+    followOutputRef.current = true;
+    setSettled(false);
   }, [activeSessionName]);
+
+  // Once history is in, give the list a moment to lay out; an empty session settles at once.
+  // The fallback keeps a list that never reports its size from hiding the conversation.
+  useEffect(() => {
+    if (settled || historyLoading) return undefined;
+    settleSoon(messages.length ? 250 : 0);
+    const fallback = setTimeout(() => setSettled(true), 2500);
+    return () => clearTimeout(fallback);
+  }, [historyLoading, messages.length, settleSoon, settled]);
+
+  useEffect(() => () => { if (settleTimerRef.current) clearTimeout(settleTimerRef.current); }, []);
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -264,6 +314,17 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
       : <Markdown variant={compact ? 'compact' : 'chat'}>{message.text}</Markdown>
   ), []);
 
+  // While a turn runs, its newest text is a progress note, not the answer.
+  const liveStatusId = useMemo(() => {
+    if (!streaming) return null;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i];
+      if (m.role === 'user') return null;
+      if (m.role === 'assistant' && m.text.trim()) return m.id;
+    }
+    return null;
+  }, [messages, streaming]);
+
   const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
     const crumbs = resolvedAfter[item.id];
     const after = crumbs ? <View style={styles.crumbs}>{crumbs.map(r => <ResolvedLine key={r.id} record={r} />)}</View> : null;
@@ -284,7 +345,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
           <Pressable onPress={() => setMessages(current => current.map(m => (m.id === item.id ? { ...m, collapseOpen: !m.collapseOpen } : m)))}
             scale={false} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded: !!item.collapseOpen }} testID={`worked-${item.id}`}
             style={({ pressed }) => [styles.workedHead, { backgroundColor: pressed ? colors.hairline : colors.sunken }]}>
-            <Text variant="label" tone="ink2" numberOfLines={1} numeric style={{ flexShrink: 1 }}>{label}</Text>
+            <Text variant="label" tone="ink2" numeric style={{ flexShrink: 1 }}>{label}</Text>
             <Icon name={item.collapseOpen ? 'chevron-down' : 'chevron-right'} color={colors.ink3} />
           </Pressable>
           {item.collapseOpen ? (
@@ -294,9 +355,9 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
                   {row.tools ? <ToolList items={row.tools} running={!!item.collapseLive} testID={`tool-list-${row.key}`} /> : renderAssistantBody(row.message!, true)}
                 </View>
               ))}
+              {after}
             </View>
           ) : null}
-          {after}
         </View>
       );
     }
@@ -306,7 +367,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
       <MessageHandoff phase={item.role === 'assistant' ? item.handoff : undefined}>
         <View style={[styles.msgRow, isUser ? styles.userRow : null]}>
           <View style={[isUser ? styles.userMessage : styles.assistantMessage, isUser ? { backgroundColor: colors.accent.wash } : null]}>
-            {isUser ? <Text variant="bodyLg">{item.text}</Text> : renderAssistantBody(item)}
+            {isUser ? <Text variant="bodyLg">{item.text}</Text> : item.id === liveStatusId ? <StatusSheen text={item.text} testID={`live-status-${item.id}`} /> : renderAssistantBody(item)}
             {isUser && item.attachments?.length ? (
               <View style={styles.attachments}>
                 {item.attachments.map(a => <Chip key={a.attachment_id} variant="meta" label={a.name} />)}
@@ -324,12 +385,13 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
         {after}
       </MessageHandoff>
     );
-  }, [activeSessionName, colors, onVisualizationInteractionChange, receiptsById, renderAssistantBody, resolvedAfter, setMessages]);
+  }, [activeSessionName, colors, liveStatusId, onVisualizationInteractionChange, receiptsById, renderAssistantBody, resolvedAfter, setMessages]);
 
   const onScroll = useCallback((event: any) => {
     const native = event?.nativeEvent;
     if (!native) return;
     const distanceFromEnd = Math.max(0, native.contentSize.height - native.layoutMeasurement.height - native.contentOffset.y);
+    if (!settledRef.current) return;
     if (native.contentOffset.y < 100 && hasMore && !loadingOlder && !loadingOlderRef.current) {
       loadingOlderRef.current = true;
       void loadOlderHistory().finally(() => { loadingOlderRef.current = false; });
@@ -352,6 +414,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.timeline}>
         <FlatList
+          style={settled ? null : styles.hidden}
           testID="chat-transcript"
           ref={flatListRef}
           data={messages}
@@ -387,14 +450,7 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
             </View>
           }
           ListEmptyComponent={
-            historyLoading ? (
-              <View style={styles.historyLoading}>
-                <GeneratingIndicator label="Loading conversation history" />
-                <Skeleton height={16} style={{ marginBottom: spacing.sm, width: '72%' }} />
-                <Skeleton height={16} style={{ marginBottom: spacing.sm, width: '88%' }} />
-                <Skeleton height={16} style={{ width: '56%' }} />
-              </View>
-            ) : error ? <ErrorState message={error} onRetry={retry} /> : prompt ? null : (
+            !settled ? null : error ? <ErrorState message={error} onRetry={retry} /> : prompt ? null : (
               <EmptyState icon="sparkles" pigment="apricot" title="What are we building today?"
                 message="Ask μcli to inspect, explain, debug, or change your workspace." actionLabel={`Mode: ${mode.label}`} onAction={onOpenModes} />
             )
@@ -410,6 +466,11 @@ export function ChatScreen({ mode, onOpenModes, onOpenSettings, onOpenContext, a
             </View>
           }
         />
+        {!settled ? (
+          <View style={styles.settleOverlay} pointerEvents="none">
+            <LoadingRing testID="chat-loading" label="Loading conversation" progress={historyLoading ? historyProgress : 1} />
+          </View>
+        ) : null}
         <ConversationStageRail messages={messages} activeMessageIndex={activeMessageIndex} hasMoreHistory={hasMore} loadingHistory={loadingOlder}
           onLoadOlder={loadOlderCheckpoints} onJump={jumpToCheckpoint} />
         {prompt && !atEnd ? (
@@ -503,7 +564,8 @@ const styles = StyleSheet.create({
   workedRow: { paddingVertical: spacing.xs },
   crumbs: { marginBottom: spacing.sm },
   inlineError: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, marginBottom: spacing.md, borderWidth: 1, borderRadius: radii.md },
-  historyLoading: { paddingTop: spacing.lg, paddingHorizontal: spacing.xs },
+  hidden: { opacity: 0 },
+  settleOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   loadingOlder: { paddingVertical: spacing.sm, alignItems: 'center' },
   footer: { minHeight: 10, paddingTop: 2 },
   needsYou: { position: 'absolute', left: spacing.base, right: spacing['2xl'], bottom: spacing.sm },

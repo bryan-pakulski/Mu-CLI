@@ -53,6 +53,11 @@
     color: var(--wash-ink);
     white-space: normal;
 }
+/* Your messages carry a thin accent rule so they read apart from replies at a glance. */
+.w-msg[data-role="user"] {
+    padding-left: var(--wash-space-3);
+    border-left: 2px solid var(--wash-accent-pigment);
+}
 .w-msg[data-role="user"]::before {
     content: "You";
     display: block;
@@ -100,72 +105,32 @@
 }
 @keyframes w-msg-caret { 50% { opacity: 0.25; } }
 
-/* quiet system lines */
-.w-msg:is([data-role="info"], [data-role="error"]) {
-    display: flex;
-    align-items: baseline;
-    gap: var(--wash-space-2);
-    padding: 0;
-    border-radius: 0;
-    background: none;
-    color: var(--wash-ink-2);
-    font-size: var(--wash-type-body-size);
-    line-height: var(--wash-type-body-line);
+/* live status: while a turn runs, its newest text is a progress note, not the answer —
+   italic and a step quieter (ink-3), with a band of normal ink sweeping through it left to
+   right. Inline code keeps its chip and its own ink, so it never paints as a blank blob. */
+.w-msg[data-role="assistant"][data-status] .w-msg__body {
+    font-style: italic;
+    color: transparent;
+    background: linear-gradient(100deg,
+        var(--wash-ink-3) 0%, var(--wash-ink-3) 42%,
+        var(--wash-ink) 50%,
+        var(--wash-ink-3) 58%, var(--wash-ink-3) 100%);
+    background-size: 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation: w-msg-status 2.8s linear infinite;
 }
-.w-msg[data-role="error"] { color: var(--wash-danger-ink); }
-.w-msg__glyph { flex: none; font-weight: 600; }
-.w-msg[data-role="info"] .w-msg__glyph { color: var(--wash-info-pigment); font-size: var(--wash-type-caption-size); }
-.w-msg[data-role="command"] {
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    background: none;
-    font-size: var(--wash-type-body-size);
-    line-height: var(--wash-type-body-line);
-}
-.w-msg--diff { align-self: stretch; }
-.w-msg[data-role="visualization"] {
-    padding: var(--wash-space-3);
-    border: 1px solid var(--w-glass-line);
-    border-radius: var(--wash-radius-lg);
-    background: var(--w-glass-fill);
+.w-msg[data-role="assistant"][data-status] .w-msg__body :not(code, code *) { color: transparent; }
+.w-msg[data-role="assistant"][data-status] .w-msg__body code { color: var(--wash-ink-2); }
+@keyframes w-msg-status { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+    .w-msg[data-role="assistant"][data-status] .w-msg__body { animation: none; background: none; color: var(--wash-ink-3); }
+    .w-msg[data-role="assistant"][data-status] .w-msg__body :not(code, code *) { color: var(--wash-ink-3); }
 }
 
-/* ------------------------------------------------------------ thinking */
-.w-thinking { color: var(--wash-ink-3); font-size: var(--wash-type-body-size); }
-.w-thinking__head {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--wash-space-2);
-    min-height: 28px;
-    padding: 0 var(--wash-space-2);
-    margin-left: calc(var(--wash-space-2) * -1);
-    border: 0;
-    border-radius: var(--wash-radius-sm);
-    background: none;
-    color: inherit;
-    font: inherit;
-    font-style: italic;
-    cursor: pointer;
-}
-.w-thinking__head:hover { background: var(--w-glass-fill-subtle); color: var(--wash-ink-2); }
-.w-thinking__caret { display: inline-block; transition: transform var(--wash-motion-small) var(--wash-ease-small); font-style: normal; }
-.w-thinking[data-open] .w-thinking__caret { transform: rotate(90deg); }
-.w-thinking__meta { font-style: normal; font-size: var(--wash-type-caption-size); }
-.w-thinking__body {
-    max-height: 320px;
-    margin: var(--wash-space-1) 0 var(--wash-space-2);
-    padding: var(--wash-space-1) 0 var(--wash-space-1) var(--wash-space-4);
-    overflow-y: auto;
-    border-left: 1px solid var(--wash-hairline-strong);
-    color: var(--wash-ink-3);
-    font-style: italic;
-    line-height: var(--wash-type-body-line);
-    white-space: pre-wrap;
-}
-
-/* ------------------------------------------------------------ worked (interim collapse) */
-.w-worked { align-self: stretch; margin: 0; padding: 0; border: 0; }
+/* flex: none — the transcript is a scrolling flex column; a shrinkable row with
+   overflow:hidden collapses to zero height once the transcript overflows. */
+.w-worked { align-self: stretch; flex: none; margin: 0; padding: 0; border: 0; }
 .w-worked__row {
     display: flex;
     align-items: center;

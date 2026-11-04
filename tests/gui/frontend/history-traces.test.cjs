@@ -199,3 +199,61 @@ test('a live turn keeps its latest answer last and reports time, tokens and cost
     chat._groupIntermediateTurns(slot);
     assert.equal(window.summarizeCollapse(slot.turns[1]), 'Worked for 1m 15s · 2 steps · 12.4k tokens · $0.031');
 });
+
+test('live events keep the newest answer last and every step in the activity row', async t => {
+    const { chat, slot } = await harness(t, []);
+    await chat.loadHistory('mailroom');
+    chat.addUser('Fix it', 'mailroom');
+    chat.startAssistant('a1', 'mailroom');
+    chat.appendDelta('a1', 'Looking first.', 'mailroom');
+    chat.addToolCall('read_file', { path: 'x' }, 'mailroom');
+    chat.addToolResult('read_file', 'ok', 'mailroom');
+    chat.addPromptResolved({ auto: true, shape: 'tool_approval', toolName: 'bash' }, 'mailroom');
+    chat.startAssistant('a2', 'mailroom');
+    chat.appendDelta('a2', 'Done.', 'mailroom');
+    chat.endAssistant('a2', 'mailroom');
+    assert.deepEqual(roles(slot.turns), ['user', 'collapse', 'assistant']);
+    assert.equal(slot.turns[2].text, 'Done.');
+    assert.deepEqual(roles(slot.turns[1].childTurns), ['assistant', 'trace', 'prompt_resolved']);
+    assert.equal(slot.turns[1].childTurns[0].text, 'Looking first.');
+});
+
+test('the activity row lists every finished step instead of folding them', async t => {
+    const { window } = await harness(t, []);
+    window.eval(script('js/wash/toolcard.js'));
+    const events = [
+        { id: 'c1', kind: 'tool_call', name: 'bash', args: { command: 'ls' }, at: 1 },
+        { id: 'r1', kind: 'tool_result', name: 'bash', rawText: 'ok', at: 2 },
+        { id: 'c2', kind: 'tool_call', name: 'read_file', args: { path: 'a.py' }, at: 3 },
+        { id: 'r2', kind: 'tool_result', name: 'read_file', rawText: 'ok', at: 4 },
+    ];
+    const host = window.document.createElement('div');
+    host.innerHTML = window.renderToolCards(events, { running: false });
+    assert(host.querySelector('[data-summary]'), 'a finished trace on its own folds into one line');
+    host.innerHTML = window.renderToolCards(events, { running: false, expanded: true });
+    assert.equal(host.querySelector('[data-summary]'), null);
+    assert.equal(host.querySelectorAll('.w-toolcard').length >= 2, true);
+});
+
+test('only the newest text of a running turn is the live status', async t => {
+    const { chat, slot } = await harness(t, []);
+    chat.addUser('Go', 'mailroom');
+    chat.startAssistant('a1', 'mailroom');
+    chat.appendDelta('a1', 'Checking the MFA step.', 'mailroom');
+    chat.endAssistant('a1', 'mailroom');
+    slot.busy = true;
+    const update = chat._findById(slot, 'a1');
+    assert.equal(chat.isLiveStatus(update), true);
+    assert.equal(chat.isLiveStatus(slot.turns[0]), false, 'your message is never a status');
+    slot.busy = false;
+    assert.equal(chat.isLiveStatus(update), false, 'a finished turn shows its answer plainly');
+});
+
+test('live text shows `inline code` as a code chip, escaped', async t => {
+    const { window } = await harness(t, []);
+    const host = window.document.createElement('div');
+    host.innerHTML = window.renderLiveText('The two `dmesg-ramoops` dumps <b>x</b>');
+    assert.equal(host.querySelector('code').textContent, 'dmesg-ramoops');
+    assert.equal(host.textContent.includes('`'), false);
+    assert.equal(host.querySelector('b'), null, 'markup in the text stays text');
+});

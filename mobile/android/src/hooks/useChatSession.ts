@@ -212,12 +212,14 @@ export function historyToMessages(turns: SessionHistoryTurn[]): ChatMessage[] {
 async function historyToMessagesCooperatively(
   turns: SessionHistoryTurn[],
   signal?: AbortSignal,
+  onProgress?: (done: number) => void,
 ): Promise<ChatMessage[]> {
   const messages: ChatMessage[] = [];
   const batchSize = 8;
   for (let start = 0; start < turns.length; start += batchSize) {
     if (signal?.aborted) return [];
     messages.push(...historyToMessages(turns.slice(start, start + batchSize)));
+    onProgress?.(Math.min(1, (start + batchSize) / turns.length));
     if (start + batchSize < turns.length) {
       // Let gestures, navigation, and incoming SSE deltas run between
       // conversion batches. A large history response must not monopolize
@@ -637,6 +639,8 @@ export function useChatSession(activeSessionName: string | null) {
   const [streaming, setStreaming] = useState(false);
   const [waitingForFirstToken, setWaitingForFirstToken] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // 0..1 through the first load of a session: request, then converting turns.
+  const [historyProgress, setHistoryProgress] = useState(0);
   const [activityLabel, setActivityLabel] = useState('Thinking');
   const [sseConnected, setSseConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -838,7 +842,10 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     const initialLoad = historyHydratedRef.current !== activeSessionName;
-    if (initialLoad) setHistoryLoading(true);
+    if (initialLoad) {
+      setHistoryLoading(true);
+      setHistoryProgress(0.05);
+    }
 
     olderHistoryAbortRef.current?.abort();
     olderHistoryAbortRef.current = null;
@@ -852,9 +859,11 @@ export function useChatSession(activeSessionName: string | null) {
           timeoutMs: 15_000,
         });
         if (controller.signal.aborted || lastSessionRef.current !== activeSessionName) return;
+        if (initialLoad) setHistoryProgress(0.4);
         const historyMessages = await historyToMessagesCooperatively(
           response.turns || [],
           controller.signal,
+          initialLoad ? done => setHistoryProgress(0.4 + 0.5 * done) : undefined,
         );
         if (controller.signal.aborted || lastSessionRef.current !== activeSessionName) return;
         // Track the oldest loaded turn index for backward pagination.
@@ -900,6 +909,7 @@ export function useChatSession(activeSessionName: string | null) {
           return groupIntermediateTurns(merged, current);
         });
         historyHydratedRef.current = activeSessionName;
+        if (initialLoad) setHistoryProgress(0.9);
         setError(null);
       } catch (historyError) {
         if (controller.signal.aborted) return;
@@ -1579,6 +1589,7 @@ export function useChatSession(activeSessionName: string | null) {
     streaming,
     waitingForFirstToken,
     historyLoading,
+    historyProgress,
     activityLabel,
     sseConnected,
     error,

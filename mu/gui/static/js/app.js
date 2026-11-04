@@ -334,6 +334,18 @@ document.addEventListener("alpine:init", () => {
             }
             return active;
         },
+        // While a turn runs, its newest assistant text is a status update, not the answer.
+        isLiveStatus(turn) {
+            if (!turn || turn.role !== "assistant" || !turn.text) return false;
+            const slot = this.current();
+            if (!slot.busy) return false;
+            for (let i = slot.turns.length - 1; i >= 0; i -= 1) {
+                const t = slot.turns[i];
+                if (t.role === "user") return false;
+                if (t.role === "assistant" && t.text) return t.id === turn.id;
+            }
+            return false;
+        },
         isActiveTrace(turn) {
             if (!turn || turn.role !== "trace" || !turn.running) return false;
             const active = this._activeTrace(this.current());
@@ -409,10 +421,11 @@ document.addEventListener("alpine:init", () => {
         // by this to stay chronological; unseen rows slot in where they stand.
         _stampOrder(items) {
             let previous = null;
+            let highest = null;
             const pending = [];
             const flush = (next) => {
                 const count = pending.length;
-                const low = previous ?? (next ?? 0) - count - 1;
+                const low = next === null ? (highest ?? -count - 1) : (previous ?? next - count - 1);
                 const high = next ?? low + count + 1;
                 pending.forEach((turn, i) => { turn.order = low + (high - low) * (i + 1) / (count + 1); });
                 pending.length = 0;
@@ -421,6 +434,7 @@ document.addEventListener("alpine:init", () => {
                 if (typeof turn.order === "number") {
                     if (pending.length) flush(turn.order);
                     previous = turn.order;
+                    highest = highest === null ? turn.order : Math.max(highest, turn.order);
                 } else {
                     pending.push(turn);
                 }
@@ -440,8 +454,8 @@ document.addEventListener("alpine:init", () => {
         // panels it produced, then its latest answer; errors close the exchange.
         _layoutExchange(userTurn, items, known) {
             let final = null;
-            for (let i = items.length - 1; i >= 0; i -= 1) {
-                if (items[i].role === "assistant" && items[i].text) { final = items[i]; break; }
+            for (const turn of items) {
+                if (turn.role === "assistant" && turn.text && (!final || turn.order > final.order)) final = turn;
             }
             const activity = [], anchors = [], tail = [];
             for (const turn of items) {
@@ -653,6 +667,7 @@ document.addEventListener("alpine:init", () => {
             // the rendered HTML.
             t.rawText = null;
             t.html = renderMarkdown(t.text);
+            this._layoutLive(slot);
             if (!name || name === this.currentName) {
                 queueMicrotask(() => requestAnimationFrame(() => {
                     enhanceRenderedTurns([t.id]);
@@ -666,6 +681,7 @@ document.addEventListener("alpine:init", () => {
         // ---------- trace events -------------------------------------
 
         addToolCall(toolName, args, name) {
+            this.flushPendingDelta(name);
             const slot = this._slot(name);
             this._closeStreamingAssistants(slot);
             const t = this._ensureTrace(slot);
@@ -805,6 +821,7 @@ document.addEventListener("alpine:init", () => {
             slot.recentDiffs = [turn, ...(slot.recentDiffs || []).filter(d => d.filename !== file)].slice(0, 12);
             this._closeStreamingAssistants(slot);
             slot.turns.push(turn);
+            this._layoutLive(slot);
             if (!name || name === this.currentName) this.scroll();
         },
         // Latest proposed diff whose filename matches `path` (approval preview).
@@ -959,6 +976,7 @@ document.addEventListener("alpine:init", () => {
                 answerHtml: renderMarkdownInline(answer),
                 at: Date.now(),
             });
+            this._layoutLive(slot);
             if (!name || name === this.currentName) this.scroll();
         },
 
@@ -6711,6 +6729,15 @@ function formatTokenCount(n) {
 function formatUsd(v) {
     v = Number(v) || 0;
     return v >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(v >= 0.01 ? 3 : 4)}`;
+}
+// Streaming text: escaped plain text with `inline code` as chips. Linear, so it stays cheap on
+// every flush; the full markdown render still happens once at assistant_end.
+function renderLiveText(text) {
+    return String(text || "").split(/(`[^`\n]+`)/).map(part => (
+        part.length > 2 && part.startsWith("`") && part.endsWith("`")
+            ? `<code>${escapeHtml(part.slice(1, -1))}</code>`
+            : escapeHtml(part)
+    )).join("");
 }
 function summarizeCollapse(t, _tick) {
     const children = (t && t.childTurns) || [];

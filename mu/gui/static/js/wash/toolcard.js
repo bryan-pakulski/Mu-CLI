@@ -473,8 +473,9 @@
         }
         var calls = items.filter(function (item) { return item.type === 'card' || item.type === 'group'; });
         // A finished turn with tool calls folds into one line; a running turn
-        // stays open so you can watch it work.
-        if (!(options && options.running) && calls.length) {
+        // stays open so you can watch it work, and `expanded` (the activity row,
+        // already a disclosure) lists every step.
+        if (!(options && (options.running || options.expanded)) && calls.length) {
             var first = calls[0];
             var source = first.source;
             var id = 'sum:' + first.id;
